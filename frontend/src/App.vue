@@ -2,14 +2,13 @@
   <main class="app-shell">
     <header v-show="!focusMode" ref="topbarRef" class="topbar">
       <div>
-        <h1>小说结构理清助手</h1>
-        <p class="sub">把大纲、章节、角色与伏笔串成一条清晰的脉络 · 本地优先</p>
+        <h1 class="topbar__brand">小说结构理清助手</h1>
       </div>
       <div class="topbar__actions">
         <button
           type="button"
           class="focus-toggle"
-          title="隐藏顶栏，扩大写作区；滚动后工具条可悬停于右上角"
+          title="专注写作（隐藏顶栏）"
           @click="toggleFocusMode"
         >
           <span class="focus-toggle__icon" aria-hidden="true">⛶</span>
@@ -27,7 +26,7 @@
           v-if="showFloatingChrome"
           class="floating-chrome"
           role="toolbar"
-          aria-label="快捷操作：返回 / 专注 / 主题"
+          aria-label="快捷操作"
         >
           <RouterLink
             v-if="floatingBack"

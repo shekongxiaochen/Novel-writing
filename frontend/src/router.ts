@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import NovelListView from './views/NovelListView.vue'
-import NovelWorkspaceView from './views/NovelWorkspaceView.vue'
-import NovelChapterHubView from './views/NovelChapterHubView.vue'
+import NovelListView from './views/novel-list/NovelListView.vue'
+import NovelWorkspaceView from './views/workspace/NovelWorkspaceView.vue'
+import NovelChapterHubView from './views/chapter-hub/NovelChapterHubView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),

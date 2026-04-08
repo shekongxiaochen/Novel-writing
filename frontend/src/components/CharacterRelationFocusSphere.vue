@@ -17,8 +17,10 @@ const props = withDefaults(
     relations: CharacterRelation[]
     focusCharacterId: string
     selectable?: boolean
+    renderScale?: number
+    panelHeight?: number
   }>(),
-  { selectable: false },
+  { selectable: false, renderScale: 1, panelHeight: 520 },
 )
 
 const emit = defineEmits<{
@@ -38,6 +40,8 @@ let mouseNdc: THREE.Vector2 | null = null
 let animationId = 0
 let isOrbiting = false
 let themeObserver: MutationObserver | null = null
+let resizeObserver: ResizeObserver | null = null
+let lastPointerDown = { x: 0, y: 0 }
 
 const meshById = new Map<string, THREE.Mesh>()
 const nodeLabelById = new Map<string, THREE.Sprite>()
@@ -256,9 +260,10 @@ function build() {
   const allNodeIds = [focusId, ...otherIds]
   allNodeIds.forEach((id, i) => nodeColorById.set(id, palette[i % palette.length]))
 
-  const focusRadius = 18
-  const nodeRadius = 16
-  const orbitRadius = 180
+  const renderScale = Math.min(1.5, Math.max(0.45, Number(props.renderScale) || 1))
+  const focusRadius = 18 * renderScale
+  const nodeRadius = 16 * renderScale
+  const orbitRadius = 180 * renderScale
 
   // 大球网格轮廓线（和上面的 3D 图一致的“网格球”感觉）
   const wireRadius = orbitRadius
@@ -317,9 +322,10 @@ function build() {
     // 角色名：放在球心（不描边）
     const name = props.characters.find((c) => c.id === id)?.name ?? ''
     if (name) {
-      const label = makeTextSprite(name, { fontSize: 54 })
+      const label = makeTextSprite(name, { fontSize: Math.max(26, Math.round(54 * renderScale)) })
       // label 对齐球心：sprite 的原点在中心
       label.position.copy(p)
+      label.scale.multiplyScalar(renderScale)
       ;(label.material as THREE.SpriteMaterial).opacity = isFocus ? 1 : 0.92
       nodeLabelById.set(id, label)
       scene.add(label)
@@ -377,8 +383,11 @@ function build() {
 
     // 在线的 58% 处放标签，避免和箭头/节点重叠
     const labelPos = curve.getPoint(0.58)
-    const label = makeTextSprite(relationText || '关系', { fontSize: 36 })
+    const label = makeTextSprite(relationText || '关系', {
+      fontSize: Math.max(20, Math.round(36 * renderScale)),
+    })
     label.position.copy(labelPos)
+    label.scale.multiplyScalar(renderScale)
     scene!.add(label)
     relationLabels.push(label)
 
@@ -386,8 +395,8 @@ function build() {
     const p0 = curve.getPoint(0.86)
     const p1 = curve.getPoint(0.96)
     const arrowDir = new THREE.Vector3().subVectors(p1, p0).normalize()
-    const arrowLen = Math.max(12, len * 0.06)
-    const arrow = new THREE.ArrowHelper(arrowDir, p0, arrowLen, lineColor, 9, 6)
+    const arrowLen = Math.max(8 * renderScale, len * 0.06)
+    const arrow = new THREE.ArrowHelper(arrowDir, p0, arrowLen, lineColor, 9 * renderScale, 6 * renderScale)
     ;(arrow.line.material as THREE.LineBasicMaterial).transparent = true
     ;(arrow.line.material as THREE.LineBasicMaterial).opacity = lineOpacity + 0.08
     ;(arrow.cone.material as THREE.MeshBasicMaterial).transparent = true
@@ -426,10 +435,20 @@ function animate() {
   renderer?.render(scene!, camera!)
 }
 
-function onClick(e: PointerEvent) {
+function onPointerDown(e: PointerEvent) {
+  if (!props.selectable) return
+  lastPointerDown = { x: e.clientX, y: e.clientY }
+}
+
+function onClick(e: MouseEvent) {
   if (!props.selectable) return
   if (!raycaster || !mouseNdc) return
   if (!canvasHostRef.value) return
+
+  const dx = e.clientX - lastPointerDown.x
+  const dy = e.clientY - lastPointerDown.y
+  // 避免旋转视角时误触选中节点
+  if (dx * dx + dy * dy > 100) return
 
   const rect = canvasHostRef.value.getBoundingClientRect()
   const x = e.clientX - rect.left
@@ -469,9 +488,11 @@ onMounted(() => {
   controls.dampingFactor = 0.08
   controls.enablePan = false
   controls.enableZoom = false
+  controls.enableRotate = true
   controls.rotateSpeed = 0.65
   controls.target.set(0, 0, 0)
   controls.update()
+  renderer.domElement.style.touchAction = 'none'
 
   controls.addEventListener('start', () => {
     isOrbiting = true
@@ -484,13 +505,21 @@ onMounted(() => {
   mouseNdc = new THREE.Vector2()
 
   // 相机摆到球的外侧
-  camera.position.set(0, 0, 520)
+  const renderScale = Math.min(1.5, Math.max(0.45, Number(props.renderScale) || 1))
+  camera.position.set(0, 0, 520 * renderScale)
 
   measureAndRender()
   build()
   animate()
 
   window.addEventListener('resize', measureAndRender)
+  if (typeof ResizeObserver !== 'undefined' && wrapRef.value) {
+    resizeObserver = new ResizeObserver(() => {
+      measureAndRender()
+    })
+    resizeObserver.observe(wrapRef.value)
+  }
+  canvasHostRef.value.addEventListener('pointerdown', onPointerDown)
   canvasHostRef.value.addEventListener('click', onClick)
 
   // 主题切换时重建文字贴图（暗色下需要白字）
@@ -503,6 +532,8 @@ onMounted(() => {
 watch(
   () => [
     props.focusCharacterId,
+    String(props.renderScale ?? 1),
+    String(props.panelHeight ?? 520),
     props.characters.map((c) => c.id).join('|'),
     props.relations
       .map((r) => `${r.id}:${r.fromCharacterId}->${r.toCharacterId}:${r.relationType}:${r.note ?? ''}:${r.updatedAt ?? ''}`)
@@ -514,8 +545,11 @@ watch(
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationId)
   window.removeEventListener('resize', measureAndRender)
+  resizeObserver?.disconnect()
+  resizeObserver = null
 
   if (canvasHostRef.value) {
+    canvasHostRef.value.removeEventListener('pointerdown', onPointerDown)
     canvasHostRef.value.removeEventListener('click', onClick)
   }
 
@@ -535,7 +569,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .focus-sphere-wrap {
   width: 100%;
-  height: 520px;
+  height: v-bind('`${props.panelHeight}px`');
   border-radius: var(--radius-sm);
   overflow: hidden;
   position: relative;
