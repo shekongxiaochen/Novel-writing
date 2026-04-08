@@ -1,26 +1,25 @@
-<template>
+﻿<template>
   <section class="page-block">
     <header ref="listChromeAnchorRef" class="page-hero">
       <h1>我的作品</h1>
-      <p class="muted">先建立作品，再进入工作台整理写作脉络。</p>
     </header>
 
     <form class="card form-grid" @submit.prevent="handleCreate">
       <h2>新建作品</h2>
       <label>
         作品标题 *
-        <input v-model="form.title" required maxlength="60" placeholder="例如：雾海尽头的灯塔" />
+        <input v-model="form.title" required maxlength="60" />
       </label>
 
       <label>
         简介
-        <textarea v-model="form.summary" rows="3" maxlength="500" placeholder="一句话或一段话说明故事核心" />
+        <textarea v-model="form.summary" rows="3" maxlength="500" />
       </label>
 
       <div class="grid-3">
         <label>
           题材
-          <input v-model="form.genre" maxlength="30" placeholder="玄幻 / 悬疑 / 科幻..." />
+          <input v-model="form.genre" maxlength="30" />
         </label>
         <label>
           叙事视角
@@ -31,13 +30,13 @@
         </label>
         <label>
           基调
-          <input v-model="form.tone" maxlength="30" placeholder="热血 / 压抑 / 轻松..." />
+          <input v-model="form.tone" maxlength="30" />
         </label>
       </div>
 
       <label class="checkbox-line">
         <input v-model="form.isMultiLineNarrative" type="checkbox" />
-        多线叙事（后续会关联故事线模块）
+        多线叙事
       </label>
 
       <div class="action-row">
@@ -68,9 +67,9 @@
 <script setup lang="ts">
 import { onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { setChromeAnchor } from '../composables/useChromeAnchor'
-import { createNovel, getNovels } from '../lib/storage'
-import type { NewNovelInput, Novel } from '../types'
+import { setChromeAnchor } from '../../composables/useChromeAnchor'
+import { createNovel, getNovels } from '../../lib/storage'
+import type { NewNovelInput, Novel } from '../../types'
 
 const router = useRouter()
 const listChromeAnchorRef = ref<HTMLElement | null>(null)

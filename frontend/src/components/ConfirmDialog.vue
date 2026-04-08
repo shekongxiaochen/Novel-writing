@@ -20,7 +20,13 @@
         >
           <div class="confirm-dialog__accent" aria-hidden="true" />
           <div class="confirm-dialog__body">
-            <h2 :id="titleId" class="confirm-dialog__title">{{ title }}</h2>
+            <div class="confirm-dialog__head">
+              <span class="confirm-dialog__icon" aria-hidden="true">{{ danger ? '!' : '?' }}</span>
+              <div class="confirm-dialog__head-text">
+                <h2 :id="titleId" class="confirm-dialog__title">{{ title }}</h2>
+                <p v-if="danger" class="confirm-dialog__hint">此操作不可撤销</p>
+              </div>
+            </div>
             <p :id="descId" class="confirm-dialog__message">{{ message }}</p>
             <div class="confirm-dialog__actions">
               <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="emitCancel">
