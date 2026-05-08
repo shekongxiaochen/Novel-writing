@@ -13,27 +13,12 @@
       </div>
     </div>
     <div class="chapter-hub__editor-buttons">
-      <button
-        type="button"
-        class="chapter-hub__btn chapter-hub__btn--ghost"
-        :title="hideMeta ? '显示标题与笔记' : '隐藏标题与笔记'"
-        @click="emit('toggleMeta')"
-      >
-        {{ hideMeta ? '信息' : '隐藏' }}
-      </button>
-      <button
-        type="button"
-        class="chapter-hub__btn chapter-hub__btn--ghost"
-        :title="hideOutline ? '显示大纲勾选' : '隐藏大纲'"
-        @click="emit('toggleOutline')"
-      >
-        {{ hideOutline ? '大纲' : '隐藏' }}
-      </button>
       <button type="button" class="chapter-hub__btn chapter-hub__btn--ghost" @click="emit('toggleDone')">
-        {{ chapter.status === 'done' ? '草稿' : '完成' }}
+        {{ chapter.status === 'done' ? '标为草稿' : '标为完成' }}
       </button>
+      <span class="chapter-hub__btn-divider" aria-hidden="true"></span>
       <button type="button" class="chapter-hub__btn chapter-hub__btn--danger" @click="emit('deleteChapter')">
-        删除
+        删除章节
       </button>
     </div>
   </div>
@@ -45,13 +30,9 @@ import type { Chapter } from '../../../types'
 defineProps<{
   chapter: Chapter
   wordCount: number
-  hideMeta: boolean
-  hideOutline: boolean
 }>()
 
 const emit = defineEmits<{
-  toggleMeta: []
-  toggleOutline: []
   toggleDone: []
   deleteChapter: []
 }>()

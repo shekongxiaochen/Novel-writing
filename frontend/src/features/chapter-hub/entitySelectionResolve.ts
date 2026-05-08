@@ -1,4 +1,5 @@
 import type { Character, Faction } from '../../types'
+import { characterMatchLabels } from '../../lib/characterLabels'
 
 /** 文本中 needle 每一次出现的起始下标（允许重叠，如连续相同字） */
 export function findNameOccurrences(haystack: string, needle: string): number[] {
@@ -43,15 +44,16 @@ export function resolveCharacterCoveringSelection(
   let bestLen = -1
 
   for (const c of characters) {
-    const name = c.name.trim()
-    if (!name) continue
-    for (const i of findNameOccurrences(fullText, name)) {
-      const occEnd = i + name.length
-      if (selStart >= i && selEnd <= occEnd) {
-        const expected = name.slice(selStart - i, selEnd - i)
-        if (slice === expected && name.length > bestLen) {
-          best = c
-          bestLen = name.length
+    for (const name of characterMatchLabels(c)) {
+      if (!name) continue
+      for (const i of findNameOccurrences(fullText, name)) {
+        const occEnd = i + name.length
+        if (selStart >= i && selEnd <= occEnd) {
+          const expected = name.slice(selStart - i, selEnd - i)
+          if (slice === expected && name.length > bestLen) {
+            best = c
+            bestLen = name.length
+          }
         }
       }
     }

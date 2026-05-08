@@ -1,0 +1,18 @@
+0 verbose cli E:\Download\nodejs\node.exe E:\Download\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@10.9.2
+2 info using node@v23.9.0
+3 silly config load:file:E:\Download\nodejs\node_modules\npm\npmrc
+4 silly config load:file:D:\Novel writing\frontend\.npmrc
+5 silly config load:file:C:\Users\chiaoyunao\.npmrc
+6 silly config load:file:E:\Program Files\node-v18.18.0-win-x64\node_global\etc\npmrc
+7 verbose title npm run build
+8 verbose argv "run" "build"
+9 verbose logfile logs-max:10 dir:D:\Novel writing\frontend\.npm-cache\_logs\2026-04-19T04_41_34_692Z-
+10 verbose logfile D:\Novel writing\frontend\.npm-cache\_logs\2026-04-19T04_41_34_692Z-debug-0.log
+11 silly logfile done cleaning log files
+12 verbose cwd D:\Novel writing\frontend
+13 verbose os Windows_NT 10.0.26100
+14 verbose node v23.9.0
+15 verbose npm  v10.9.2
+16 verbose exit 0
+17 info ok

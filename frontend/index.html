@@ -14,7 +14,7 @@
       (function () {
         try {
           var t = localStorage.getItem('novel-writing.theme')
-          if (t === 'dark' || t === 'light') {
+          if (t === 'dark' || t === 'light' || t === 'mint' || t === 'blueprint') {
             document.documentElement.setAttribute('data-theme', t)
           } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
             document.documentElement.setAttribute('data-theme', 'dark')

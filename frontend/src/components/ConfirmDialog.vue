@@ -4,6 +4,7 @@
       <div
         v-if="modelValue"
         class="confirm-overlay"
+        :class="overlayClass"
         role="presentation"
         @click.self="emitCancel"
       >
@@ -24,7 +25,7 @@
               <span class="confirm-dialog__icon" aria-hidden="true">{{ danger ? '!' : '?' }}</span>
               <div class="confirm-dialog__head-text">
                 <h2 :id="titleId" class="confirm-dialog__title">{{ title }}</h2>
-                <p v-if="danger" class="confirm-dialog__hint">此操作不可撤销</p>
+                <p v-if="danger && showDangerSubhint" class="confirm-dialog__hint">此操作不可撤销</p>
               </div>
             </div>
             <p :id="descId" class="confirm-dialog__message">{{ message }}</p>
@@ -54,11 +55,17 @@ const props = withDefaults(
     confirmLabel?: string
     cancelLabel?: string
     danger?: boolean
+    /** 附加在遮罩层上的 class（用于提高 z-index 等） */
+    overlayClass?: string
+    /** 与 danger 同时使用时是否显示「此操作不可撤销」副文案 */
+    showDangerSubhint?: boolean
   }>(),
   {
     confirmLabel: '删除',
     cancelLabel: '取消',
     danger: false,
+    overlayClass: '',
+    showDangerSubhint: true,
   }
 )
 

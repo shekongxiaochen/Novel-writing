@@ -22,10 +22,12 @@
         type="button"
         class="chapter-link chapter-hub__toc-item"
         :class="{ active: selectedChapterId === c.id }"
+        :title="`第 ${c.chapterNo} 章：${c.title}`"
         @click="selectedChapterId = c.id"
       >
         <span class="chapter-hub__toc-no">第 {{ c.chapterNo }} 章</span>
         <span class="chapter-hub__toc-name">{{ c.title }}</span>
+        <span class="chapter-hub__toc-words">{{ chapterWordCount(c.content) }} 字</span>
       </button>
     </div>
     <div
@@ -57,4 +59,8 @@ defineProps<{
 
 const selectedChapterId = defineModel<string>('selectedChapterId', { required: true })
 const sidebarCollapsed = defineModel<boolean>('sidebarCollapsed', { required: true })
+
+function chapterWordCount(content?: string | null): number {
+  return String(content ?? '').replace(/\s/g, '').length
+}
 </script>

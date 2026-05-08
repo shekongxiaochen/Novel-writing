@@ -9,6 +9,7 @@ import type { Chapter, Novel } from '../../../types'
 type ChapterFormState = {
   title: string
   notes: string
+  annotation: string
 }
 
 export function useChapterHubChapterMutations(deps: {
@@ -27,9 +28,11 @@ export function useChapterHubChapterMutations(deps: {
       novelId: novel.value.id,
       title: chapterForm.title,
       notes: chapterForm.notes,
+      annotation: chapterForm.annotation,
     })
     chapterForm.title = ''
     chapterForm.notes = ''
+    chapterForm.annotation = ''
     reload()
     const list = getChaptersByNovelId(novel.value.id)
     if (list.length > 0) {
