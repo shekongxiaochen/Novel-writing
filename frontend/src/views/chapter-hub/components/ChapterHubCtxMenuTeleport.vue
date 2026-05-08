@@ -3,6 +3,8 @@
     <div v-if="open" class="chapter-hub__ctx-overlay" @click="emit('close')">
       <div class="chapter-hub__ctx-menu" :style="{ top: `${y}px`, left: `${x}px` }" @click.stop>
         <p v-if="notice" class="chapter-hub__ctx-notice">{{ notice }}</p>
+        <p v-if="selectedCharacter" class="chapter-hub__ctx-entity-title">角色：{{ selectedCharacter.name }}</p>
+        <p v-else-if="selectedFaction && !selectedCharacter" class="chapter-hub__ctx-entity-title">势力：{{ selectedFaction.name }}</p>
         <div v-if="showAddAs" class="chapter-hub__ctx-parent">
           添加为
           <div class="chapter-hub__ctx-sub">
@@ -16,12 +18,6 @@
               势力
             </button>
           </div>
-        </div>
-        <div
-          v-else-if="selectedFaction && !selectedCharacter"
-          class="chapter-hub__ctx-parent chapter-hub__ctx-parent--hint"
-        >
-          <p class="chapter-hub__ctx-sub-heading">已为势力「{{ selectedFaction.name }}」</p>
         </div>
         <div v-if="selectedCharacter" class="chapter-hub__ctx-parent">
           加入 / 退出势力
@@ -41,6 +37,20 @@
                 <span v-if="isFactionCurrent(f.id)" class="chapter-hub__ctx-bind-pill">已加入</span>
                 <span v-else class="chapter-hub__ctx-bind-pill chapter-hub__ctx-bind-pill--off">未加入</span>
               </span>
+            </button>
+          </div>
+        </div>
+        <div class="chapter-hub__ctx-parent">
+          伏笔 / 照应
+          <div class="chapter-hub__ctx-sub">
+            <button type="button" @click="emit('setForeshadow')">设为伏笔</button>
+            <button
+              type="button"
+              :disabled="!hasForeshadowIssues"
+              :title="!hasForeshadowIssues ? '当前还没有可对应的伏笔' : undefined"
+              @click="emit('resolveForeshadow')"
+            >
+              设为照应
             </button>
           </div>
         </div>
@@ -69,6 +79,8 @@ withDefaults(
   characterFactionUnbound?: boolean
   /** 选区与已有角色同名时为 false，禁止添加为势力 */
   canAddAsFaction: boolean
+  /** 是否已有伏笔，可用于“对应伏笔（标记完成）” */
+  hasForeshadowIssues: boolean
   factions: Faction[]
   isFactionCurrent: (id: string) => boolean
   }>(),
@@ -80,5 +92,7 @@ const emit = defineEmits<{
   addCharacter: []
   addFaction: []
   toggleFaction: [factionId: string]
+  setForeshadow: []
+  resolveForeshadow: []
 }>()
 </script>

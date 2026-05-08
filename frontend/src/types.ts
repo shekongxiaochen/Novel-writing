@@ -27,6 +27,7 @@ export type Chapter = {
   chapterNo: number
   title: string
   notes: string
+  annotation: string
   content: string
   outlineItemIds: string[]
   status: ChapterStatus
@@ -38,6 +39,7 @@ export type NewChapterInput = {
   novelId: string
   title: string
   notes: string
+  annotation: string
 }
 
 export type CharacterAttribute = {
@@ -66,6 +68,30 @@ export type NewCharacterRelationInput = {
 }
 
 export type OutlineStatus = 'todo' | 'doing' | 'done'
+export type OutlineNodeLevel = 'volume' | 'act' | 'chapter' | 'scene'
+export type OutlinePlotStage = 'idea' | 'drafted' | 'written' | 'resolved'
+export type OutlineStorylineType = 'main' | 'subplot' | 'character' | 'romance' | 'antagonist' | 'world' | 'custom'
+export type OutlineTension = 1 | 2 | 3 | 4 | 5
+
+export type OutlineStoryline = {
+  id: string
+  novelId: string
+  name: string
+  type: OutlineStorylineType
+  color: string
+  description: string
+  order: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type NewOutlineStorylineInput = {
+  novelId: string
+  name: string
+  type?: OutlineStorylineType
+  color?: string
+  description?: string
+}
 
 export type OutlineItem = {
   id: string
@@ -74,6 +100,23 @@ export type OutlineItem = {
   title: string
   summary: string
   status: OutlineStatus
+  level?: OutlineNodeLevel
+  goal?: string
+  conflict?: string
+  twist?: string
+  result?: string
+  suspense?: string
+  plotStage?: OutlinePlotStage
+  storylineIds?: string[]
+  parentId?: string | null
+  location?: string
+  timeLabel?: string
+  povCharacterId?: string | null
+  tension?: OutlineTension
+  characterIds?: string[]
+  factionIds?: string[]
+  foreshadowIds?: string[]
+  issueIds?: string[]
   createdAt: string
   updatedAt: string
 }
@@ -82,6 +125,23 @@ export type NewOutlineInput = {
   novelId: string
   title: string
   summary: string
+  level?: OutlineNodeLevel
+  goal?: string
+  conflict?: string
+  twist?: string
+  result?: string
+  suspense?: string
+  plotStage?: OutlinePlotStage
+  storylineIds?: string[]
+  parentId?: string | null
+  location?: string
+  timeLabel?: string
+  povCharacterId?: string | null
+  tension?: OutlineTension
+  characterIds?: string[]
+  factionIds?: string[]
+  foreshadowIds?: string[]
+  issueIds?: string[]
 }
 
 /** 角色与势力的从属关系（多对多）；描述为该角色在此势力中的身份/立场等 */
@@ -108,6 +168,8 @@ export type Character = {
   id: string
   novelId: string
   name: string
+  /** 若由写作页右键在某章内创建，则记录来源章节 id */
+  createdInChapterId?: string | null
   // 角色首次出场章节（按 chapterNo 记录；null/undefined 表示未设置）
   firstAppearanceChapterNo?: number | null
   age: string
@@ -118,6 +180,8 @@ export type Character = {
   notes: string
   // 知识图谱式的可扩展属性（MVP：额外属性）
   attributes?: CharacterAttribute[]
+  /** 可选别名（多个）；正文中与主名同等参与高亮与识别 */
+  aliases?: string[]
   /** 角色分类（引用 Category.id） */
   categoryIds?: string[]
   createdAt: string
@@ -127,6 +191,7 @@ export type Character = {
 export type NewCharacterInput = {
   novelId: string
   name: string
+  createdInChapterId?: string | null
   firstAppearanceChapterNo?: number | null
   age: string
   gender: string
@@ -136,6 +201,8 @@ export type NewCharacterInput = {
   notes: string
   /** 自定义字段（字段名 / 字段说明）；新建时可选 */
   attributes?: CharacterAttribute[]
+  /** 可选别名（多个） */
+  aliases?: string[]
   /** 角色分类（引用 Category.id） */
   categoryIds?: string[]
 }
@@ -144,6 +211,8 @@ export type Faction = {
   id: string
   novelId: string
   name: string
+  /** 若由写作页右键在某章内创建，则记录来源章节 id */
+  createdInChapterId?: string | null
   leader: string
   notes: string
   /** 势力自定义字段（名称 + 内容） */
@@ -157,6 +226,7 @@ export type Faction = {
 export type NewFactionInput = {
   novelId: string
   name: string
+  createdInChapterId?: string | null
   leader: string
   notes: string
   attributes?: CharacterAttribute[]
@@ -164,32 +234,68 @@ export type NewFactionInput = {
   categoryIds?: string[]
 }
 
-export type IssueType =
-  | 'foreshadow'
-  | 'logic'
-  | 'timeline'
-  | 'motivation'
-  | 'other'
+/** 单条"填坑"记录 — 对应某处正文解决了该伏笔 */
+export type ForeshadowFulfillment = {
+  id: string
+  /** 正文中"填坑"的引用文本（来自选区或手动输入） */
+  fulfillText: string
+  fulfillChapterId: string
+  fulfillChapterNo: number
+  fulfillChapterTitle: string
+  /** 填坑选区在章节正文中的偏移（用于叠加层标记）；旧数据或工作台手填可无 */
+  fulfillStart?: number
+  fulfillEnd?: number
+  /** 说明此处如何解决了该伏笔 */
+  notes: string
+  createdAt: string
+}
 
-export type IssueStatus = 'open' | 'in_progress' | 'resolved'
-
-export type StoryIssue = {
+/** 伏笔植入记录 */
+export type ForeshadowPlant = {
   id: string
   novelId: string
+  /** 简短标签（通常截取自 plantText，用户可改） */
   title: string
-  type: IssueType
-  status: IssueStatus
-  plan: string
-  notes: string
+  /** 正文中植入伏笔的引用文本（来自选区） */
+  plantText: string
+  plantChapterId: string
+  plantChapterNo: number
+  plantChapterTitle: string
+  /** 正文选区范围（用于下划线标记）；兼容旧数据可缺省 */
+  plantStart?: number
+  plantEnd?: number
+  /** 详细描述：这个伏笔想说明什么、需要怎样收尾 */
+  description: string
+  /** 预计填坑位置（可选） */
+  expectedFulfillChapterNo?: number | null
+  expectedFulfillNotes?: string
+  status: 'open' | 'fulfilled'
+  fulfillments: ForeshadowFulfillment[]
   createdAt: string
   updatedAt: string
 }
 
-export type NewStoryIssueInput = {
+export type NewForeshadowPlantInput = {
   novelId: string
   title: string
-  type: IssueType
-  plan: string
+  plantText: string
+  plantChapterId: string
+  plantChapterNo: number
+  plantChapterTitle: string
+  plantStart?: number
+  plantEnd?: number
+  description: string
+  expectedFulfillChapterNo?: number | null
+  expectedFulfillNotes?: string
+}
+
+export type NewForeshadowFulfillmentInput = {
+  fulfillText: string
+  fulfillChapterId: string
+  fulfillChapterNo: number
+  fulfillChapterTitle: string
+  fulfillStart?: number
+  fulfillEnd?: number
   notes: string
 }
 
@@ -223,4 +329,3 @@ export type NewTimelineEventInput = {
   chapterNo?: number | null
   outlineItemId?: string | null
 }
-

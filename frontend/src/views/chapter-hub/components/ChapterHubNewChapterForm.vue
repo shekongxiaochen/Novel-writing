@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section class="card chapter-hub__top chapter-hub__composer">
     <h2 class="chapter-hub__composer-title">新建章节</h2>
     <form class="chapter-hub__composer-form" @submit.prevent="emit('submit')">
@@ -11,6 +11,10 @@
           <span class="chapter-hub__field-label">章节笔记</span>
           <input v-model="notes" class="chapter-hub__input" maxlength="200" />
         </label>
+        <label class="chapter-hub__field">
+          <span class="chapter-hub__field-label">章节注释</span>
+          <input v-model="annotation" class="chapter-hub__input" maxlength="200" placeholder="章总结（可选）" />
+        </label>
       </div>
       <div class="chapter-hub__composer-actions">
         <button type="submit" class="chapter-hub__btn chapter-hub__btn--primary">添加章节</button>
@@ -22,6 +26,7 @@
 <script setup lang="ts">
 const title = defineModel<string>('title', { required: true })
 const notes = defineModel<string>('notes', { required: true })
+const annotation = defineModel<string>('annotation', { required: true })
 
 const emit = defineEmits<{
   submit: []

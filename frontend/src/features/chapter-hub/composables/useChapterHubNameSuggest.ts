@@ -1,8 +1,19 @@
 import { nextTick, ref, type ComputedRef, type Ref } from 'vue'
 import { updateChapter } from '../../../lib/storage'
+import { characterMatchLabels } from '../../../lib/characterLabels'
 import { getCaretPixelOffset, scrollCaretIntoView } from '../caretGeometry'
 import { getTypingPrefixInfo, resolveNamePrefix } from '../nameSuggestUtils'
 import type { Chapter, Character, Faction } from '../../../types'
+
+type NameSuggestRow = { id: string; name: string; kind: 'character' | 'faction' }
+
+function sortNameSuggestRows(rows: NameSuggestRow[]): NameSuggestRow[] {
+  return [...rows].sort((a, b) => {
+    const ld = b.name.length - a.name.length
+    if (ld !== 0) return ld
+    return a.name.localeCompare(b.name, 'zh-Hans')
+  })
+}
 
 export function useChapterHubNameSuggest(deps: {
   characters: Ref<Character[]>
@@ -14,7 +25,7 @@ export function useChapterHubNameSuggest(deps: {
   const { characters, factions, selectedChapter, chapters, chapterTextareaRef } = deps
 
   const nameSuggestOpen = ref(false)
-  const nameSuggestList = ref<Array<{ id: string; name: string; kind: 'character' | 'faction' }>>([])
+  const nameSuggestList = ref<NameSuggestRow[]>([])
   const nameSuggestIndex = ref(0)
   const nameSuggestRange = ref<{ start: number; end: number } | null>(null)
   const nameSuggestDirection = ref<'down' | 'up'>('down')
@@ -46,7 +57,7 @@ export function useChapterHubNameSuggest(deps: {
       }
     }
 
-    const characterNames = characters.value.map((c) => c.name).filter(Boolean)
+    const characterNames = characters.value.flatMap((c) => characterMatchLabels(c)).filter(Boolean)
     const factionNames = factions.value.map((f) => f.name).filter(Boolean)
     const allNames = [...characterNames, ...factionNames]
     const resolved = prefixRaw ? resolveNamePrefix(prefixRaw, allNames) : null
@@ -58,30 +69,52 @@ export function useChapterHubNameSuggest(deps: {
     }
 
     const normalizedPrefix = prefix.toLowerCase()
-    const startsWithMatches = [
-      ...characters.value
-        .filter((c) => c.name && c.name.toLowerCase().startsWith(normalizedPrefix))
-        .map((c) => ({ id: c.id, name: c.name, kind: 'character' as const })),
-      ...factions.value
-        .filter((f) => f.name && f.name.toLowerCase().startsWith(normalizedPrefix))
-        .map((f) => ({ id: f.id, name: f.name, kind: 'faction' as const })),
-    ]
-    const includeMatches = [
-      ...characters.value
-        .filter((c) => c.name && !c.name.toLowerCase().startsWith(normalizedPrefix) && c.name.includes(prefix))
-        .map((c) => ({ id: c.id, name: c.name, kind: 'character' as const })),
-      ...factions.value
-        .filter((f) => f.name && !f.name.toLowerCase().startsWith(normalizedPrefix) && f.name.includes(prefix))
-        .map((f) => ({ id: f.id, name: f.name, kind: 'faction' as const })),
-    ]
+    const startsWithMatches: NameSuggestRow[] = []
+    for (const c of characters.value) {
+      for (const label of characterMatchLabels(c)) {
+        if (!label) continue
+        if (label.toLowerCase().startsWith(normalizedPrefix)) {
+          startsWithMatches.push({ id: `ch:${c.id}:${label}`, name: label, kind: 'character' })
+        }
+      }
+    }
+    for (const f of factions.value) {
+      if (f.name && f.name.toLowerCase().startsWith(normalizedPrefix)) {
+        startsWithMatches.push({ id: f.id, name: f.name, kind: 'faction' })
+      }
+    }
 
-    const list = (prefix
-      ? [...startsWithMatches, ...includeMatches]
-      : [
-          ...characters.value.map((c) => ({ id: c.id, name: c.name, kind: 'character' as const })),
-          ...factions.value.map((f) => ({ id: f.id, name: f.name, kind: 'faction' as const })),
-        ])
-      .slice(0, 10)
+    const includeMatches: NameSuggestRow[] = []
+    for (const c of characters.value) {
+      for (const label of characterMatchLabels(c)) {
+        if (!label) continue
+        if (!label.toLowerCase().startsWith(normalizedPrefix) && label.includes(prefix)) {
+          includeMatches.push({ id: `ch:${c.id}:${label}`, name: label, kind: 'character' })
+        }
+      }
+    }
+    for (const f of factions.value) {
+      if (f.name && !f.name.toLowerCase().startsWith(normalizedPrefix) && f.name.includes(prefix)) {
+        includeMatches.push({ id: f.id, name: f.name, kind: 'faction' })
+      }
+    }
+
+    const allCharacterRows: NameSuggestRow[] = characters.value.flatMap((c) =>
+      characterMatchLabels(c).map((label) => ({
+        id: `ch:${c.id}:${label}`,
+        name: label,
+        kind: 'character' as const,
+      })),
+    )
+    const allFactionRows: NameSuggestRow[] = factions.value.map((f) => ({
+      id: f.id,
+      name: f.name,
+      kind: 'faction' as const,
+    }))
+
+    const list = sortNameSuggestRows(
+      prefix ? [...startsWithMatches, ...includeMatches] : [...allCharacterRows, ...allFactionRows],
+    ).slice(0, 10)
 
     if (list.length === 0) {
       resetNameSuggest()
@@ -106,23 +139,75 @@ export function useChapterHubNameSuggest(deps: {
     const coords = getCaretPixelOffset(ta, caretPos)
     if (!coords) return
 
-    const panelHeight = Math.min(260, list.length * 40 + 16)
-    const panelWidth = Math.min(420, Math.max(240, ta.clientWidth * 0.72))
     const taRect = ta.getBoundingClientRect()
     const caretYViewport = taRect.top + (coords.top - ta.scrollTop)
     const caretXViewport = taRect.left + coords.left
     const lineHeight = Math.max(18, coords.height || 0)
-    const viewportPad = 8
-    const spaceBelow = window.innerHeight - (caretYViewport + lineHeight)
-    const spaceAbove = caretYViewport
-    const preferUp = spaceBelow < panelHeight + 8 && spaceAbove > panelHeight + 8
+    const caretBottom = caretYViewport + lineHeight
 
-    const top = preferUp
-      ? Math.max(viewportPad, caretYViewport - panelHeight - 6)
-      : Math.min(window.innerHeight - panelHeight - viewportPad, caretYViewport + lineHeight + 6)
+    const viewportPad = 8
+    const edgePad = 8
+    const gap = 6
+    const maxPanelH = 240
+    const rowEstimate = 44
+    const gridGap = 6
+    const panelPad = 16
+    const maxRowsBeforeScroll = 4
+
+    function listPanelHeightForRows(rows: number): number {
+      if (rows <= 0) return panelPad
+      return rows * rowEstimate + (rows - 1) * gridGap + panelPad
+    }
+
+    const visibleRowCount = list.length > maxRowsBeforeScroll ? maxRowsBeforeScroll : list.length
+    const contentCapHeight = listPanelHeightForRows(visibleRowCount)
+    const naturalHeight = Math.min(maxPanelH, contentCapHeight)
+
+    const panelWidth = Math.min(420, Math.max(240, ta.clientWidth * 0.72))
+
+    // 以正文 textarea 可视区域为边界，避免提示列表伸出写作区底部/顶部
+    const spaceBelowTa = taRect.bottom - caretBottom - edgePad
+    const spaceAboveTa = caretYViewport - taRect.top - edgePad
+    const vSpaceBelow = window.innerHeight - caretBottom - viewportPad
+    const vSpaceAbove = caretYViewport - viewportPad
+
+    let preferUp = false
+    let panelHeight = naturalHeight
+
+    if (spaceBelowTa >= naturalHeight + gap) {
+      preferUp = false
+      panelHeight = Math.min(naturalHeight, spaceBelowTa - gap, vSpaceBelow - gap)
+    } else if (spaceAboveTa >= naturalHeight + gap) {
+      preferUp = true
+      panelHeight = Math.min(naturalHeight, spaceAboveTa - gap, vSpaceAbove - gap)
+    } else if (spaceAboveTa > spaceBelowTa) {
+      preferUp = true
+      panelHeight = Math.max(96, Math.min(naturalHeight, spaceAboveTa - gap, vSpaceAbove - gap))
+    } else {
+      preferUp = false
+      panelHeight = Math.max(96, Math.min(naturalHeight, spaceBelowTa - gap, vSpaceBelow - gap))
+    }
+
+    panelHeight = Math.min(panelHeight, maxPanelH, contentCapHeight)
+    if (preferUp) {
+      panelHeight = Math.min(panelHeight, Math.max(96, vSpaceAbove - gap))
+    } else {
+      panelHeight = Math.min(panelHeight, Math.max(96, vSpaceBelow - gap))
+    }
+
+    let top: number
+    if (preferUp) {
+      top = Math.min(caretYViewport - gap - panelHeight, taRect.bottom - edgePad - panelHeight)
+      top = Math.max(viewportPad, taRect.top + edgePad, top)
+    } else {
+      top = caretBottom + gap
+      top = Math.min(top, taRect.bottom - edgePad - panelHeight, window.innerHeight - viewportPad - panelHeight)
+      top = Math.max(viewportPad, taRect.top + edgePad, top)
+    }
+
     const left = Math.min(
-      Math.max(viewportPad, caretXViewport - 18),
-      Math.max(viewportPad, window.innerWidth - panelWidth - viewportPad)
+      Math.max(viewportPad, taRect.left + edgePad, caretXViewport - 18),
+      Math.max(viewportPad, taRect.right - panelWidth - edgePad, window.innerWidth - panelWidth - viewportPad)
     )
 
     nameSuggestDirection.value = preferUp ? 'up' : 'down'
@@ -131,6 +216,7 @@ export function useChapterHubNameSuggest(deps: {
       top: `${top}px`,
       left: `${left}px`,
       width: `${panelWidth}px`,
+      maxHeight: `${Math.max(96, Math.min(panelHeight, contentCapHeight))}px`,
     }
   }
 

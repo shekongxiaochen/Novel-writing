@@ -2,7 +2,7 @@
   <Teleport to="body">
     <div
       v-if="open && list.length > 0"
-      class="chapter-hub__name-suggest"
+      class="chapter-hub__name-suggest scrollbar-paper"
       :class="{ 'chapter-hub__name-suggest--up': direction === 'up' }"
       :style="panelStyle"
     >

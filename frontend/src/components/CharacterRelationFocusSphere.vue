@@ -19,8 +19,9 @@ const props = withDefaults(
     selectable?: boolean
     renderScale?: number
     panelHeight?: number
+    modifiedInChapterIds?: string[]
   }>(),
-  { selectable: false, renderScale: 1, panelHeight: 520 },
+  { selectable: false, renderScale: 1, panelHeight: 520, modifiedInChapterIds: () => [] },
 )
 
 const emit = defineEmits<{
@@ -38,7 +39,6 @@ let controls: OrbitControls | null = null
 let raycaster: THREE.Raycaster | null = null
 let mouseNdc: THREE.Vector2 | null = null
 let animationId = 0
-let isOrbiting = false
 let themeObserver: MutationObserver | null = null
 let resizeObserver: ResizeObserver | null = null
 let lastPointerDown = { x: 0, y: 0 }
@@ -89,7 +89,9 @@ function clearAll() {
 
   relationLabels.forEach((s) => {
     scene?.remove(s)
-    if (s.material) (s.material as THREE.SpriteMaterial).dispose()
+    const mat = s.material as THREE.SpriteMaterial
+    mat.map?.dispose?.()
+    mat.dispose()
   })
   relationLabels = []
 
@@ -104,7 +106,6 @@ function clearAll() {
 }
 
 function computeGridPositions(count: number, radius: number): THREE.Vector3[] {
-  // 经纬网格交叉点：用于“节点看起来有规律”
   const out: THREE.Vector3[] = []
   if (count <= 0) return out
 
@@ -117,7 +118,6 @@ function computeGridPositions(count: number, radius: number): THREE.Vector3[] {
     const r = Math.sin(phi)
 
     for (let j = 0; j < lonSteps && out.length < count; j++) {
-      // 避免两极重复太多
       if ((i === 0 || i === latSteps) && j !== 0) continue
       const theta = (j / lonSteps) * Math.PI * 2
       const x = Math.cos(theta) * r
@@ -149,15 +149,13 @@ function makeTextSprite(text: string, opts?: { fontSize?: number }) {
   const theme = document.documentElement.getAttribute('data-theme') || 'light'
   const isDark = theme === 'dark'
 
-  // 文字底牌：半透明底 + 细边框，确保在复杂 3D 背景上仍清楚
   const padX = 18
   const padY = 10
   const radius = 14
-  const textColor = isDark ? '#f5f2ed' : '#1c1a17'
-  const bgColor = isDark ? 'rgba(24, 23, 22, 0.78)' : 'rgba(250, 246, 237, 0.86)'
-  const borderColor = isDark ? 'rgba(201, 184, 166, 0.55)' : 'rgba(42, 38, 34, 0.35)'
+  const textColor = isDark ? '#efe4d4' : '#1c1a17'
+  const bgColor = isDark ? 'rgba(33, 29, 24, 0.84)' : 'rgba(250, 246, 237, 0.86)'
+  const borderColor = isDark ? 'rgba(211, 197, 181, 0.38)' : 'rgba(42, 38, 34, 0.35)'
 
-  ctx.font = `700 ${fontSize}px sans-serif`
   const metrics = ctx.measureText(t)
   const textW = Math.min(metrics.width, canvas.width - 2 * padX)
   const textH = fontSize * 1.1
@@ -166,14 +164,14 @@ function makeTextSprite(text: string, opts?: { fontSize?: number }) {
   const x = (canvas.width - boxW) / 2
   const y = (canvas.height - boxH) / 2
 
-  const rr = (x: number, y: number, w: number, h: number, r: number) => {
+  const rr = (rx: number, ry: number, w: number, h: number, r: number) => {
     const cr = Math.max(0, Math.min(r, Math.min(w, h) / 2))
     ctx.beginPath()
-    ctx.moveTo(x + cr, y)
-    ctx.arcTo(x + w, y, x + w, y + h, cr)
-    ctx.arcTo(x + w, y + h, x, y + h, cr)
-    ctx.arcTo(x, y + h, x, y, cr)
-    ctx.arcTo(x, y, x + w, y, cr)
+    ctx.moveTo(rx + cr, ry)
+    ctx.arcTo(rx + w, ry, rx + w, ry + h, cr)
+    ctx.arcTo(rx + w, ry + h, rx, ry + h, cr)
+    ctx.arcTo(rx, ry + h, rx, ry, cr)
+    ctx.arcTo(rx, ry, rx + w, ry, cr)
     ctx.closePath()
   }
 
@@ -184,7 +182,6 @@ function makeTextSprite(text: string, opts?: { fontSize?: number }) {
   ctx.strokeStyle = borderColor
   ctx.stroke()
 
-  // 文字：轻描边 + 轻阴影（比单纯 shadow 更稳）
   ctx.shadowColor = isDark ? 'rgba(0, 0, 0, 0.55)' : 'rgba(0, 0, 0, 0.35)'
   ctx.shadowBlur = isDark ? 10 : 8
   ctx.shadowOffsetY = 1
@@ -212,8 +209,7 @@ function makeTextSprite(text: string, opts?: { fontSize?: number }) {
 }
 
 function build() {
-  if (!canvasHostRef.value) return
-  if (!wrapRef.value) return
+  if (!canvasHostRef.value || !wrapRef.value) return
   if (!scene || !camera || !renderer || !controls) return
 
   clearAll()
@@ -225,23 +221,19 @@ function build() {
   if (!focusChar) return
 
   const theme = document.documentElement.getAttribute('data-theme') || 'light'
-  const isDark = theme === 'dark'
+  const isDark = theme === 'dark' || theme === 'blueprint'
 
-  const palette = [
-    0x5c534c,
-    0x5f6b5a,
-    0x7d6654,
-    0x6b5d4f,
-    0x4d5c52,
-    0x8b7355,
-    0x6e6258,
-    0x7a6f63,
-  ]
+  const palettes: Record<string, number[]> = {
+    mint: [0x00a884, 0xf0b85a, 0x2dd4bf, 0x6ee7b7, 0x0f766e, 0xf59e0b, 0x14b8a6, 0x84cc16],
+    blueprint: [0x38bdf8, 0x818cf8, 0x60a5fa, 0xa5b4fc, 0x22d3ee, 0xfbbf24, 0x7dd3fc, 0x4f46e5],
+    dark: [0x75665b, 0x74846f, 0x9a7957, 0x8a7260, 0x63756a, 0xb08c61, 0x8f8274, 0xa49787],
+    light: [0x2563eb, 0x0f766e, 0x7c3aed, 0xc2410c, 0x0284c7, 0x16a34a, 0x9333ea, 0xd97706],
+  }
+  const palette = palettes[theme] ?? palettes.light
 
   const otherIds: string[] = []
   const otherSet = new Set<string>()
 
-  // relations 保证只包含与 focus 有关的边；从边上收集“有关人物”
   for (const r of props.relations) {
     if (r.fromCharacterId === focusId && r.toCharacterId) {
       if (!otherSet.has(r.toCharacterId)) {
@@ -256,26 +248,23 @@ function build() {
     }
   }
 
-  // 节点颜色映射
   const allNodeIds = [focusId, ...otherIds]
   allNodeIds.forEach((id, i) => nodeColorById.set(id, palette[i % palette.length]))
 
-  const renderScale = Math.min(1.5, Math.max(0.45, Number(props.renderScale) || 1))
-  const focusRadius = 18 * renderScale
-  const nodeRadius = 16 * renderScale
-  const orbitRadius = 180 * renderScale
+  const renderScale = Math.min(1.35, Math.max(0.4, Number(props.renderScale) || 1))
+  const focusRadius = 16 * renderScale
+  const nodeRadius = 14 * renderScale
+  const orbitRadius = 196 * renderScale
 
-  // 大球网格轮廓线（和上面的 3D 图一致的“网格球”感觉）
-  const wireRadius = orbitRadius
   const latSteps = Math.max(4, Math.ceil(Math.sqrt(otherIds.length || 1)))
   const lonSteps = Math.max(6, Math.ceil((otherIds.length - 2) / Math.max(1, latSteps - 1)))
   const wireColor = isDark ? 0xe2e8f0 : 0x7c5c3a
   const wireOpacity = isDark ? 0.18 : 0.26
-  const wireGeo = new THREE.SphereGeometry(wireRadius, Math.max(10, lonSteps * 2), Math.max(8, latSteps * 2))
+  const wireGeo = new THREE.SphereGeometry(wireRadius(orbitRadius), Math.max(10, lonSteps * 2), Math.max(8, latSteps * 2))
   const wireframe = new THREE.WireframeGeometry(wireGeo)
   sphereWire = new THREE.LineSegments(
     wireframe,
-    new THREE.LineBasicMaterial({ color: wireColor, transparent: true, opacity: wireOpacity })
+    new THREE.LineBasicMaterial({ color: wireColor, transparent: true, opacity: wireOpacity }),
   )
   scene.add(sphereWire)
 
@@ -289,7 +278,6 @@ function build() {
     positionsById.set(id, p)
   })
 
-  // 节点：中心（聚焦角色）+ 侧面（相关角色）
   const sphereGeoFocus = new THREE.SphereGeometry(focusRadius, 24, 24)
   const sphereGeo = new THREE.SphereGeometry(nodeRadius, 24, 24)
 
@@ -319,11 +307,9 @@ function build() {
     meshById.set(id, mesh)
     scene.add(mesh)
 
-    // 角色名：放在球心（不描边）
     const name = props.characters.find((c) => c.id === id)?.name ?? ''
     if (name) {
       const label = makeTextSprite(name, { fontSize: Math.max(26, Math.round(54 * renderScale)) })
-      // label 对齐球心：sprite 的原点在中心
       label.position.copy(p)
       label.scale.multiplyScalar(renderScale)
       ;(label.material as THREE.SpriteMaterial).opacity = isFocus ? 1 : 0.92
@@ -332,11 +318,10 @@ function build() {
     }
   })
 
-  // 连线：只从中心指向“有关人物”
   const lineColor = isDark ? 0xe2e8f0 : 0x334155
   const lineOpacity = isDark ? 0.32 : 0.22
 
-  const drawDirectedRelation = (fromId: string, toId: string, relationText: string) => {
+  const drawDirectedRelation = (fromId: string, toId: string) => {
     const a = positionsById.get(fromId)
     const b = positionsById.get(toId)
     if (!a || !b) return
@@ -345,7 +330,6 @@ function build() {
     const len = dir.length()
     if (len < 1e-3) return
 
-    // 与“角色对（无向）”绑定的偏移法向量：确保 A->B 与 B->A 永远分居两侧，而不会叠线
     const minId = fromId < toId ? fromId : toId
     const maxId = fromId < toId ? toId : fromId
     const pMin = positionsById.get(minId)
@@ -366,32 +350,16 @@ function build() {
     const normal = baseNormal.multiplyScalar(18 * sideSign)
 
     const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5).add(normal)
-    // 轻微外鼓，减少和节点/网格重叠
     mid.y += 5
 
     const curve = new THREE.QuadraticBezierCurve3(a.clone(), mid, b.clone())
     const points = curve.getPoints(36)
     const lineGeo = new THREE.BufferGeometry().setFromPoints(points)
-    const lineMat = new THREE.LineBasicMaterial({
-      color: lineColor,
-      transparent: true,
-      opacity: lineOpacity,
-    })
+    const lineMat = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: lineOpacity })
     const line = new THREE.Line(lineGeo, lineMat)
     scene!.add(line)
     relationLines.push(line)
 
-    // 在线的 58% 处放标签，避免和箭头/节点重叠
-    const labelPos = curve.getPoint(0.58)
-    const label = makeTextSprite(relationText || '关系', {
-      fontSize: Math.max(20, Math.round(36 * renderScale)),
-    })
-    label.position.copy(labelPos)
-    label.scale.multiplyScalar(renderScale)
-    scene!.add(label)
-    relationLabels.push(label)
-
-    // 箭头放在线尾部附近，表示方向
     const p0 = curve.getPoint(0.86)
     const p1 = curve.getPoint(0.96)
     const arrowDir = new THREE.Vector3().subVectors(p1, p0).normalize()
@@ -406,16 +374,19 @@ function build() {
   }
 
   for (const r of props.relations) {
-    // A=focusId。若关系是 A->B，则箭头指向 B；若关系是 B->A，则箭头指向 A。
     if (r.fromCharacterId === focusId) {
-      drawDirectedRelation(focusId, r.toCharacterId, r.relationType || '关系')
+      drawDirectedRelation(focusId, r.toCharacterId)
     } else if (r.toCharacterId === focusId) {
-      drawDirectedRelation(r.fromCharacterId, focusId, r.relationType || '关系')
+      drawDirectedRelation(r.fromCharacterId, focusId)
     }
   }
 
   controls.target.set(0, 0, 0)
   controls.update()
+}
+
+function wireRadius(radius: number): number {
+  return radius
 }
 
 function measureAndRender() {
@@ -441,13 +412,10 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onClick(e: MouseEvent) {
-  if (!props.selectable) return
-  if (!raycaster || !mouseNdc) return
-  if (!canvasHostRef.value) return
+  if (!props.selectable || !raycaster || !mouseNdc || !canvasHostRef.value || !camera) return
 
   const dx = e.clientX - lastPointerDown.x
   const dy = e.clientY - lastPointerDown.y
-  // 避免旋转视角时误触选中节点
   if (dx * dx + dy * dy > 100) return
 
   const rect = canvasHostRef.value.getBoundingClientRect()
@@ -456,7 +424,7 @@ function onClick(e: MouseEvent) {
   mouseNdc.x = (x / rect.width) * 2 - 1
   mouseNdc.y = -(y / rect.height) * 2 + 1
 
-  raycaster.setFromCamera(mouseNdc, camera!)
+  raycaster.setFromCamera(mouseNdc, camera)
   const meshes = Array.from(meshById.values())
   const hit = raycaster.intersectObjects(meshes, false)[0]
   if (hit?.object) {
@@ -475,7 +443,6 @@ onMounted(() => {
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   canvasHostRef.value.appendChild(renderer.domElement)
 
-  // 光照（MeshStandardMaterial 需要灯光）
   const amb = new THREE.AmbientLight(0xffffff, 0.65)
   const dir = new THREE.DirectionalLight(0xffffff, 0.9)
   dir.position.set(250, 350, 180)
@@ -494,17 +461,9 @@ onMounted(() => {
   controls.update()
   renderer.domElement.style.touchAction = 'none'
 
-  controls.addEventListener('start', () => {
-    isOrbiting = true
-  })
-  controls.addEventListener('end', () => {
-    isOrbiting = false
-  })
-
   raycaster = new THREE.Raycaster()
   mouseNdc = new THREE.Vector2()
 
-  // 相机摆到球的外侧
   const renderScale = Math.min(1.5, Math.max(0.45, Number(props.renderScale) || 1))
   camera.position.set(0, 0, 520 * renderScale)
 
@@ -522,7 +481,6 @@ onMounted(() => {
   canvasHostRef.value.addEventListener('pointerdown', onPointerDown)
   canvasHostRef.value.addEventListener('click', onClick)
 
-  // 主题切换时重建文字贴图（暗色下需要白字）
   if (typeof MutationObserver !== 'undefined') {
     themeObserver = new MutationObserver(() => build())
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
@@ -535,9 +493,7 @@ watch(
     String(props.renderScale ?? 1),
     String(props.panelHeight ?? 520),
     props.characters.map((c) => c.id).join('|'),
-    props.relations
-      .map((r) => `${r.id}:${r.fromCharacterId}->${r.toCharacterId}:${r.relationType}:${r.note ?? ''}:${r.updatedAt ?? ''}`)
-      .join('|'),
+    props.relations.map((r) => `${r.id}:${r.fromCharacterId}->${r.toCharacterId}:${r.relationType}:${r.note ?? ''}:${r.updatedAt ?? ''}`).join('|'),
   ].join('::'),
   () => build(),
 )
@@ -555,7 +511,7 @@ onBeforeUnmount(() => {
 
   clearAll()
   lights.splice(0, lights.length).forEach((l) => scene?.remove(l))
-  themeObserver?.disconnect?.()
+  themeObserver?.disconnect()
   themeObserver = null
   renderer?.dispose()
   controls?.dispose()
@@ -570,15 +526,14 @@ onBeforeUnmount(() => {
 .focus-sphere-wrap {
   width: 100%;
   height: v-bind('`${props.panelHeight}px`');
-  border-radius: var(--radius-sm);
+  border-radius: 24px;
   overflow: hidden;
   position: relative;
-  background: radial-gradient(
-    ellipse at 30% 20%,
-    rgba(217, 186, 135, 0.22) 0%,
-    rgba(217, 186, 135, 0.1) 40%,
-    rgba(255, 255, 255, 0) 70%
-  );
+  background:
+    radial-gradient(ellipse at 28% 18%, rgba(192, 138, 92, 0.16) 0%, rgba(192, 138, 92, 0.07) 36%, rgba(255, 255, 255, 0) 68%),
+    radial-gradient(ellipse at 78% 84%, rgba(147, 168, 139, 0.12) 0%, rgba(147, 168, 139, 0.04) 34%, rgba(255, 255, 255, 0) 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, transparent), color-mix(in srgb, var(--color-surface-muted) 82%, transparent));
+  border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
 }
 
 .focus-sphere-canvas {
@@ -588,12 +543,17 @@ onBeforeUnmount(() => {
 }
 
 [data-theme='dark'] .focus-sphere-wrap {
-  background: radial-gradient(
-    ellipse at 30% 20%,
-    rgba(217, 186, 135, 0.12) 0%,
-    rgba(217, 186, 135, 0.06) 40%,
-    rgba(0, 0, 0, 0) 70%
-  );
+  background:
+    radial-gradient(ellipse at 28% 18%, rgba(192, 138, 92, 0.11) 0%, rgba(192, 138, 92, 0.05) 36%, rgba(255, 255, 255, 0) 68%),
+    radial-gradient(ellipse at 78% 84%, rgba(147, 168, 139, 0.08) 0%, rgba(147, 168, 139, 0.03) 34%, rgba(255, 255, 255, 0) 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 98%, transparent), color-mix(in srgb, var(--color-surface-muted) 82%, transparent));
+}
+
+:root:not([data-theme='dark']) .focus-sphere-wrap {
+  background:
+    radial-gradient(ellipse at 28% 18%, rgba(47, 111, 237, 0.08) 0%, rgba(47, 111, 237, 0.03) 36%, rgba(255, 255, 255, 0) 68%),
+    radial-gradient(ellipse at 78% 84%, rgba(15, 159, 203, 0.07) 0%, rgba(15, 159, 203, 0.02) 34%, rgba(255, 255, 255, 0) 70%),
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 98%, transparent), color-mix(in srgb, #f5f7fb 86%, transparent));
+  border-color: rgba(15, 23, 42, 0.08);
 }
 </style>
-
