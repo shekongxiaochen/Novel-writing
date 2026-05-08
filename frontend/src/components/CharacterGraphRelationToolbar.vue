@@ -1,130 +1,291 @@
 <template>
   <div v-if="focusCharacterId && anchorCharacter" class="character-graph-relation-toolbar">
-    <section
-      v-if="pairOtherCharacter"
-      class="characters-graph-ui__section character-graph-pair-detail"
-    >
-      <h3 class="characters-graph-ui__h3 character-graph-pair-detail__title">
-        「{{ pairOtherCharacter.name }}」与中心「{{ anchorCharacter.name }}」
-      </h3>
-      <p class="muted character-graph-pair-detail__hint">点击 3D 图中中心球可恢复查看全部关系边。</p>
-      <ul class="character-graph-pair-detail__list">
-        <li v-for="r in pairDirectedEdges" :key="r.id" class="character-graph-pair-detail__item">
-          <p class="character-graph-pair-detail__sentence">{{ relationEdgeFullSentence(r) }}</p>
-          <button type="button" class="btn-danger chapter-hub__char-graph-relation-remove" @click="removeRelation(r.id)">
-            删除
-          </button>
-        </li>
-      </ul>
-      <p v-if="pairDirectedEdges.length === 0" class="muted character-graph-pair-detail__empty">
-        双方尚未记录任何有向关系描述。
-      </p>
-    </section>
-
     <div class="characters-graph-ui__link-mode">
+      <label v-if="panelMode === 'edit'" class="characters-graph-ui__field">
+        <span class="characters-graph-ui__field-label">搜索角色</span>
+        <input
+          v-model="relationEditSearchQuery"
+          type="search"
+          class="characters-graph-ui__input chapter-hub__relation-edit-search-input"
+          placeholder="输入角色名筛选"
+          autocomplete="off"
+        />
+      </label>
+
       <div class="characters-graph-ui__link-head">
         <button
           type="button"
-          class="btn-primary"
-          :class="{ 'btn-primary--active': linkMode }"
-          @click="toggleLinkMode"
+          class="confirm-dialog__btn confirm-dialog__btn--ghost character-graph-relation-toolbar__mode-btn"
+          :class="{ 'btn-primary--active': !relationAddModalOpen }"
+          @click="openRelationEditModal"
         >
-          {{ linkMode ? '结束编辑关系' : '编辑与其他角色的关系' }}
+          编辑角色关系
+        </button>
+        <button
+          type="button"
+          class="confirm-dialog__btn confirm-dialog__btn--ghost character-graph-relation-toolbar__mode-btn"
+          :class="{ 'btn-primary--active': relationAddModalOpen }"
+          @click="openRelationAddModal"
+        >
+          新增角色关系
         </button>
       </div>
-
-      <p v-if="linkMode" class="muted characters-graph-ui__link-hint">
-        以「{{ anchorCharacter.name }}」为 A，选择<strong>尚未关联</strong>的角色 B，并分别填写 A 对 B、B 对 A 的关系描述。
-      </p>
 
       <p v-if="linkError" class="characters-graph-ui__link-error">{{ linkError }}</p>
       <p v-if="linkSuccess" class="characters-graph-ui__link-success">{{ linkSuccess }}</p>
 
-      <div v-if="linkMode" class="graph3d-link-editor">
-        <label class="characters-graph-ui__field">
-          <span class="characters-graph-ui__field-label">目标角色（B，仅尚无关系）</span>
-          <select
-            v-model="targetBId"
-            class="characters-graph-ui__select chapter-hub__target-role-select"
-            :class="{ 'chapter-hub__target-role-select--list': targetSelectSize > 1 }"
-            :size="targetSelectSize"
-          >
-            <option value="">请选择角色</option>
-            <option v-for="c in relationTargetUnlinked" :key="`new-${c.id}`" :value="c.id">
-              {{ c.name }}
-            </option>
-          </select>
-        </label>
-        <p v-if="linkMode && relationTargetUnlinked.length === 0" class="muted characters-graph-ui__link-hint">
-          暂无可新增关系的角色（其他角色均已与当前角色存在关系边）。
-        </p>
-
-        <p v-if="targetBId" class="characters-graph-ui__from-chip">将新增双向关系</p>
-
-        <label class="characters-graph-ui__field">
-          <span class="characters-graph-ui__field-label">
-            {{ anchorCharacter.name }} 是 {{ targetBName || 'B' }} 的
-          </span>
-          <input
-            v-model="typeFromA"
-            maxlength="40"
-            class="characters-graph-ui__input"
-          />
-        </label>
-
-        <label class="characters-graph-ui__field">
-          <span class="characters-graph-ui__field-label">
-            {{ targetBName || 'B' }} 是 {{ anchorCharacter.name }} 的
-          </span>
-          <input
-            v-model="typeFromB"
-            maxlength="40"
-            class="characters-graph-ui__input"
-          />
-        </label>
-
-        <label class="characters-graph-ui__field">
-          <span class="characters-graph-ui__field-label">备注（可选）</span>
-          <input
-            v-model="note"
-            maxlength="120"
-            class="characters-graph-ui__input"
-          />
-        </label>
-
-        <div class="action-row">
-          <button type="button" class="btn-primary" :disabled="relationTargetUnlinked.length === 0" @click="submitBidirectional">
-            新增双向关系
-          </button>
+      <div class="character-graph-relation-toolbar__body scrollbar-paper">
+        <div v-if="panelMode === 'edit'" class="chapter-hub__relation-edit-scroll">
+          <template v-if="relationEditVisibleRows.length > 0">
+            <div
+              v-for="row in relationEditVisibleRows"
+              :key="`rel-edit-${row.targetCharacterId}`"
+              class="chapter-hub__relation-view-row"
+            >
+              <div class="chapter-hub__relation-view-row-head">
+                <p class="chapter-hub__relation-view-target">{{ anchorCharacter.name }} · {{ row.targetName }}</p>
+              </div>
+              <p class="chapter-hub__relation-view-line">
+                <span class="chapter-hub__relation-view-name">「{{ anchorCharacter.name }}」</span>
+                是
+                <span class="chapter-hub__relation-view-name">「{{ row.targetName }}」</span>
+                的
+                <span class="chapter-hub__relation-view-tag">{{ row.centerToOtherType || '未填写' }}</span>
+              </p>
+              <p class="chapter-hub__relation-view-line">
+                <span class="chapter-hub__relation-view-name">「{{ row.targetName }}」</span>
+                是
+                <span class="chapter-hub__relation-view-name">「{{ anchorCharacter.name }}」</span>
+                的
+                <span class="chapter-hub__relation-view-tag">{{ row.otherToCenterType || '未填写' }}</span>
+              </p>
+            </div>
+          </template>
+          <p v-else-if="relationDraftRows.length > 0" class="muted">无匹配角色，请调整搜索词。</p>
+          <p v-else class="muted">暂无与当前角色相连的关系。</p>
         </div>
       </div>
     </div>
 
-    <Transition name="chapter-hub-fold">
-      <section
-        v-if="relatedRelations.length > 0 && !linkMode && !pairOtherCharacter"
-        class="characters-graph-ui__section chapter-hub__char-graph-existing"
-      >
-        <h3 class="characters-graph-ui__h3">已有关系（可删单边）</h3>
-        <div class="chapter-hub__char-graph-relation-scroll">
-          <ul class="chapter-hub__char-graph-relation-list">
-            <li v-for="r in relatedRelations" :key="r.id" class="chapter-hub__char-graph-relation-item">
-              <div class="chapter-hub__char-graph-relation-text">
-                <span class="chapter-hub__char-graph-relation-sentence">{{ relationEdgeFullSentence(r) }}</span>
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div
+          v-if="relationAddModalOpen && anchorCharacter"
+          class="confirm-overlay"
+          role="presentation"
+          @click.self="closeRelationAddModal"
+        >
+          <div
+            ref="relationAddDialogRef"
+            class="confirm-dialog chapter-hub__relation-add-dialog"
+            role="dialog"
+            aria-modal="true"
+            tabindex="-1"
+            @keydown.escape.prevent="closeRelationAddModal"
+          >
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+            <div class="confirm-dialog__body chapter-hub__relation-add-dialog-body">
+              <h2 class="confirm-dialog__title">新增角色关系</h2>
+              <p class="muted chapter-hub__relation-edit-sub">
+                为当前焦点角色建立一组双向关系。保存后会同时写入 A→B 与 B→A 两条边。
+              </p>
+
+              <div class="chapter-hub__relation-add-form scrollbar-paper">
+                <label class="chapter-hub__relation-edit-field">
+                  <span>对方角色</span>
+                  <div class="workspace-dd">
+                    <button
+                      type="button"
+                      class="workspace-dd__btn workspace-dd__btn--compact character-panel__input"
+                      :class="{ 'workspace-dd__btn--open': relationAddTargetDropdownOpen }"
+                      data-dd-key="workspace-relation-add-target"
+                      :disabled="relationTargetUnlinked.length === 0"
+                      @click="toggleRelationAddTargetDropdown"
+                    >
+                      <span class="workspace-dd__btn-text">{{ relationAddTargetDropdownLabel }}</span>
+                      <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div
+                      v-if="relationAddTargetDropdownOpen"
+                      class="workspace-dd__panel scrollbar-paper chapter-hub__relation-add-dd-panel"
+                      :class="[
+                        relationAddTargetPanelDirectionClass,
+                        { 'workspace-dd__panel--max4': relationAddFilteredCandidates.length > 4 },
+                      ]"
+                      data-dd-panel-key="workspace-relation-add-target"
+                      :style="relationAddTargetPanelStyle"
+                      role="listbox"
+                    >
+                      <div class="workspace-dd__search">
+                        <input
+                          v-model="relationAddTargetQuery"
+                          type="search"
+                          class="workspace-dd__search-input"
+                          placeholder="搜索角色名…"
+                          autocomplete="off"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        class="workspace-dd__item"
+                        :class="{ 'workspace-dd__item--active': !targetBId }"
+                        @click="selectRelationAddTarget('')"
+                      >
+                        请选择尚未与球心建立关系的角色…
+                      </button>
+                      <button
+                        v-for="c in relationAddFilteredCandidates"
+                        :key="`rel-new-${c.id}`"
+                        type="button"
+                        class="workspace-dd__item"
+                        :class="{ 'workspace-dd__item--active': targetBId === c.id }"
+                        @click="selectRelationAddTarget(c.id)"
+                      >
+                        {{ c.name || '未命名角色' }}
+                      </button>
+                      <p v-if="relationAddFilteredCandidates.length === 0" class="muted chapter-hub__relation-add-empty">
+                        无匹配角色
+                      </p>
+                    </div>
+                  </div>
+                </label>
+                <label v-if="targetBName" class="chapter-hub__relation-edit-field">
+                  <span class="chapter-hub__relation-edit-sentence">
+                    「<strong>{{ anchorCharacter.name }}</strong>」是「<strong>{{ targetBName }}</strong>」的
+                  </span>
+                  <input
+                    v-model="typeFromA"
+                    class="character-panel__input"
+                    maxlength="20"
+                    placeholder="如：父亲、徒弟、盟友"
+                  />
+                </label>
+                <label v-if="targetBName" class="chapter-hub__relation-edit-field">
+                  <span class="chapter-hub__relation-edit-sentence">
+                    「<strong>{{ targetBName }}</strong>」是「<strong>{{ anchorCharacter.name }}</strong>」的
+                  </span>
+                  <input
+                    v-model="typeFromB"
+                    class="character-panel__input"
+                    maxlength="20"
+                    placeholder="如：儿子、师父、宿敌"
+                  />
+                </label>
+                <label v-if="targetBName" class="chapter-hub__relation-edit-field">
+                  <span>备注（可选）</span>
+                  <input
+                    v-model="note"
+                    class="character-panel__input"
+                    maxlength="120"
+                    placeholder="补充关系说明"
+                  />
+                </label>
+                <p v-if="relationTargetUnlinked.length === 0" class="muted">
+                  本作中已没有可与球心新建关系的角色（或均已存在关系边）。
+                </p>
+                <p v-if="linkError" class="characters-graph-ui__link-error">{{ linkError }}</p>
               </div>
-              <button type="button" class="btn-danger chapter-hub__char-graph-relation-remove" @click="removeRelation(r.id)">
-                删除
-              </button>
-            </li>
-          </ul>
+
+              <div class="chapter-hub__relation-edit-actions">
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeRelationAddModal">
+                  取消
+                </button>
+                <button
+                  type="button"
+                  class="confirm-dialog__btn confirm-dialog__btn--danger"
+                  :disabled="!canSaveNewRelation"
+                  @click="submitBidirectional"
+                >
+                  保存关系
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </section>
-    </Transition>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div
+          v-if="relationEditModalOpen"
+          class="confirm-overlay"
+          role="presentation"
+          @click.self="closeRelationEditModal"
+        >
+          <div class="confirm-dialog chapter-hub__relation-edit-dialog" role="dialog" aria-modal="true">
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+            <div class="confirm-dialog__body chapter-hub__relation-edit-dialog-body">
+              <h2 class="confirm-dialog__title">编辑角色关系</h2>
+              <div class="chapter-hub__relation-edit-top">
+                <label class="chapter-hub__relation-edit-field">
+                  <span>搜索角色</span>
+                  <input
+                    v-model="relationEditSearchQuery"
+                    type="search"
+                    class="characters-graph-ui__input chapter-hub__relation-edit-search-input"
+                    placeholder="输入角色名筛选"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <div class="chapter-hub__relation-edit-scroll scrollbar-paper">
+                <template v-if="relationEditVisibleRows.length > 0">
+                  <div
+                    v-for="row in relationEditVisibleRows"
+                    :key="`rel-modal-${row.targetCharacterId}`"
+                    class="chapter-hub__relation-edit-row"
+                  >
+                    <div class="chapter-hub__relation-edit-row-head">
+                      <p class="chapter-hub__relation-edit-target">{{ anchorCharacter.name }} · {{ row.targetName }}</p>
+                      <button
+                        type="button"
+                        class="character-panel__icon-btn chapter-hub__relation-edit-remove"
+                        @click="removeRelationDraftRow(row.targetCharacterId)"
+                      >
+                        移除此行
+                      </button>
+                    </div>
+                    <label class="chapter-hub__relation-edit-field">
+                      <span class="chapter-hub__relation-edit-sentence">
+                        「<strong>{{ anchorCharacter.name }}</strong>」是「<strong>{{ row.targetName }}</strong>」的
+                      </span>
+                      <input v-model="row.centerToOtherType" class="characters-graph-ui__input" maxlength="20" />
+                    </label>
+                    <label class="chapter-hub__relation-edit-field">
+                      <span class="chapter-hub__relation-edit-sentence">
+                        「<strong>{{ row.targetName }}</strong>」是「<strong>{{ anchorCharacter.name }}</strong>」的
+                      </span>
+                      <input v-model="row.otherToCenterType" class="characters-graph-ui__input" maxlength="20" />
+                    </label>
+                  </div>
+                </template>
+                <p v-else-if="relationDraftRows.length > 0" class="muted">无匹配角色，请调整搜索词。</p>
+                <p v-else class="muted">暂无与当前角色相连的关系可编辑。</p>
+              </div>
+              <div class="chapter-hub__relation-edit-actions">
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeRelationEditModal">
+                  取消
+                </button>
+                <button
+                  type="button"
+                  class="btn-primary character-graph-relation-toolbar__save-btn"
+                  :disabled="relationDraftRows.length === 0"
+                  @click="saveRelationDraftRowsFromModal"
+                >
+                  保存关系修改
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { createCharacterRelation, deleteCharacterRelation, getCharacterRelationsByNovelId } from '../lib/storage'
 import type { Character, CharacterRelation } from '../types'
 
@@ -134,7 +295,7 @@ const props = withDefaults(
     focusCharacterId: string
     characters: Character[]
     relations: CharacterRelation[]
-    /** 3D 聚焦图中点击的对方角色 id（非中心）；空字符串表示未点选 */
+    /** 聚焦图中点击的对方角色 id（非中心）；空字符串表示未点选 */
     pairCharacterId?: string
   }>(),
   { pairCharacterId: '' }
@@ -145,6 +306,7 @@ const emit = defineEmits<{
 }>()
 
 const linkMode = defineModel<boolean>('linkMode', { default: false })
+const panelMode = ref<'edit' | 'add'>('edit')
 
 const targetBId = ref('')
 const typeFromA = ref('')
@@ -152,6 +314,24 @@ const typeFromB = ref('')
 const note = ref('')
 const linkError = ref('')
 const linkSuccess = ref('')
+const relationEditSearchQuery = ref('')
+const relationEditModalOpen = ref(false)
+const relationAddModalOpen = ref(false)
+const relationAddDialogRef = ref<HTMLElement | null>(null)
+const relationAddTargetDropdownOpen = ref(false)
+const relationAddTargetPanelStyle = ref<Record<string, string>>({})
+const relationAddTargetQuery = ref('')
+const relationAddTargetPanelDirection = ref<'up' | 'down'>('down')
+
+type RelationDraftRow = {
+  targetCharacterId: string
+  targetName: string
+  centerToOtherType: string
+  otherToCenterType: string
+  centerToOtherRelId: string
+  otherToCenterRelId: string
+}
+const relationDraftRows = ref<RelationDraftRow[]>([])
 
 const anchorCharacter = computed(() => props.characters.find((c) => c.id === props.focusCharacterId) ?? null)
 
@@ -180,44 +360,87 @@ const relationTargetUnlinked = computed(() =>
   sortCharactersByName(relationTargetOptions.value.filter((c) => !linkedCharacterIds.value.has(c.id)))
 )
 
-const targetSelectSize = computed(() => {
-  const n = relationTargetUnlinked.value.length
-  if (n <= 5) return 1
-  return Math.min(6, n)
-})
-
 const targetBName = computed(() => props.characters.find((c) => c.id === targetBId.value)?.name ?? '')
-
-const pairOtherCharacter = computed(() => {
-  const pid = (props.pairCharacterId ?? '').trim()
-  if (!pid || pid === props.focusCharacterId) return null
-  return props.characters.find((c) => c.id === pid) ?? null
+const relationAddFilteredCandidates = computed(() => {
+  const q = relationAddTargetQuery.value.trim().toLowerCase()
+  if (!q) return relationTargetUnlinked.value
+  return relationTargetUnlinked.value.filter((c) => String(c.name ?? '').toLowerCase().includes(q))
 })
 
-const pairDirectedEdges = computed(() => {
-  const other = pairOtherCharacter.value
-  const focus = props.focusCharacterId
-  if (!other) return []
-  return props.relations.filter(
-    (r) =>
-      (r.fromCharacterId === focus && r.toCharacterId === other.id) ||
-      (r.fromCharacterId === other.id && r.toCharacterId === focus)
-  )
+const relationAddTargetDropdownLabel = computed(() => {
+  if (!targetBId.value) return '请选择尚未与球心建立关系的角色…'
+  return targetBName.value || '请选择尚未与球心建立关系的角色…'
+})
+
+const relationAddTargetPanelDirectionClass = computed(() =>
+  relationAddTargetPanelDirection.value === 'up' ? 'workspace-dd__panel--up' : 'workspace-dd__panel--down',
+)
+
+function selectRelationAddTarget(id: string): void {
+  targetBId.value = id
+  relationAddTargetDropdownOpen.value = false
+  relationAddTargetQuery.value = ''
+  if (!id) {
+    typeFromA.value = ''
+    typeFromB.value = ''
+    note.value = ''
+  }
+}
+
+function toggleRelationAddTargetDropdown(): void {
+  if (relationTargetUnlinked.value.length === 0) return
+  relationAddTargetDropdownOpen.value = !relationAddTargetDropdownOpen.value
+  if (relationAddTargetDropdownOpen.value) {
+    void nextTick(() => positionRelationAddTargetPanel())
+  } else {
+    relationAddTargetQuery.value = ''
+  }
+}
+
+function positionRelationAddTargetPanel(): void {
+  if (typeof window === 'undefined') return
+  const btn = document.querySelector<HTMLElement>('[data-dd-key="workspace-relation-add-target"]')
+  const panel = document.querySelector<HTMLElement>('[data-dd-panel-key="workspace-relation-add-target"]')
+  if (!btn || !panel) return
+  const rect = btn.getBoundingClientRect()
+  const pad = 8
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const panelH = panel.offsetHeight || 240
+  const below = vh - rect.bottom - pad
+  const above = rect.top - pad
+  const openUp = below < Math.min(Math.max(panelH, 180), 360) && above > below
+  relationAddTargetPanelDirection.value = openUp ? 'up' : 'down'
+
+  const w = rect.width
+  const left = Math.max(8, Math.min(rect.left, vw - w - 8))
+  const top = openUp ? Math.max(8, rect.top - pad - panelH) : Math.min(vh - 8, rect.bottom + pad)
+  relationAddTargetPanelStyle.value = {
+    left: `${Math.round(left)}px`,
+    width: `${Math.round(w)}px`,
+    top: `${Math.round(top)}px`,
+  }
+}
+
+function onDocPointerDownForRelationAddTarget(e: MouseEvent): void {
+  if (!relationAddTargetDropdownOpen.value) return
+  const t = e.target
+  if (!(t instanceof Node)) return
+  const btn = document.querySelector<HTMLElement>('[data-dd-key="workspace-relation-add-target"]')
+  const panel = document.querySelector<HTMLElement>('[data-dd-panel-key="workspace-relation-add-target"]')
+  if (btn?.contains(t)) return
+  if (panel?.contains(t)) return
+  relationAddTargetDropdownOpen.value = false
+  relationAddTargetQuery.value = ''
+}
+
+
+const canSaveNewRelation = computed(() => {
+  return !!anchorCharacter.value && !!targetBId.value && !!typeFromA.value.trim() && !!typeFromB.value.trim()
 })
 
 function characterNameById(id: string): string {
   return props.characters.find((c) => c.id === id)?.name ?? '未知'
-}
-
-/** 完整有向关系句，不使用箭头符号 */
-function relationEdgeFullSentence(r: CharacterRelation): string {
-  const a = characterNameById(r.fromCharacterId)
-  const b = characterNameById(r.toCharacterId)
-  const t = (r.relationType ?? '').trim() || '未标注类型'
-  const n = (r.note ?? '').trim()
-  let s = `「${a}」是「${b}」的「${t}」看`
-  if (n) s += `；备注：${n}`
-  return `${s}。`
 }
 
 function clearFormFields(): void {
@@ -225,12 +448,127 @@ function clearFormFields(): void {
   typeFromA.value = ''
   typeFromB.value = ''
   note.value = ''
+  relationAddTargetDropdownOpen.value = false
+  relationAddTargetQuery.value = ''
 }
 
-function toggleLinkMode(): void {
+function syncRelationDraftRows(): void {
+  const focus = props.focusCharacterId
+  if (!focus) {
+    relationDraftRows.value = []
+    return
+  }
+  const byTarget = new Map<string, RelationDraftRow>()
+  for (const r of props.relations) {
+    if (r.fromCharacterId !== focus && r.toCharacterId !== focus) continue
+    const targetId = r.fromCharacterId === focus ? r.toCharacterId : r.fromCharacterId
+    const targetName = characterNameById(targetId)
+    if (!byTarget.has(targetId)) {
+      byTarget.set(targetId, {
+        targetCharacterId: targetId,
+        targetName,
+        centerToOtherType: '',
+        otherToCenterType: '',
+        centerToOtherRelId: '',
+        otherToCenterRelId: '',
+      })
+    }
+    const row = byTarget.get(targetId)!
+    if (r.fromCharacterId === focus && r.toCharacterId === targetId) {
+      row.centerToOtherType = String(r.relationType ?? '')
+      row.centerToOtherRelId = r.id
+    } else if (r.fromCharacterId === targetId && r.toCharacterId === focus) {
+      row.otherToCenterType = String(r.relationType ?? '')
+      row.otherToCenterRelId = r.id
+    }
+  }
+  relationDraftRows.value = Array.from(byTarget.values()).sort((a, b) => a.targetName.localeCompare(b.targetName, 'zh-Hans'))
+}
+
+const relationEditVisibleRows = computed(() => {
+  const q = relationEditSearchQuery.value.trim().toLowerCase()
+  if (!q) return relationDraftRows.value
+  return relationDraftRows.value.filter((row) =>
+    row.targetName.toLowerCase().includes(q) || row.targetCharacterId.toLowerCase().includes(q),
+  )
+})
+
+function removeRelationDraftRow(targetCharacterId: string): void {
+  const row = relationDraftRows.value.find((x) => x.targetCharacterId === targetCharacterId)
+  if (!row) return
+  if (row.centerToOtherRelId) deleteCharacterRelation(row.centerToOtherRelId)
+  if (row.otherToCenterRelId) deleteCharacterRelation(row.otherToCenterRelId)
+  relationDraftRows.value = relationDraftRows.value.filter((x) => x.targetCharacterId !== targetCharacterId)
+  emit('relationsChanged')
+}
+
+function saveRelationDraftRows(): void {
+  const focus = props.focusCharacterId
+  if (!focus) return
+  for (const row of relationDraftRows.value) {
+    if (row.centerToOtherRelId) deleteCharacterRelation(row.centerToOtherRelId)
+    if (row.otherToCenterRelId) deleteCharacterRelation(row.otherToCenterRelId)
+    const t1 = row.centerToOtherType.trim()
+    const t2 = row.otherToCenterType.trim()
+    if (t1) {
+      createCharacterRelation({
+        novelId: props.novelId,
+        fromCharacterId: focus,
+        toCharacterId: row.targetCharacterId,
+        relationType: t1,
+      })
+    }
+    if (t2) {
+      createCharacterRelation({
+        novelId: props.novelId,
+        fromCharacterId: row.targetCharacterId,
+        toCharacterId: focus,
+        relationType: t2,
+      })
+    }
+  }
+  linkError.value = ''
+  linkSuccess.value = '角色关系已保存。'
+  emit('relationsChanged')
+  syncRelationDraftRows()
+}
+
+function openRelationEditModal(): void {
+  panelMode.value = 'edit'
+  relationAddModalOpen.value = false
+  linkMode.value = false
   linkError.value = ''
   linkSuccess.value = ''
-  linkMode.value = !linkMode.value
+  relationEditSearchQuery.value = ''
+  syncRelationDraftRows()
+  relationEditModalOpen.value = true
+}
+
+function closeRelationEditModal(): void {
+  relationEditModalOpen.value = false
+  relationEditSearchQuery.value = ''
+}
+
+function openRelationAddModal(): void {
+  panelMode.value = 'edit'
+  relationEditModalOpen.value = false
+  linkMode.value = true
+  linkError.value = ''
+  linkSuccess.value = ''
+  clearFormFields()
+  relationAddModalOpen.value = true
+  void nextTick(() => relationAddDialogRef.value?.focus())
+}
+
+function closeRelationAddModal(): void {
+  relationAddModalOpen.value = false
+  linkMode.value = false
+  clearFormFields()
+}
+
+function saveRelationDraftRowsFromModal(): void {
+  saveRelationDraftRows()
+  relationEditModalOpen.value = false
 }
 
 function submitBidirectional(): void {
@@ -290,6 +628,8 @@ function submitBidirectional(): void {
 
   emit('relationsChanged')
   clearFormFields()
+  relationAddModalOpen.value = false
+  linkMode.value = false
   linkError.value = ''
   linkSuccess.value = '双向关系已新增。'
 }
@@ -303,6 +643,7 @@ function removeRelation(relationId: string): void {
 
 watch(linkMode, (v) => {
   if (!v) {
+    relationAddModalOpen.value = false
     clearFormFields()
     linkError.value = ''
     linkSuccess.value = ''
@@ -315,12 +656,158 @@ watch(
     clearFormFields()
     linkError.value = ''
     linkSuccess.value = ''
+    panelMode.value = 'edit'
     linkMode.value = false
+    relationEditSearchQuery.value = ''
+    relationEditModalOpen.value = false
+    relationAddModalOpen.value = false
+    syncRelationDraftRows()
   }
 )
 
-watch(targetBId, () => {
+watch(relationAddTargetDropdownOpen, (open) => {
+  if (typeof document === 'undefined') return
+  document.removeEventListener('pointerdown', onDocPointerDownForRelationAddTarget, true)
+  if (open) document.addEventListener('pointerdown', onDocPointerDownForRelationAddTarget, true)
+})
+
+watch(
+  () => [relationAddModalOpen.value, relationAddTargetDropdownOpen.value] as const,
+  ([modalOpen, ddOpen]) => {
+    if (!modalOpen) {
+      relationAddTargetDropdownOpen.value = false
+      relationAddTargetQuery.value = ''
+      return
+    }
+    if (!ddOpen) return
+    void nextTick(() => positionRelationAddTargetPanel())
+  },
+)
+
+
+watch(panelMode, (mode) => {
+  linkMode.value = mode === 'add'
   linkError.value = ''
   linkSuccess.value = ''
 })
+
+watch(
+  () => props.pairCharacterId ?? '',
+  (pid) => {
+    const id = String(pid ?? '').trim()
+    if (!id || id === props.focusCharacterId) {
+      // 清空点选：恢复全量展示（保留用户手动输入的搜索词则会“锁住”过滤）
+      return
+    }
+    const name = props.characters.find((c) => c.id === id)?.name ?? ''
+    if (!name) return
+    panelMode.value = 'edit'
+    relationEditSearchQuery.value = name
+  }
+)
+
+onUnmounted(() => {
+  linkMode.value = false
+})
+
+syncRelationDraftRows()
 </script>
+
+<style scoped>
+.character-graph-relation-toolbar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.characters-graph-ui__link-mode {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.characters-graph-ui__link-head {
+  margin: 6px 0 10px;
+}
+
+.character-graph-relation-toolbar__mode-btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  border-radius: 999px;
+}
+
+.character-graph-relation-toolbar__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.chapter-hub__relation-view-row {
+  border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+  border-radius: 16px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-surface) 96%, transparent),
+    color-mix(in srgb, var(--color-surface-muted) 88%, transparent)
+  );
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.chapter-hub__relation-view-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chapter-hub__relation-view-target {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.chapter-hub__relation-view-remove {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+}
+
+.chapter-hub__relation-view-line {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub__relation-view-name {
+  color: var(--color-text);
+  font-weight: 650;
+}
+
+.chapter-hub__relation-view-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary-soft) 45%, transparent);
+  color: color-mix(in srgb, var(--color-primary) 86%, var(--color-text) 14%);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.chapter-hub__relation-add-form {
+  margin-top: 2px;
+}
+
+.chapter-hub__relation-add-empty {
+  margin: 2px 6px 6px;
+}
+</style>
+

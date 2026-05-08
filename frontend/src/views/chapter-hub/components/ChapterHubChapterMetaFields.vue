@@ -19,6 +19,16 @@
         @change="emit('notesChange', $event)"
       />
     </label>
+    <label class="chapter-hub__field">
+      <span class="chapter-hub__field-label">章节注释</span>
+      <input
+        class="chapter-hub__input"
+        :value="chapter.annotation"
+        maxlength="200"
+        placeholder="章总结（可选）"
+        @change="emit('annotationChange', $event)"
+      />
+    </label>
   </div>
 </template>
 
@@ -33,5 +43,6 @@ defineProps<{
 const emit = defineEmits<{
   titleChange: [event: Event]
   notesChange: [event: Event]
+  annotationChange: [event: Event]
 }>()
 </script>

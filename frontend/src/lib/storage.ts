@@ -1,6 +1,7 @@
 import type {
   Category,
   Character,
+  CharacterAttribute,
   Chapter,
   NewCharacterInput,
   NewChapterInput,
@@ -9,26 +10,36 @@ import type {
   NewFactionInput,
   NewNovelInput,
   NewOutlineInput,
-  NewStoryIssueInput,
+  NewOutlineStorylineInput,
   NewTimelineEventInput,
   CharacterFactionMembership,
   Faction,
+  ForeshadowPlant,
+  ForeshadowFulfillment,
+  NewForeshadowPlantInput,
+  NewForeshadowFulfillmentInput,
   Novel,
   OutlineItem,
-  StoryIssue,
+  OutlineStoryline,
+  OutlineStorylineType,
+  OutlineTension,
   TimelineEvent,
 } from '../types'
+import { normalizeCharacterAliases } from './characterLabels'
 
 const NOVELS_KEY = 'novel-writing.novels'
 const CHAPTERS_KEY = 'novel-writing.chapters'
 const OUTLINE_KEY = 'novel-writing.outline'
+const OUTLINE_STORYLINES_KEY = 'novel-writing.outline-storylines'
 const CHARACTERS_KEY = 'novel-writing.characters'
 const CHARACTER_RELATIONS_KEY = 'novel-writing.character-relations'
 const FACTIONS_KEY = 'novel-writing.factions'
 const CHARACTER_FACTION_MEMBERSHIPS_KEY = 'novel-writing.character-faction-memberships'
+const CHARACTER_LAST_CHANGED_FIELDS_KEY = 'novel-writing.character-last-changed-fields'
+const FACTION_LAST_CHANGED_FIELDS_KEY = 'novel-writing.faction-last-changed-fields'
 const CATEGORIES_KEY = 'novel-writing.categories'
-const ISSUES_KEY = 'novel-writing.issues'
 const TIMELINE_KEY = 'novel-writing.timeline-events'
+const FORESHADOWS_KEY = 'novel-writing.foreshadows'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -38,7 +49,12 @@ function uid(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
 }
 
-function normalizeCategoryIds(ids?: string[] | null): string[] {
+function emitStorageChange(): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event('novel-writing:changed'))
+}
+
+function normalizeIdList(ids?: unknown): string[] {
   if (!Array.isArray(ids)) return []
   const seen = new Set<string>()
   const out: string[] = []
@@ -49,6 +65,10 @@ function normalizeCategoryIds(ids?: string[] | null): string[] {
     out.push(id)
   }
   return out
+}
+
+export function normalizeCategoryIds(ids?: string[] | null): string[] {
+  return normalizeIdList(ids)
 }
 
 function getAllCategories(): Category[] {
@@ -179,10 +199,291 @@ function getAllChapters(): Chapter[] {
   const raw = localStorage.getItem(CHAPTERS_KEY)
   if (!raw) return []
   try {
-    return JSON.parse(raw) as Chapter[]
+    const parsed = JSON.parse(raw) as Chapter[]
+    return parsed.map((c) => ({
+      ...c,
+      notes: (c as any).notes ?? '',
+      annotation: (c as any).annotation ?? '',
+      content: (c as any).content ?? '',
+      outlineItemIds: Array.isArray((c as any).outlineItemIds) ? (c as any).outlineItemIds : [],
+      status: ((c as any).status as any) ?? 'draft',
+      createdAt: (c as any).createdAt ?? nowIso(),
+      updatedAt: (c as any).updatedAt ?? nowIso(),
+    }))
   } catch {
     return []
   }
+}
+
+function detectTextChangeWindow(oldText: string, newText: string): {
+  oldStart: number
+  oldEnd: number
+  newStart: number
+  newEnd: number
+  delta: number
+} {
+  const oldLen = oldText.length
+  const newLen = newText.length
+  let prefix = 0
+  const minLen = Math.min(oldLen, newLen)
+  while (prefix < minLen && oldText[prefix] === newText[prefix]) prefix += 1
+
+  let suffix = 0
+  while (
+    suffix < oldLen - prefix &&
+    suffix < newLen - prefix &&
+    oldText[oldLen - 1 - suffix] === newText[newLen - 1 - suffix]
+  ) {
+    suffix += 1
+  }
+
+  const oldStart = prefix
+  const oldEnd = oldLen - suffix
+  const newStart = prefix
+  const newEnd = newLen - suffix
+  return {
+    oldStart,
+    oldEnd,
+    newStart,
+    newEnd,
+    delta: (newEnd - newStart) - (oldEnd - oldStart),
+  }
+}
+
+function remapRangeAfterEdit(
+  start: number,
+  end: number,
+  win: { oldStart: number; oldEnd: number; newStart: number; newEnd: number; delta: number },
+): { start: number; end: number } {
+  const s = Math.max(0, Math.floor(start))
+  const e = Math.max(s, Math.floor(end))
+
+  // 纯插入：在范围内插入应扩展该范围；在前方插入整体右移
+  if (win.oldStart === win.oldEnd && win.newEnd > win.newStart) {
+    const addLen = win.newEnd - win.newStart
+    const p = win.oldStart
+    // 仅当插入点严格落在区间内部时才扩展；边界（p===s 或 p===e）不计入区间
+    if (p <= s) return { start: s + addLen, end: e + addLen }
+    if (p < e) return { start: s, end: e + addLen }
+    return { start: s, end: e }
+  }
+
+  const mapPos = (pos: number, edge: 'start' | 'end'): number => {
+    if (pos <= win.oldStart) return pos
+    if (pos >= win.oldEnd) return pos + win.delta
+    return edge === 'start' ? win.newStart : win.newEnd
+  }
+
+  const mappedStart = mapPos(s, 'start')
+  const mappedEnd = mapPos(e, 'end')
+  return {
+    start: Math.max(0, Math.min(mappedStart, mappedEnd)),
+    end: Math.max(0, Math.max(mappedStart, mappedEnd)),
+  }
+}
+
+function syncForeshadowsAfterChapterContentEdit(
+  chapterId: string,
+  oldContent: string,
+  newContent: string,
+): void {
+  if (oldContent === newContent) return
+  const foreshadows = getAllForeshadows()
+  if (foreshadows.length === 0) return
+  const win = detectTextChangeWindow(oldContent, newContent)
+  let changed = false
+
+  const next = foreshadows.map((plant) => {
+    let plantChanged = false
+    let nextPlant = plant
+
+    if (
+      plant.plantChapterId === chapterId &&
+      typeof plant.plantStart === 'number' &&
+      typeof plant.plantEnd === 'number' &&
+      plant.plantEnd > plant.plantStart
+    ) {
+      const mapped = remapRangeAfterEdit(plant.plantStart, plant.plantEnd, win)
+      const nextPlantText = newContent.slice(mapped.start, mapped.end)
+      nextPlant = {
+        ...nextPlant,
+        plantStart: mapped.start,
+        plantEnd: mapped.end,
+        plantText: nextPlantText,
+      }
+      plantChanged = true
+    }
+
+    const nextFulfillments = (nextPlant.fulfillments ?? []).map((ff) => {
+      if (
+        ff.fulfillChapterId !== chapterId ||
+        typeof ff.fulfillStart !== 'number' ||
+        typeof ff.fulfillEnd !== 'number' ||
+        ff.fulfillEnd <= ff.fulfillStart
+      ) {
+        return ff
+      }
+      const mapped = remapRangeAfterEdit(ff.fulfillStart, ff.fulfillEnd, win)
+      const nextText = newContent.slice(mapped.start, mapped.end)
+      plantChanged = true
+      return {
+        ...ff,
+        fulfillStart: mapped.start,
+        fulfillEnd: mapped.end,
+        fulfillText: nextText,
+      }
+    })
+
+    if (!plantChanged) return plant
+    changed = true
+    return {
+      ...nextPlant,
+      fulfillments: nextFulfillments,
+      updatedAt: nowIso(),
+    }
+  })
+
+  if (changed) saveAllForeshadows(next)
+}
+
+function normalizeAnchoredEventAfterRemap<T extends { anchorStart?: number; anchorEnd?: number }>(
+  ev: T,
+  win: { oldStart: number; oldEnd: number; newStart: number; newEnd: number; delta: number },
+): T {
+  if (typeof ev.anchorStart !== 'number') return ev
+  const start = Math.max(0, Math.floor(ev.anchorStart))
+  const endRaw = typeof ev.anchorEnd === 'number' ? Math.max(0, Math.floor(ev.anchorEnd)) : start + 1
+  const end = Math.max(start + 1, endRaw)
+  const mapped = remapRangeAfterEdit(start, end, win)
+  const nextStart = Math.max(0, Math.floor(mapped.start))
+  const nextEnd = Math.max(nextStart + 1, Math.floor(mapped.end))
+  if (nextStart === start && nextEnd === end) return ev
+  return {
+    ...(ev as any),
+    anchorStart: nextStart,
+    anchorEnd: nextEnd,
+  } as T
+}
+
+/** 章节正文变更后：重映射本章内角色/势力档案修改锚点，避免插入/删除导致锚点失效 */
+function syncEntityChangeAnchorsAfterChapterContentEdit(
+  chapterId: string,
+  oldContent: string,
+  newContent: string,
+): void {
+  if (oldContent === newContent) return
+  const chId = String(chapterId ?? '').trim()
+  if (!chId) return
+  const win = detectTextChangeWindow(oldContent, newContent)
+
+  // 角色
+  const charMap = readCharacterLastChangedMap()
+  let charChanged = false
+  for (const [id, row] of Object.entries(charMap)) {
+    const events = row?.events
+    if (!Array.isArray(events) || events.length === 0) continue
+    let touched = false
+    const nextEvents = events.map((ev) => {
+      if (String(ev.chapterId ?? '').trim() !== chId) return ev
+      if (typeof ev.anchorStart !== 'number') return ev
+      touched = true
+      return normalizeAnchoredEventAfterRemap(ev, win)
+    })
+    if (touched) {
+      charMap[id] = { events: nextEvents }
+      charChanged = true
+    }
+  }
+  if (charChanged) saveCharacterLastChangedMap(charMap)
+
+  // 势力
+  const facMap = readFactionLastChangedMap()
+  let facChanged = false
+  for (const [id, row] of Object.entries(facMap)) {
+    const events = row?.events
+    if (!Array.isArray(events) || events.length === 0) continue
+    let touched = false
+    const nextEvents = events.map((ev) => {
+      if (String(ev.chapterId ?? '').trim() !== chId) return ev
+      if (typeof ev.anchorStart !== 'number') return ev
+      touched = true
+      return normalizeAnchoredEventAfterRemap(ev, win)
+    })
+    if (touched) {
+      facMap[id] = { events: nextEvents }
+      facChanged = true
+    }
+  }
+  if (facChanged) saveFactionLastChangedMap(facMap)
+}
+
+function removeEntityChangeAnchorsForChapter(chapterId: string): void {
+  const chId = String(chapterId ?? '').trim()
+  if (!chId) return
+
+  const charMap = readCharacterLastChangedMap()
+  let charChanged = false
+  for (const [id, row] of Object.entries(charMap)) {
+    const events = row.events.filter((ev) => String(ev.chapterId ?? '').trim() !== chId)
+    if (events.length !== row.events.length) {
+      if (events.length > 0) charMap[id] = { events }
+      else delete charMap[id]
+      charChanged = true
+    }
+  }
+  if (charChanged) saveCharacterLastChangedMap(charMap)
+
+  const facMap = readFactionLastChangedMap()
+  let facChanged = false
+  for (const [id, row] of Object.entries(facMap)) {
+    const events = row.events.filter((ev) => String(ev.chapterId ?? '').trim() !== chId)
+    if (events.length !== row.events.length) {
+      if (events.length > 0) facMap[id] = { events }
+      else delete facMap[id]
+      facChanged = true
+    }
+  }
+  if (facChanged) saveFactionLastChangedMap(facMap)
+}
+
+
+/** 章节正文变更后：自动绑定角色首次出场章节（基于角色名在正文中首次出现） */
+function syncCharacterFirstAppearanceByNovel(novelId: string): void {
+  const id = String(novelId ?? '').trim()
+  if (!id) return
+  const chapters = getAllChapters()
+    .filter((c) => c.novelId === id)
+    .sort((a, b) => a.chapterNo - b.chapterNo)
+  if (chapters.length === 0) return
+
+  const allCharacters = getAllCharacters()
+  let changed = false
+  for (let i = 0; i < allCharacters.length; i++) {
+    const c = allCharacters[i]
+    if (c.novelId !== id) continue
+    const name = (c.name ?? '').trim()
+    if (!name) continue
+    let firstNo: number | null = null
+    for (const ch of chapters) {
+      if ((ch.content ?? '').includes(name)) {
+        firstNo = ch.chapterNo
+        break
+      }
+    }
+    if (firstNo == null) continue
+    const prevNo =
+      typeof c.firstAppearanceChapterNo === 'number' && c.firstAppearanceChapterNo > 0
+        ? Math.floor(c.firstAppearanceChapterNo)
+        : null
+    if (prevNo === firstNo) continue
+    allCharacters[i] = {
+      ...c,
+      firstAppearanceChapterNo: firstNo,
+      updatedAt: nowIso(),
+    }
+    changed = true
+  }
+  if (changed) saveAllCharacters(allCharacters)
 }
 
 export function createChapter(input: NewChapterInput): Chapter {
@@ -196,6 +497,7 @@ export function createChapter(input: NewChapterInput): Chapter {
     chapterNo: maxNo + 1,
     title: input.title.trim() || `第${maxNo + 1}章`,
     notes: input.notes.trim(),
+    annotation: input.annotation.trim(),
     content: '',
     outlineItemIds: [],
     status: 'draft',
@@ -212,41 +514,385 @@ export function updateChapter(partial: Pick<Chapter, 'id'> & Partial<Chapter>): 
   const idx = all.findIndex((c) => c.id === partial.id)
   if (idx < 0) return null
 
+  const prev = all[idx]
   const updated: Chapter = {
-    ...all[idx],
+    ...prev,
     ...partial,
     updatedAt: nowIso(),
   }
   all[idx] = updated
   saveAllChapters(all)
+  if (typeof partial.content === 'string') {
+    syncForeshadowsAfterChapterContentEdit(updated.id, prev.content ?? '', updated.content ?? '')
+    syncEntityChangeAnchorsAfterChapterContentEdit(updated.id, prev.content ?? '', updated.content ?? '')
+    syncCharacterFirstAppearanceByNovel(updated.novelId)
+  }
   return updated
 }
 
-/** 删除章节并按顺序重编号（同作品内 1..n） */
-export function deleteChapter(chapterId: string): boolean {
-  const all = getAllChapters()
-  const target = all.find((c) => c.id === chapterId)
-  if (!target) return false
+export type ChapterDeletePreview = {
+  chapterId: string
+  chapterNo: number
+  chapterTitle: string
+  charactersToDelete: Character[]
+  factionsToDelete: Faction[]
+  foreshadowPlantsToDelete: ForeshadowPlant[]
+  fulfillmentsToDeleteCount: number
+  chaptersToRenumberCount: number
+}
+
+function remapChapterNoAfterDelete(chapterNo: number | null | undefined, deletedNo: number): number | null {
+  if (typeof chapterNo !== 'number' || !Number.isFinite(chapterNo) || chapterNo <= 0) return null
+  if (chapterNo === deletedNo) return null
+  return chapterNo > deletedNo ? chapterNo - 1 : Math.floor(chapterNo)
+}
+
+export function getChapterDeletePreview(chapterId: string): ChapterDeletePreview | null {
+  const allChapters = getAllChapters()
+  const target = allChapters.find((c) => c.id === chapterId)
+  if (!target) return null
   const novelId = target.novelId
-  const filtered = all.filter((c) => c.id !== chapterId)
-  const novelChapters = filtered
-    .filter((c) => c.novelId === novelId)
-    .sort((a, b) => a.chapterNo - b.chapterNo)
-  novelChapters.forEach((c, i) => {
-    const j = filtered.findIndex((x) => x.id === c.id)
-    if (j >= 0) {
-      filtered[j] = { ...filtered[j], chapterNo: i + 1, updatedAt: nowIso() }
-    }
+  const deletedNo = target.chapterNo
+
+  const allCharacters = getAllCharacters().filter((c) => c.novelId === novelId)
+  const charactersToDelete = allCharacters.filter((c) => {
+    if ((c.createdInChapterId ?? '') === chapterId) return true
+    const no = c.firstAppearanceChapterNo
+    return (c.createdInChapterId == null || c.createdInChapterId === '') && no === deletedNo
   })
-  saveAllChapters(filtered)
+
+  const allFactions = getAllFactions().filter((f) => f.novelId === novelId)
+  const factionsToDelete = allFactions.filter((f) => (f.createdInChapterId ?? '') === chapterId)
+
+  const novelForeshadows = getAllForeshadows().filter((p) => p.novelId === novelId)
+  const foreshadowPlantsToDelete = novelForeshadows.filter((p) => p.plantChapterId === chapterId)
+  const deletedPlantIds = new Set(foreshadowPlantsToDelete.map((p) => p.id))
+  const fulfillmentsToDeleteCount = novelForeshadows.reduce((sum, p) => {
+    if (deletedPlantIds.has(p.id)) return sum + (p.fulfillments?.length ?? 0)
+    return sum + (p.fulfillments ?? []).filter((ff) => ff.fulfillChapterId === chapterId).length
+  }, 0)
+
+  const chaptersToRenumberCount = allChapters.filter(
+    (c) => c.novelId === novelId && c.id !== chapterId && c.chapterNo > deletedNo,
+  ).length
+
+  return {
+    chapterId,
+    chapterNo: target.chapterNo,
+    chapterTitle: target.title,
+    charactersToDelete,
+    factionsToDelete,
+    foreshadowPlantsToDelete,
+    fulfillmentsToDeleteCount,
+    chaptersToRenumberCount,
+  }
+}
+
+/** 删除章节并级联清理关联数据，然后重排后续章节号 */
+export function deleteChapter(chapterId: string): boolean {
+  const preview = getChapterDeletePreview(chapterId)
+  if (!preview) return false
+
+  const now = nowIso()
+  const target = getAllChapters().find((c) => c.id === chapterId)
+  if (!target) return false
+  removeEntityChangeAnchorsForChapter(chapterId)
+  const novelId = target.novelId
+  const deletedNo = target.chapterNo
+  const remainingChapters = getAllChapters().filter((c) => c.id !== chapterId)
+
+  const chapterById = new Map<string, Chapter>()
+  for (const ch of remainingChapters) chapterById.set(ch.id, ch)
+
+  const reindexedChapters = remainingChapters.map((c) => {
+    if (c.novelId !== novelId) return c
+    const nextNo = remapChapterNoAfterDelete(c.chapterNo, deletedNo)
+    if (nextNo == null) return c
+    if (nextNo === c.chapterNo) return c
+    return { ...c, chapterNo: nextNo, updatedAt: now }
+  })
+  saveAllChapters(reindexedChapters)
+
+  const deletedCharacterIds = new Set(preview.charactersToDelete.map((c) => c.id))
+  const deletedFactionIds = new Set(preview.factionsToDelete.map((f) => f.id))
+
+  const allCharacters = getAllCharacters()
+  const nextCharacters = allCharacters
+    .filter((c) => !deletedCharacterIds.has(c.id))
+    .map((c) => {
+      if (c.novelId !== novelId) return c
+      const mappedNo = remapChapterNoAfterDelete(c.firstAppearanceChapterNo, deletedNo)
+      if (mappedNo === c.firstAppearanceChapterNo) return c
+      return { ...c, firstAppearanceChapterNo: mappedNo, updatedAt: now }
+    })
+  saveAllCharacters(nextCharacters)
+
+  const allFactions = getAllFactions()
+  const nextFactions = allFactions.filter((f) => !deletedFactionIds.has(f.id))
+  saveAllFactions(nextFactions)
+
+  const allMems = getAllCharacterFactionMemberships()
+  const nextMems = allMems.filter(
+    (m) => !deletedCharacterIds.has(m.characterId) && !deletedFactionIds.has(m.factionId),
+  )
+  if (nextMems.length !== allMems.length) saveAllCharacterFactionMemberships(nextMems)
+
+  const allRelations = getAllCharacterRelations()
+  const nextRelations = allRelations.filter(
+    (r) => !deletedCharacterIds.has(r.fromCharacterId) && !deletedCharacterIds.has(r.toCharacterId),
+  )
+  if (nextRelations.length !== allRelations.length) saveAllCharacterRelations(nextRelations)
+
+  const allForeshadows = getAllForeshadows()
+  const nextForeshadows: ForeshadowPlant[] = []
+  for (const plant of allForeshadows) {
+    if (plant.novelId !== novelId) {
+      nextForeshadows.push(plant)
+      continue
+    }
+    if (plant.plantChapterId === chapterId) continue
+
+    const keptFulfillments = (plant.fulfillments ?? []).filter((ff) => ff.fulfillChapterId !== chapterId)
+    const mappedPlantNo = remapChapterNoAfterDelete(plant.plantChapterNo, deletedNo)
+    const plantChapter = chapterById.get(plant.plantChapterId)
+    const nextPlantNo = mappedPlantNo ?? plant.plantChapterNo
+    const nextPlantTitle = plantChapter?.title ?? plant.plantChapterTitle
+    const nextFulfillments = keptFulfillments.map((ff) => {
+      const mappedNo = remapChapterNoAfterDelete(ff.fulfillChapterNo, deletedNo)
+      const ffChapter = chapterById.get(ff.fulfillChapterId)
+      return {
+        ...ff,
+        fulfillChapterNo: mappedNo ?? ff.fulfillChapterNo,
+        fulfillChapterTitle: ffChapter?.title ?? ff.fulfillChapterTitle,
+      }
+    })
+
+    nextForeshadows.push({
+      ...plant,
+      plantChapterNo: nextPlantNo,
+      plantChapterTitle: nextPlantTitle,
+      fulfillments: nextFulfillments,
+      status: nextFulfillments.length > 0 ? 'fulfilled' : 'open',
+      updatedAt: now,
+    })
+  }
+  saveAllForeshadows(nextForeshadows)
+
+  const allTimeline = getAllTimelineEvents()
+  const nextTimeline = allTimeline.map((item) => {
+    if (item.novelId !== novelId) return item
+    const nextStart = remapChapterNoAfterDelete(item.chapterNoStart, deletedNo)
+    const nextEnd = remapChapterNoAfterDelete(item.chapterNoEnd, deletedNo)
+    if (nextStart === item.chapterNoStart && nextEnd === item.chapterNoEnd) return item
+    return { ...item, chapterNoStart: nextStart, chapterNoEnd: nextEnd, updatedAt: now }
+  })
+  saveAllTimelineEvents(nextTimeline)
+
   return true
 }
 
+function getAllOutlineStorylines(): OutlineStoryline[] {
+  const raw = localStorage.getItem(OUTLINE_STORYLINES_KEY)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((row) => row as Partial<OutlineStoryline> & Record<string, unknown>)
+      .map((row) => ({
+        id: String(row.id ?? '').trim(),
+        novelId: String(row.novelId ?? '').trim(),
+        name: String(row.name ?? '').trim(),
+        type: normalizeOutlineStorylineType(row.type),
+        color: String(row.color ?? '').trim() || outlineStorylineDefaultColor(normalizeOutlineStorylineType(row.type)),
+        description: String(row.description ?? '').trim(),
+        order: Number.isFinite(Number(row.order)) ? Number(row.order) : 0,
+        createdAt: String(row.createdAt ?? '') || nowIso(),
+        updatedAt: String(row.updatedAt ?? '') || nowIso(),
+      }))
+      .filter((s) => s.id && s.novelId && s.name)
+  } catch {
+    return []
+  }
+}
+
+function saveAllOutlineStorylines(items: OutlineStoryline[]): void {
+  localStorage.setItem(OUTLINE_STORYLINES_KEY, JSON.stringify(items))
+}
+
+function normalizeOutlineStorylineType(type?: unknown): OutlineStorylineType {
+  const value = String(type ?? '').trim()
+  if (
+    value === 'main' ||
+    value === 'subplot' ||
+    value === 'character' ||
+    value === 'romance' ||
+    value === 'antagonist' ||
+    value === 'world' ||
+    value === 'custom'
+  ) {
+    return value
+  }
+  return 'custom'
+}
+
+function outlineStorylineDefaultColor(type: OutlineStorylineType): string {
+  if (type === 'main') return '#8b5cf6'
+  if (type === 'subplot') return '#0ea5e9'
+  if (type === 'character') return '#22c55e'
+  if (type === 'romance') return '#f43f5e'
+  if (type === 'antagonist') return '#f97316'
+  if (type === 'world') return '#14b8a6'
+  return '#64748b'
+}
+
+function normalizeOutlineTension(value: unknown): OutlineTension {
+  const n = Math.round(Number(value))
+  if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) return n
+  return 3
+}
+
+function normalizeOutlineItem(row: OutlineItem | (Partial<OutlineItem> & Record<string, unknown>)): OutlineItem {
+  const now = nowIso()
+  return {
+    id: String(row.id ?? '').trim(),
+    novelId: String(row.novelId ?? '').trim(),
+    order: Number.isFinite(Number(row.order)) ? Number(row.order) : 0,
+    title: String(row.title ?? '').trim() || '未命名情节点',
+    summary: String(row.summary ?? '').trim(),
+    status: row.status === 'doing' || row.status === 'done' ? row.status : 'todo',
+    level: row.level === 'volume' || row.level === 'act' || row.level === 'chapter' || row.level === 'scene' ? row.level : 'scene',
+    goal: String(row.goal ?? '').trim(),
+    conflict: String(row.conflict ?? '').trim(),
+    twist: String(row.twist ?? '').trim(),
+    result: String(row.result ?? '').trim(),
+    suspense: String(row.suspense ?? '').trim(),
+    plotStage: row.plotStage === 'drafted' || row.plotStage === 'written' || row.plotStage === 'resolved' ? row.plotStage : 'idea',
+    storylineIds: normalizeIdList(row.storylineIds),
+    parentId: String(row.parentId ?? '').trim() || null,
+    location: String(row.location ?? '').trim(),
+    timeLabel: String(row.timeLabel ?? '').trim(),
+    povCharacterId: String(row.povCharacterId ?? '').trim() || null,
+    tension: normalizeOutlineTension(row.tension),
+    characterIds: normalizeIdList(row.characterIds),
+    factionIds: normalizeIdList(row.factionIds),
+    foreshadowIds: normalizeIdList(row.foreshadowIds),
+    issueIds: normalizeIdList(row.issueIds),
+    createdAt: String(row.createdAt ?? '') || now,
+    updatedAt: String(row.updatedAt ?? '') || now,
+  }
+}
+
+export function getOutlineStorylinesByNovelId(novelId: string): OutlineStoryline[] {
+  return getAllOutlineStorylines()
+    .filter((s) => s.novelId === novelId)
+    .sort((a, b) => a.order - b.order)
+}
+
+export function createOutlineStoryline(input: NewOutlineStorylineInput): OutlineStoryline {
+  const all = getAllOutlineStorylines()
+  const novelId = input.novelId.trim()
+  const novelItems = all.filter((s) => s.novelId === novelId)
+  const maxOrder = novelItems.reduce((max, s) => Math.max(max, s.order), 0)
+  const type = normalizeOutlineStorylineType(input.type)
+  const now = nowIso()
+  const item: OutlineStoryline = {
+    id: uid(),
+    novelId,
+    name: input.name.trim() || `故事线 ${maxOrder + 1}`,
+    type,
+    color: String(input.color ?? '').trim() || outlineStorylineDefaultColor(type),
+    description: String(input.description ?? '').trim(),
+    order: maxOrder + 1,
+    createdAt: now,
+    updatedAt: now,
+  }
+  all.push(item)
+  saveAllOutlineStorylines(all)
+  return item
+}
+
+export function updateOutlineStoryline(
+  partial: Pick<OutlineStoryline, 'id'> & Partial<OutlineStoryline>,
+): OutlineStoryline | null {
+  const all = getAllOutlineStorylines()
+  const idx = all.findIndex((s) => s.id === partial.id)
+  if (idx < 0) return null
+  const type = partial.type != null ? normalizeOutlineStorylineType(partial.type) : all[idx].type
+  const updated: OutlineStoryline = {
+    ...all[idx],
+    ...partial,
+    name: partial.name != null ? String(partial.name).trim() || all[idx].name : all[idx].name,
+    type,
+    color: partial.color != null ? String(partial.color).trim() || outlineStorylineDefaultColor(type) : all[idx].color,
+    description: partial.description != null ? String(partial.description).trim() : all[idx].description,
+    updatedAt: nowIso(),
+  }
+  all[idx] = updated
+  saveAllOutlineStorylines(all)
+  return updated
+}
+
+export function deleteOutlineStoryline(storylineId: string): boolean {
+  const all = getAllOutlineStorylines()
+  const target = all.find((s) => s.id === storylineId)
+  if (!target) return false
+  const filtered = all.filter((s) => s.id !== storylineId)
+  const novelItems = filtered
+    .filter((s) => s.novelId === target.novelId)
+    .sort((a, b) => a.order - b.order)
+  const now = nowIso()
+  novelItems.forEach((item, i) => {
+    const idx = filtered.findIndex((s) => s.id === item.id)
+    if (idx >= 0) filtered[idx] = { ...filtered[idx], order: i + 1, updatedAt: now }
+  })
+  saveAllOutlineStorylines(filtered)
+
+  const outlineItems = getAllOutlineItems()
+  const nextOutlineItems = outlineItems.map((item) => {
+    const ids = item.storylineIds ?? []
+    if (!ids.includes(storylineId)) return item
+    return {
+      ...item,
+      storylineIds: ids.filter((id) => id !== storylineId),
+      updatedAt: now,
+    }
+  })
+  saveAllOutlineItems(nextOutlineItems)
+  return true
+}
+
+export function moveOutlineStoryline(storylineId: string, direction: 'up' | 'down'): boolean {
+  const all = getAllOutlineStorylines()
+  const target = all.find((s) => s.id === storylineId)
+  if (!target) return false
+  const novelItems = all
+    .filter((s) => s.novelId === target.novelId)
+    .sort((a, b) => a.order - b.order)
+  const pos = novelItems.findIndex((s) => s.id === storylineId)
+  if (pos < 0) return false
+  const newPos = direction === 'up' ? pos - 1 : pos + 1
+  if (newPos < 0 || newPos >= novelItems.length) return false
+  const a = novelItems[pos]
+  const b = novelItems[newPos]
+  const ia = all.findIndex((x) => x.id === a.id)
+  const ib = all.findIndex((x) => x.id === b.id)
+  if (ia < 0 || ib < 0) return false
+  const now = nowIso()
+  all[ia] = { ...a, order: b.order, updatedAt: now }
+  all[ib] = { ...b, order: a.order, updatedAt: now }
+  saveAllOutlineStorylines(all)
+  return true
+}
 function getAllOutlineItems(): OutlineItem[] {
   const raw = localStorage.getItem(OUTLINE_KEY)
   if (!raw) return []
   try {
-    return JSON.parse(raw) as OutlineItem[]
+    const parsed = JSON.parse(raw) as unknown[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((row) => normalizeOutlineItem(row as Partial<OutlineItem> & Record<string, unknown>))
+      .filter((item) => item.id && item.novelId)
   } catch {
     return []
   }
@@ -274,6 +920,23 @@ export function createOutlineItem(input: NewOutlineInput): OutlineItem {
     title: input.title.trim() || `情节点 ${maxOrder + 1}`,
     summary: input.summary.trim(),
     status: 'todo',
+    level: input.level ?? 'scene',
+    goal: String(input.goal ?? '').trim(),
+    conflict: String(input.conflict ?? '').trim(),
+    twist: String(input.twist ?? '').trim(),
+    result: String(input.result ?? '').trim(),
+    suspense: String(input.suspense ?? '').trim(),
+    plotStage: input.plotStage ?? 'idea',
+    storylineIds: normalizeIdList(input.storylineIds),
+    parentId: String(input.parentId ?? '').trim() || null,
+    location: String(input.location ?? '').trim(),
+    timeLabel: String(input.timeLabel ?? '').trim(),
+    povCharacterId: String(input.povCharacterId ?? '').trim() || null,
+    tension: normalizeOutlineTension(input.tension),
+    characterIds: normalizeIdList(input.characterIds),
+    factionIds: normalizeIdList(input.factionIds),
+    foreshadowIds: normalizeIdList(input.foreshadowIds),
+    issueIds: normalizeIdList(input.issueIds),
     createdAt: now,
     updatedAt: now,
   }
@@ -292,6 +955,23 @@ export function updateOutlineItem(
   const updated: OutlineItem = {
     ...all[idx],
     ...partial,
+    storylineIds: partial.storylineIds !== undefined ? normalizeIdList(partial.storylineIds) : all[idx].storylineIds ?? [],
+    characterIds: partial.characterIds !== undefined ? normalizeIdList(partial.characterIds) : all[idx].characterIds ?? [],
+    factionIds: partial.factionIds !== undefined ? normalizeIdList(partial.factionIds) : all[idx].factionIds ?? [],
+    foreshadowIds: partial.foreshadowIds !== undefined ? normalizeIdList(partial.foreshadowIds) : all[idx].foreshadowIds ?? [],
+    issueIds: partial.issueIds !== undefined ? normalizeIdList(partial.issueIds) : all[idx].issueIds ?? [],
+    parentId: partial.parentId !== undefined ? String(partial.parentId ?? '').trim() || null : all[idx].parentId ?? null,
+    location: partial.location != null ? String(partial.location).trim() : String(all[idx].location ?? '').trim(),
+    timeLabel: partial.timeLabel != null ? String(partial.timeLabel).trim() : String(all[idx].timeLabel ?? '').trim(),
+    povCharacterId: partial.povCharacterId !== undefined ? String(partial.povCharacterId ?? '').trim() || null : all[idx].povCharacterId ?? null,
+    tension: partial.tension !== undefined ? normalizeOutlineTension(partial.tension) : normalizeOutlineTension(all[idx].tension),
+    goal: partial.goal != null ? String(partial.goal).trim() : String(all[idx].goal ?? '').trim(),
+    conflict: partial.conflict != null ? String(partial.conflict).trim() : String(all[idx].conflict ?? '').trim(),
+    twist: partial.twist != null ? String(partial.twist).trim() : String(all[idx].twist ?? '').trim(),
+    result: partial.result != null ? String(partial.result).trim() : String(all[idx].result ?? '').trim(),
+    suspense: partial.suspense != null ? String(partial.suspense).trim() : String(all[idx].suspense ?? '').trim(),
+    level: partial.level ?? all[idx].level ?? 'scene',
+    plotStage: partial.plotStage ?? all[idx].plotStage ?? 'idea',
     updatedAt: nowIso(),
   }
   all[idx] = updated
@@ -368,6 +1048,7 @@ function getAllCharacterFactionMemberships(): CharacterFactionMembership[] {
 
 function saveAllCharacterFactionMemberships(items: CharacterFactionMembership[]): void {
   localStorage.setItem(CHARACTER_FACTION_MEMBERSHIPS_KEY, JSON.stringify(items))
+  emitStorageChange()
 }
 
 export function getCharacterFactionMembershipsByNovelId(novelId: string): CharacterFactionMembership[] {
@@ -528,8 +1209,11 @@ function getAllCharacters(): Character[] {
       }
     }
     if (memChanged) saveAllCharacterFactionMemberships(mems)
-    if (charChanged) saveAllCharacters(nextChars)
-    return charChanged ? nextChars : (parsed as Character[])
+    const base = charChanged ? nextChars : (parsed as Character[])
+    const finalized = base.map((c) => ({ ...c, aliases: normalizeCharacterAliases(c.aliases) }))
+    const needAliasPersist = base.some((c) => !Array.isArray((c as Character).aliases))
+    if (charChanged || needAliasPersist) saveAllCharacters(finalized)
+    return finalized
   } catch {
     return []
   }
@@ -537,6 +1221,899 @@ function getAllCharacters(): Character[] {
 
 function saveAllCharacters(items: Character[]): void {
   localStorage.setItem(CHARACTERS_KEY, JSON.stringify(items))
+  emitStorageChange()
+}
+
+export type EntityMembershipSnapshot = {
+  id?: string
+  novelId: string
+  characterId: string
+  factionId: string
+  description: string
+}
+
+export type CharacterStateSnapshot = {
+  name: string
+  firstAppearanceChapterNo?: number | null
+  age: string
+  gender: string
+  goal: string
+  secret: string
+  arc: string
+  notes: string
+  attributes: CharacterAttribute[]
+  aliases: string[]
+  categoryIds: string[]
+  memberships: EntityMembershipSnapshot[]
+}
+
+export type FactionStateSnapshot = {
+  name: string
+  leader: string
+  notes: string
+  attributes: CharacterAttribute[]
+  categoryIds: string[]
+  memberships: EntityMembershipSnapshot[]
+}
+
+function normalizeMembershipSnapshot(raw: unknown): EntityMembershipSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+  const novelId = String(row.novelId ?? '').trim()
+  const characterId = String(row.characterId ?? '').trim()
+  const factionId = String(row.factionId ?? '').trim()
+  if (!novelId || !characterId || !factionId) return null
+  return {
+    id: String(row.id ?? '').trim() || undefined,
+    novelId,
+    characterId,
+    factionId,
+    description: String(row.description ?? '').trim(),
+  }
+}
+
+function normalizeAttributeSnapshot(raw: unknown): CharacterAttribute[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((a) => a as Record<string, unknown>)
+    .map((a) => ({
+      id: String(a.id ?? '').trim() || uid(),
+      key: String(a.key ?? '').trim(),
+      value: String(a.value ?? '').trim(),
+    }))
+    .filter((a) => a.key && a.value)
+}
+
+function normalizeCharacterStateSnapshot(raw: unknown): CharacterStateSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+  return {
+    name: String(row.name ?? '').trim(),
+    firstAppearanceChapterNo:
+      typeof row.firstAppearanceChapterNo === 'number' && row.firstAppearanceChapterNo > 0
+        ? Math.floor(row.firstAppearanceChapterNo)
+        : null,
+    age: String(row.age ?? ''),
+    gender: String(row.gender ?? ''),
+    goal: String(row.goal ?? ''),
+    secret: String(row.secret ?? ''),
+    arc: String(row.arc ?? ''),
+    notes: String(row.notes ?? ''),
+    attributes: normalizeAttributeSnapshot(row.attributes),
+    aliases: normalizeCharacterAliases(Array.isArray(row.aliases) ? row.aliases.map((x) => String(x ?? '')) : []),
+    categoryIds: normalizeCategoryIds(Array.isArray(row.categoryIds) ? row.categoryIds.map((x) => String(x ?? '')) : []),
+    memberships: Array.isArray(row.memberships)
+      ? row.memberships.map(normalizeMembershipSnapshot).filter((m): m is EntityMembershipSnapshot => !!m)
+      : [],
+  }
+}
+
+function normalizeFactionStateSnapshot(raw: unknown): FactionStateSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null
+  const row = raw as Record<string, unknown>
+  return {
+    name: String(row.name ?? '').trim(),
+    leader: String(row.leader ?? ''),
+    notes: String(row.notes ?? ''),
+    attributes: normalizeAttributeSnapshot(row.attributes),
+    categoryIds: normalizeCategoryIds(Array.isArray(row.categoryIds) ? row.categoryIds.map((x) => String(x ?? '')) : []),
+    memberships: Array.isArray(row.memberships)
+      ? row.memberships.map(normalizeMembershipSnapshot).filter((m): m is EntityMembershipSnapshot => !!m)
+      : [],
+  }
+}
+
+export function buildCharacterStateSnapshot(
+  character: Character,
+  memberships: Array<Pick<CharacterFactionMembership, 'id' | 'novelId' | 'characterId' | 'factionId' | 'description'>> = getAllCharacterFactionMemberships().filter((m) => m.characterId === character.id),
+): CharacterStateSnapshot {
+  return {
+    name: String(character.name ?? '').trim(),
+    firstAppearanceChapterNo:
+      typeof character.firstAppearanceChapterNo === 'number' && character.firstAppearanceChapterNo > 0
+        ? Math.floor(character.firstAppearanceChapterNo)
+        : null,
+    age: String(character.age ?? ''),
+    gender: String(character.gender ?? ''),
+    goal: String(character.goal ?? ''),
+    secret: String(character.secret ?? ''),
+    arc: String(character.arc ?? ''),
+    notes: String(character.notes ?? ''),
+    attributes: normalizeAttributeSnapshot(character.attributes),
+    aliases: normalizeCharacterAliases(character.aliases),
+    categoryIds: normalizeCategoryIds(character.categoryIds),
+    memberships: memberships
+      .filter((m) => m.characterId === character.id)
+      .map((m) => ({
+        id: String(m.id ?? '').trim() || undefined,
+        novelId: String(m.novelId ?? character.novelId).trim(),
+        characterId: String(m.characterId ?? character.id).trim(),
+        factionId: String(m.factionId ?? '').trim(),
+        description: String(m.description ?? '').trim(),
+      }))
+      .filter((m) => m.novelId && m.characterId && m.factionId),
+  }
+}
+
+export function buildFactionStateSnapshot(
+  faction: Faction,
+  memberships: Array<Pick<CharacterFactionMembership, 'id' | 'novelId' | 'characterId' | 'factionId' | 'description'>> = getAllCharacterFactionMemberships().filter((m) => m.factionId === faction.id),
+): FactionStateSnapshot {
+  return {
+    name: String(faction.name ?? '').trim(),
+    leader: String(faction.leader ?? ''),
+    notes: String(faction.notes ?? ''),
+    attributes: normalizeAttributeSnapshot(faction.attributes),
+    categoryIds: normalizeCategoryIds(faction.categoryIds),
+    memberships: memberships
+      .filter((m) => m.factionId === faction.id)
+      .map((m) => ({
+        id: String(m.id ?? '').trim() || undefined,
+        novelId: String(m.novelId ?? faction.novelId).trim(),
+        characterId: String(m.characterId ?? '').trim(),
+        factionId: String(m.factionId ?? faction.id).trim(),
+        description: String(m.description ?? '').trim(),
+      }))
+      .filter((m) => m.novelId && m.characterId && m.factionId),
+  }
+}
+
+function applyCharacterSnapshot(character: Character, snapshot: CharacterStateSnapshot): Character {
+  return {
+    ...character,
+    name: snapshot.name || character.name,
+    firstAppearanceChapterNo: snapshot.firstAppearanceChapterNo ?? null,
+    age: snapshot.age,
+    gender: snapshot.gender,
+    goal: snapshot.goal,
+    secret: snapshot.secret,
+    arc: snapshot.arc,
+    notes: snapshot.notes,
+    attributes: snapshot.attributes.map((a) => ({ ...a })),
+    aliases: normalizeCharacterAliases(snapshot.aliases),
+    categoryIds: normalizeCategoryIds(snapshot.categoryIds),
+  }
+}
+
+function applyFactionSnapshot(faction: Faction, snapshot: FactionStateSnapshot): Faction {
+  return {
+    ...faction,
+    name: snapshot.name || faction.name,
+    leader: snapshot.leader,
+    notes: snapshot.notes,
+    attributes: snapshot.attributes.map((a) => ({ ...a })),
+    categoryIds: normalizeCategoryIds(snapshot.categoryIds),
+  }
+}
+
+function normalizeCharacterChangeEvent(raw: unknown): CharacterChangeEvent | null {
+  if (!raw || typeof raw !== 'object') return null
+  const e = raw as Record<string, unknown>
+  const fields = Array.isArray(e.fields) ? e.fields.map((f) => String(f ?? '').trim()).filter(Boolean) : []
+  if (fields.length === 0) return null
+  return {
+    fields,
+    updatedAt: String(e.updatedAt ?? ''),
+    chapterId: String(e.chapterId ?? '').trim(),
+    anchorStart:
+      typeof e.anchorStart === 'number' ? Math.max(0, Math.floor(e.anchorStart)) : undefined,
+    anchorEnd: typeof e.anchorEnd === 'number' ? Math.max(0, Math.floor(e.anchorEnd)) : undefined,
+    fieldValues:
+      e.fieldValues && typeof e.fieldValues === 'object'
+        ? Object.fromEntries(
+            Object.entries(e.fieldValues as Record<string, unknown>).map(([k, v]) => [
+              String(k ?? '').trim(),
+              String(v ?? ''),
+            ]),
+          )
+        : {},
+    details: Array.isArray(e.details)
+      ? e.details
+          .map((d) => d as Record<string, unknown>)
+          .map((d) => ({
+            field: String(d.field ?? '').trim(),
+            location: String(d.location ?? '').trim(),
+            before: String(d.before ?? ''),
+            after: String(d.after ?? ''),
+          }))
+          .filter((d) => d.field && d.location)
+      : [],
+    beforeSnapshot: normalizeCharacterStateSnapshot(e.beforeSnapshot),
+    afterSnapshot: normalizeCharacterStateSnapshot(e.afterSnapshot),
+  }
+}
+
+function normalizeFactionChangeEvent(raw: unknown): FactionChangeEvent | null {
+  const ev = normalizeCharacterChangeEvent(raw)
+  if (!ev || !raw || typeof raw !== 'object') return ev as FactionChangeEvent | null
+  const e = raw as Record<string, unknown>
+  return {
+    ...ev,
+    beforeSnapshot: normalizeFactionStateSnapshot(e.beforeSnapshot),
+    afterSnapshot: normalizeFactionStateSnapshot(e.afterSnapshot),
+  }
+}
+export type CharacterChangeDetail = {
+  field: string
+  location: string
+  before: string
+  after: string
+}
+
+export type EntityStateSnapshot = CharacterStateSnapshot | FactionStateSnapshot
+
+export type CharacterChangeEvent = {
+  fields: string[]
+  updatedAt: string
+  chapterId?: string
+  anchorStart?: number
+  anchorEnd?: number
+  details?: CharacterChangeDetail[]
+  fieldValues?: Record<string, string>
+  beforeSnapshot?: EntityStateSnapshot | null
+  afterSnapshot?: EntityStateSnapshot | null
+}
+
+type CharacterChangeHistoryRow = {
+  events: CharacterChangeEvent[]
+}
+
+function readCharacterLastChangedMap(): Record<string, CharacterChangeHistoryRow> {
+  const raw = localStorage.getItem(CHARACTER_LAST_CHANGED_FIELDS_KEY)
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: Record<string, CharacterChangeHistoryRow> = {}
+    for (const [id, row] of Object.entries(parsed)) {
+      if (!id || !row || typeof row !== 'object') continue
+      const anyRow = row as { events?: unknown }
+      if (Array.isArray(anyRow.events)) {
+        const events = anyRow.events
+          .map(normalizeCharacterChangeEvent)
+          .filter((e): e is CharacterChangeEvent => !!e)
+        if (events.length > 0) out[id] = { events }
+        continue
+      }
+      const event = normalizeCharacterChangeEvent(row)
+      if (event) out[id] = { events: [event] }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveCharacterLastChangedMap(map: Record<string, CharacterChangeHistoryRow>): void {
+  localStorage.setItem(CHARACTER_LAST_CHANGED_FIELDS_KEY, JSON.stringify(map))
+  emitStorageChange()
+}
+
+function appendCharacterLastChangedFields(
+  characterId: string,
+  payload: {
+    fields: string[]
+    chapterId?: string
+    anchorStart?: number
+    anchorEnd?: number
+    details?: CharacterChangeDetail[]
+    fieldValues?: Record<string, string>
+    beforeSnapshot?: CharacterStateSnapshot | null
+    afterSnapshot?: CharacterStateSnapshot | null
+  },
+): void {
+  const id = String(characterId ?? '').trim()
+  if (!id || payload.fields.length === 0) return
+  const uniq = Array.from(new Set(payload.fields.map((f) => String(f ?? '').trim()).filter(Boolean)))
+  if (uniq.length === 0) return
+  const details = (payload.details ?? [])
+    .map((d) => ({
+      field: String(d.field ?? '').trim(),
+      location: String(d.location ?? '').trim(),
+      before: String(d.before ?? ''),
+      after: String(d.after ?? ''),
+    }))
+    .filter((d) => d.field && d.location)
+  const map = readCharacterLastChangedMap()
+  const current = map[id]?.events ?? []
+  const nextEvents = [
+    ...current,
+    {
+      fields: uniq,
+      updatedAt: nowIso(),
+      chapterId: String(payload.chapterId ?? '').trim(),
+      anchorStart:
+        typeof payload.anchorStart === 'number' ? Math.max(0, Math.floor(payload.anchorStart)) : undefined,
+      anchorEnd: typeof payload.anchorEnd === 'number' ? Math.max(0, Math.floor(payload.anchorEnd)) : undefined,
+      details,
+      fieldValues: payload.fieldValues ?? {},
+      beforeSnapshot: payload.beforeSnapshot ?? null,
+      afterSnapshot: payload.afterSnapshot ?? null,
+    },
+  ]
+  // 控制历史长度，避免无限增长
+  map[id] = { events: nextEvents.slice(-50) }
+  saveCharacterLastChangedMap(map)
+}
+
+function removeCharacterLastChangedFields(characterId: string): void {
+  const id = String(characterId ?? '').trim()
+  if (!id) return
+  const map = readCharacterLastChangedMap()
+  if (!(id in map)) return
+  delete map[id]
+  saveCharacterLastChangedMap(map)
+}
+
+export function getCharacterLastChangedFields(characterId: string): string[] {
+  const id = String(characterId ?? '').trim()
+  if (!id) return []
+  const row = readCharacterLastChangedMap()[id]
+  if (!row || !Array.isArray(row.events) || row.events.length === 0) return []
+  const latest = row.events[row.events.length - 1]
+  return Array.from(new Set((latest.fields ?? []).map((f) => String(f ?? '').trim()).filter(Boolean)))
+}
+
+/** 每次保存一条修改记录；tooltip 读取该角色最近一条记录 */
+export function recordCharacterChangeFields(
+  characterId: string,
+  fields: string[],
+  options?: {
+    chapterId?: string
+    anchorStart?: number
+    anchorEnd?: number
+    details?: CharacterChangeDetail[]
+    fieldValues?: Record<string, string>
+    beforeSnapshot?: CharacterStateSnapshot | null
+    afterSnapshot?: CharacterStateSnapshot | null
+  },
+): void {
+  const id = String(characterId ?? '').trim()
+  if (!id) return
+  const uniq = Array.from(new Set(fields.map((f) => String(f ?? '').trim()).filter(Boolean)))
+  if (uniq.length === 0) return
+  appendCharacterLastChangedFields(id, {
+    fields: uniq,
+    chapterId: options?.chapterId,
+    anchorStart: options?.anchorStart,
+    anchorEnd: options?.anchorEnd,
+    details: options?.details,
+    fieldValues: options?.fieldValues,
+    beforeSnapshot: options?.beforeSnapshot,
+    afterSnapshot: options?.afterSnapshot,
+  })
+}
+
+/** 兼容旧调用：记录带上下文的角色修改 */
+export function recordCharacterChangeWithContext(
+  characterId: string,
+  fields: string[],
+  chapterId: string | null,
+  fieldValues?: Record<string, string>,
+): void {
+  recordCharacterChangeFields(characterId, fields, {
+    chapterId: chapterId ?? '',
+    fieldValues: fieldValues ?? {},
+  })
+}
+
+export function getCharacterChangeHistory(characterId: string): CharacterChangeEvent[] {
+  const id = String(characterId ?? '').trim()
+  if (!id) return []
+  const row = readCharacterLastChangedMap()[id]
+  return Array.isArray(row?.events) ? row.events : []
+}
+
+/** 是否存在「在本章节记录过」的档案修改（用于写作区关系图等强调当前章有改动的角色） */
+export function hasCharacterChangeInChapter(characterId: string, chapterId: string): boolean {
+  const cid = String(characterId ?? '').trim()
+  const chId = String(chapterId ?? '').trim()
+  if (!cid || !chId) return false
+  return getCharacterChangeHistory(cid).some((e) => String(e.chapterId ?? '').trim() === chId)
+}
+
+function resolveHistoryEventForChapter(
+  history: CharacterChangeEvent[],
+  chapterId: string,
+  chapters: Chapter[],
+): CharacterChangeEvent | null {
+  if (!chapterId || history.length === 0 || chapters.length === 0) return null
+  const chapterNoMap = new Map<string, number>()
+  for (const ch of chapters) chapterNoMap.set(ch.id, ch.chapterNo)
+  const currentNo = chapterNoMap.get(chapterId)
+  if (currentNo == null) return null
+  const events = history
+    .filter((e) => String(e.chapterId ?? '').trim())
+    .map((e) => ({ ...e, chapterId: String(e.chapterId ?? '').trim() }))
+    .filter((e) => !!e.chapterId)
+    .sort((a, b) => {
+      const noA = chapterNoMap.get(a.chapterId!) ?? Number.MAX_SAFE_INTEGER
+      const noB = chapterNoMap.get(b.chapterId!) ?? Number.MAX_SAFE_INTEGER
+      if (noA !== noB) return noA - noB
+      return a.updatedAt.localeCompare(b.updatedAt)
+    })
+  if (events.length === 0) return history[history.length - 1] ?? null
+  let picked: CharacterChangeEvent | null = null
+  for (const ev of events) {
+    const evNo = chapterNoMap.get(ev.chapterId!) ?? Number.MAX_SAFE_INTEGER
+    if (evNo <= currentNo) picked = ev
+    else break
+  }
+  return picked
+}
+
+export function getCharacterChangeEventForChapter(
+  characterId: string,
+  chapterId: string,
+  chapters: Chapter[],
+): CharacterChangeEvent | null {
+  const history = getCharacterChangeHistory(characterId)
+  if (history.length === 0) return null
+  return resolveHistoryEventForChapter(history, String(chapterId ?? '').trim(), chapters)
+}
+
+export function getCharacterChangedFieldsForChapter(
+  characterId: string,
+  chapterId: string,
+  chapters: Chapter[],
+): string[] {
+  const event = getCharacterChangeEventForChapter(characterId, chapterId, chapters)
+  if (!event) return []
+  return Array.from(new Set((event.fields ?? []).map((f) => String(f ?? '').trim()).filter(Boolean)))
+}
+
+function chapterOrderMap(chapters: Chapter[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const ch of chapters) {
+    const id = String(ch.id ?? '').trim()
+    if (!id) continue
+    map.set(id, typeof ch.chapterNo === 'number' ? ch.chapterNo : Number.MAX_SAFE_INTEGER)
+  }
+  return map
+}
+
+function compareEventAnchorPosition(
+  a: { chapterId?: string; anchorStart?: number; updatedAt?: string },
+  b: { chapterId?: string; anchorStart?: number; updatedAt?: string },
+  order: Map<string, number>,
+): number {
+  const aId = String(a.chapterId ?? '').trim()
+  const bId = String(b.chapterId ?? '').trim()
+  const noA = order.get(aId) ?? Number.MAX_SAFE_INTEGER
+  const noB = order.get(bId) ?? Number.MAX_SAFE_INTEGER
+  if (noA !== noB) return noA - noB
+  const startA = typeof a.anchorStart === 'number' ? Math.max(0, Math.floor(a.anchorStart)) : Number.MAX_SAFE_INTEGER
+  const startB = typeof b.anchorStart === 'number' ? Math.max(0, Math.floor(b.anchorStart)) : Number.MAX_SAFE_INTEGER
+  if (startA !== startB) return startA - startB
+  return String(a.updatedAt ?? '').localeCompare(String(b.updatedAt ?? ''))
+}
+
+function compareTargetToEvent(
+  targetChapterId: string,
+  targetPosition: number,
+  ev: { chapterId?: string; anchorStart?: number },
+  order: Map<string, number>,
+): number {
+  const evChapterId = String(ev.chapterId ?? '').trim()
+  const targetNo = order.get(targetChapterId) ?? Number.MAX_SAFE_INTEGER
+  const evNo = order.get(evChapterId) ?? Number.MAX_SAFE_INTEGER
+  if (targetNo !== evNo) return targetNo - evNo
+  const evStart = typeof ev.anchorStart === 'number' ? Math.max(0, Math.floor(ev.anchorStart)) : Number.MAX_SAFE_INTEGER
+  return Math.max(0, Math.floor(targetPosition)) - evStart
+}
+
+function anchoredEventsForTimeline<T extends CharacterChangeEvent>(
+  events: T[],
+  chapters: Chapter[],
+): T[] {
+  const order = chapterOrderMap(chapters)
+  return events
+    .filter((e) => String(e.chapterId ?? '').trim())
+    .filter((e) => typeof e.anchorStart === 'number')
+    .filter((e) => order.has(String(e.chapterId ?? '').trim()))
+    .sort((a, b) => compareEventAnchorPosition(a, b, order))
+}
+
+export type ResolvedCharacterState = {
+  character: Character
+  snapshot: CharacterStateSnapshot
+  memberships: EntityMembershipSnapshot[]
+  event: CharacterChangeEvent | null
+}
+
+export type ResolvedFactionState = {
+  faction: Faction
+  snapshot: FactionStateSnapshot
+  memberships: EntityMembershipSnapshot[]
+  event: FactionChangeEvent | null
+}
+
+export function getCharacterStateAtPosition(
+  characterId: string,
+  chapterId: string,
+  position: number,
+  chapters: Chapter[],
+): ResolvedCharacterState | null {
+  const id = String(characterId ?? '').trim()
+  const chId = String(chapterId ?? '').trim()
+  if (!id || !chId) return null
+  const base = getAllCharacters().find((c) => c.id === id) ?? null
+  if (!base) return null
+  const currentSnapshot = buildCharacterStateSnapshot(base)
+  const events = anchoredEventsForTimeline(getCharacterChangeHistory(id), chapters)
+  const order = chapterOrderMap(chapters)
+  const eligible = events.filter((e) => compareTargetToEvent(chId, position, e, order) >= 0)
+  const picked = eligible[eligible.length - 1] ?? null
+  const first = events[0] ?? null
+  const rawSnapshot = picked?.afterSnapshot ?? (first && compareTargetToEvent(chId, position, first, order) < 0 ? first.beforeSnapshot : null)
+  const snapshot = normalizeCharacterStateSnapshot(rawSnapshot) ?? currentSnapshot
+  return {
+    character: applyCharacterSnapshot(base, snapshot),
+    snapshot,
+    memberships: snapshot.memberships.map((m) => ({ ...m })),
+    event: picked,
+  }
+}
+
+export function getFactionStateAtPosition(
+  factionId: string,
+  chapterId: string,
+  position: number,
+  chapters: Chapter[],
+): ResolvedFactionState | null {
+  const id = String(factionId ?? '').trim()
+  const chId = String(chapterId ?? '').trim()
+  if (!id || !chId) return null
+  const base = getAllFactions().find((f) => f.id === id) ?? null
+  if (!base) return null
+  const currentSnapshot = buildFactionStateSnapshot(base)
+  const events = anchoredEventsForTimeline(getFactionChangeHistory(id), chapters)
+  const order = chapterOrderMap(chapters)
+  const eligible = events.filter((e) => compareTargetToEvent(chId, position, e, order) >= 0)
+  const picked = eligible[eligible.length - 1] ?? null
+  const first = events[0] ?? null
+  const rawSnapshot = picked?.afterSnapshot ?? (first && compareTargetToEvent(chId, position, first, order) < 0 ? first.beforeSnapshot : null)
+  const snapshot = normalizeFactionStateSnapshot(rawSnapshot) ?? currentSnapshot
+  return {
+    faction: applyFactionSnapshot(base, snapshot),
+    snapshot,
+    memberships: snapshot.memberships.map((m) => ({ ...m })),
+    event: picked,
+  }
+}
+
+function addKnownLabel(out: Map<string, Set<string>>, id: string, label: unknown): void {
+  const entityId = String(id ?? '').trim()
+  const text = String(label ?? '').trim()
+  if (!entityId || !text) return
+  if (!out.has(entityId)) out.set(entityId, new Set<string>())
+  out.get(entityId)!.add(text)
+}
+
+export function getCharacterKnownLabelsByNovelId(novelId: string): Map<string, string[]> {
+  const id = String(novelId ?? '').trim()
+  const out = new Map<string, Set<string>>()
+  if (!id) return new Map()
+  for (const c of getAllCharacters().filter((x) => x.novelId === id)) {
+    addKnownLabel(out, c.id, c.name)
+    for (const alias of normalizeCharacterAliases(c.aliases)) addKnownLabel(out, c.id, alias)
+    for (const ev of getCharacterChangeHistory(c.id)) {
+      for (const snapshot of [ev.beforeSnapshot, ev.afterSnapshot]) {
+        const s = normalizeCharacterStateSnapshot(snapshot)
+        if (!s) continue
+        addKnownLabel(out, c.id, s.name)
+        for (const alias of normalizeCharacterAliases(s.aliases)) addKnownLabel(out, c.id, alias)
+      }
+    }
+  }
+  return new Map(Array.from(out.entries()).map(([entityId, labels]) => [entityId, Array.from(labels)]))
+}
+
+export function getFactionKnownLabelsByNovelId(novelId: string): Map<string, string[]> {
+  const id = String(novelId ?? '').trim()
+  const out = new Map<string, Set<string>>()
+  if (!id) return new Map()
+  for (const f of getAllFactions().filter((x) => x.novelId === id)) {
+    addKnownLabel(out, f.id, f.name)
+    for (const ev of getFactionChangeHistory(f.id)) {
+      for (const snapshot of [ev.beforeSnapshot, ev.afterSnapshot]) {
+        const s = normalizeFactionStateSnapshot(snapshot)
+        if (s) addKnownLabel(out, f.id, s.name)
+      }
+    }
+  }
+  return new Map(Array.from(out.entries()).map(([entityId, labels]) => [entityId, Array.from(labels)]))
+}
+
+export function getCharacterChangeEventForPosition(
+  characterId: string,
+  chapterId: string,
+  position: number,
+): CharacterChangeEvent | null {
+  const id = String(characterId ?? '').trim()
+  const chId = String(chapterId ?? '').trim()
+  if (!id || !chId) return null
+  const pos = Math.max(0, Math.floor(position))
+  const history = getCharacterChangeHistory(id)
+  if (history.length === 0) return null
+  const sameChapter = history
+    .filter((e) => String(e.chapterId ?? '').trim() === chId)
+    .filter((e) => typeof e.anchorStart === 'number')
+    .sort((a, b) => {
+      const sa = Math.max(0, Math.floor(a.anchorStart ?? 0))
+      const sb = Math.max(0, Math.floor(b.anchorStart ?? 0))
+      if (sa !== sb) return sa - sb
+      return a.updatedAt.localeCompare(b.updatedAt)
+    })
+  if (sameChapter.length === 0) return null
+
+  // 仅在“改动锚点覆盖到当前位置”时才算命中
+  const hits = sameChapter.filter((e) => {
+    const s = Math.max(0, Math.floor(e.anchorStart ?? 0))
+    const endRaw = typeof e.anchorEnd === 'number' ? Math.max(0, Math.floor(e.anchorEnd)) : s + 1
+    const ed = Math.max(s + 1, endRaw)
+    return pos >= s && pos < ed
+  })
+  if (hits.length === 0) return null
+  // 同一位置多次保存时，返回“最新一次”更新（即第 n 次更新）
+  return hits[hits.length - 1] ?? null
+}
+
+export function getCharacterChangedFieldsForPosition(
+  characterId: string,
+  chapterId: string,
+  position: number,
+): string[] {
+  const ev = getCharacterChangeEventForPosition(characterId, chapterId, position)
+  if (!ev) return []
+  return Array.from(new Set((ev.fields ?? []).map((f) => String(f ?? '').trim()).filter(Boolean)))
+}
+
+/** 与角色侧结构一致，便于复用解析与 UI */
+export type FactionChangeEvent = Omit<CharacterChangeEvent, 'beforeSnapshot' | 'afterSnapshot'> & {
+  beforeSnapshot?: FactionStateSnapshot | null
+  afterSnapshot?: FactionStateSnapshot | null
+}
+
+type FactionChangeHistoryRow = {
+  events: FactionChangeEvent[]
+}
+
+function readFactionLastChangedMap(): Record<string, FactionChangeHistoryRow> {
+  const raw = localStorage.getItem(FACTION_LAST_CHANGED_FIELDS_KEY)
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: Record<string, FactionChangeHistoryRow> = {}
+    for (const [id, row] of Object.entries(parsed)) {
+      if (!id || !row || typeof row !== 'object') continue
+      const anyRow = row as { events?: unknown }
+      if (Array.isArray(anyRow.events)) {
+        const events = anyRow.events
+          .map(normalizeFactionChangeEvent)
+          .filter((e): e is FactionChangeEvent => !!e)
+        if (events.length > 0) out[id] = { events }
+        continue
+      }
+      const event = normalizeFactionChangeEvent(row)
+      if (event) out[id] = { events: [event] }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveFactionLastChangedMap(map: Record<string, FactionChangeHistoryRow>): void {
+  localStorage.setItem(FACTION_LAST_CHANGED_FIELDS_KEY, JSON.stringify(map))
+  emitStorageChange()
+}
+
+function appendFactionLastChangedFields(
+  factionId: string,
+  payload: {
+    fields: string[]
+    chapterId?: string
+    anchorStart?: number
+    anchorEnd?: number
+    details?: CharacterChangeDetail[]
+    fieldValues?: Record<string, string>
+    beforeSnapshot?: FactionStateSnapshot | null
+    afterSnapshot?: FactionStateSnapshot | null
+  },
+): void {
+  const id = String(factionId ?? '').trim()
+  if (!id || payload.fields.length === 0) return
+  const uniq = Array.from(new Set(payload.fields.map((f) => String(f ?? '').trim()).filter(Boolean)))
+  if (uniq.length === 0) return
+  const details = (payload.details ?? [])
+    .map((d) => ({
+      field: String(d.field ?? '').trim(),
+      location: String(d.location ?? '').trim(),
+      before: String(d.before ?? ''),
+      after: String(d.after ?? ''),
+    }))
+    .filter((d) => d.field && d.location)
+  const map = readFactionLastChangedMap()
+  const current = map[id]?.events ?? []
+  const nextEvents = [
+    ...current,
+    {
+      fields: uniq,
+      updatedAt: nowIso(),
+      chapterId: String(payload.chapterId ?? '').trim(),
+      anchorStart:
+        typeof payload.anchorStart === 'number' ? Math.max(0, Math.floor(payload.anchorStart)) : undefined,
+      anchorEnd: typeof payload.anchorEnd === 'number' ? Math.max(0, Math.floor(payload.anchorEnd)) : undefined,
+      details,
+      fieldValues: payload.fieldValues ?? {},
+      beforeSnapshot: payload.beforeSnapshot ?? null,
+      afterSnapshot: payload.afterSnapshot ?? null,
+    },
+  ]
+  map[id] = { events: nextEvents.slice(-50) }
+  saveFactionLastChangedMap(map)
+}
+
+export function recordFactionChangeFields(
+  factionId: string,
+  fields: string[],
+  options?: {
+    chapterId?: string
+    anchorStart?: number
+    anchorEnd?: number
+    details?: CharacterChangeDetail[]
+    fieldValues?: Record<string, string>
+    beforeSnapshot?: FactionStateSnapshot | null
+    afterSnapshot?: FactionStateSnapshot | null
+  },
+): void {
+  const id = String(factionId ?? '').trim()
+  if (!id) return
+  const uniq = Array.from(new Set(fields.map((f) => String(f ?? '').trim()).filter(Boolean)))
+  if (uniq.length === 0) return
+  appendFactionLastChangedFields(id, {
+    fields: uniq,
+    chapterId: options?.chapterId,
+    anchorStart: options?.anchorStart,
+    anchorEnd: options?.anchorEnd,
+    details: options?.details,
+    fieldValues: options?.fieldValues,
+    beforeSnapshot: options?.beforeSnapshot,
+    afterSnapshot: options?.afterSnapshot,
+  })
+}
+
+export function getFactionChangeHistory(factionId: string): FactionChangeEvent[] {
+  const id = String(factionId ?? '').trim()
+  if (!id) return []
+  const row = readFactionLastChangedMap()[id]
+  return Array.isArray(row?.events) ? row.events : []
+}
+
+export function hasFactionChangeInChapter(factionId: string, chapterId: string): boolean {
+  const fid = String(factionId ?? '').trim()
+  const chId = String(chapterId ?? '').trim()
+  if (!fid || !chId) return false
+  return getFactionChangeHistory(fid).some((e) => String(e.chapterId ?? '').trim() === chId)
+}
+
+export function getFactionChangeEventForPosition(
+  factionId: string,
+  chapterId: string,
+  position: number,
+): FactionChangeEvent | null {
+  const id = String(factionId ?? '').trim()
+  const chId = String(chapterId ?? '').trim()
+  if (!id || !chId) return null
+  const pos = Math.max(0, Math.floor(position))
+  const history = getFactionChangeHistory(id)
+  if (history.length === 0) return null
+  const sameChapter = history
+    .filter((e) => String(e.chapterId ?? '').trim() === chId)
+    .filter((e) => typeof e.anchorStart === 'number')
+    .sort((a, b) => {
+      const sa = Math.max(0, Math.floor(a.anchorStart ?? 0))
+      const sb = Math.max(0, Math.floor(b.anchorStart ?? 0))
+      if (sa !== sb) return sa - sb
+      return a.updatedAt.localeCompare(b.updatedAt)
+    })
+  if (sameChapter.length === 0) return null
+
+  const hits = sameChapter.filter((e) => {
+    const s = Math.max(0, Math.floor(e.anchorStart ?? 0))
+    const endRaw = typeof e.anchorEnd === 'number' ? Math.max(0, Math.floor(e.anchorEnd)) : s + 1
+    const ed = Math.max(s + 1, endRaw)
+    return pos >= s && pos < ed
+  })
+  if (hits.length === 0) return null
+  return hits[hits.length - 1] ?? null
+}
+
+export function getFactionChangedFieldsForPosition(
+  factionId: string,
+  chapterId: string,
+  position: number,
+): string[] {
+  const ev = getFactionChangeEventForPosition(factionId, chapterId, position)
+  if (!ev) return []
+  return Array.from(new Set((ev.fields ?? []).map((f) => String(f ?? '').trim()).filter(Boolean)))
+}
+
+/** 本章正文内「带锚点」的角色/势力档案修改位置，供滚动条旁指示（与 Cursor 类似） */
+export type ChapterEditRailMarker = {
+  start: number
+  kinds: Array<'character' | 'faction'>
+}
+
+export function getEditAnchorMarkersForChapter(
+  chapterId: string,
+  characters: Character[],
+  factions: Faction[],
+): ChapterEditRailMarker[] {
+  const chId = String(chapterId ?? '').trim()
+  if (!chId) return []
+  const byStart = new Map<number, Set<'character' | 'faction'>>()
+
+  for (const c of characters) {
+    const id = String(c.id ?? '').trim()
+    if (!id) continue
+    for (const ev of getCharacterChangeHistory(id)) {
+      if (String(ev.chapterId ?? '').trim() !== chId) continue
+      if (typeof ev.anchorStart !== 'number') continue
+      const start = Math.max(0, Math.floor(ev.anchorStart))
+      if (!byStart.has(start)) byStart.set(start, new Set())
+      byStart.get(start)!.add('character')
+    }
+  }
+  for (const f of factions) {
+    const id = String(f.id ?? '').trim()
+    if (!id) continue
+    for (const ev of getFactionChangeHistory(id)) {
+      if (String(ev.chapterId ?? '').trim() !== chId) continue
+      if (typeof ev.anchorStart !== 'number') continue
+      const start = Math.max(0, Math.floor(ev.anchorStart))
+      if (!byStart.has(start)) byStart.set(start, new Set())
+      byStart.get(start)!.add('faction')
+    }
+  }
+
+  return Array.from(byStart.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([start, kinds]) => ({
+      start,
+      kinds: Array.from(kinds).sort(),
+    }))
+}
+
+function removeFactionLastChangedFields(factionId: string): void {
+  const id = String(factionId ?? '').trim()
+  if (!id) return
+  const map = readFactionLastChangedMap()
+  if (!(id in map)) return
+  delete map[id]
+  saveFactionLastChangedMap(map)
 }
 
 export function getCharactersByNovelId(novelId: string): Character[] {
@@ -627,6 +2204,7 @@ export function createCharacter(input: NewCharacterInput): Character {
     id: uid(),
     novelId: input.novelId,
     name: input.name.trim() || '未命名角色',
+    createdInChapterId: input.createdInChapterId?.trim() || null,
     firstAppearanceChapterNo,
     age: input.age.trim(),
     gender: input.gender.trim(),
@@ -635,6 +2213,7 @@ export function createCharacter(input: NewCharacterInput): Character {
     arc: input.arc.trim(),
     notes: input.notes.trim(),
     attributes: attrsIn,
+    aliases: normalizeCharacterAliases(input.aliases),
     categoryIds: normalizeCategoryIds(input.categoryIds),
     createdAt: now,
     updatedAt: now,
@@ -650,9 +2229,10 @@ export function updateCharacter(
   const all = getAllCharacters()
   const idx = all.findIndex((c) => c.id === partial.id)
   if (idx < 0) return null
+  const merged = { ...all[idx], ...partial }
   const updated: Character = {
-    ...all[idx],
-    ...partial,
+    ...merged,
+    aliases: normalizeCharacterAliases(merged.aliases),
     categoryIds:
       partial.categoryIds !== undefined
         ? normalizeCategoryIds(partial.categoryIds)
@@ -683,6 +2263,7 @@ export function deleteCharacter(characterId: string): boolean {
   const mems = getAllCharacterFactionMemberships()
   const nextMems = mems.filter((m) => m.characterId !== characterId)
   if (nextMems.length !== mems.length) saveAllCharacterFactionMemberships(nextMems)
+  removeCharacterLastChangedFields(characterId)
 
   return true
 }
@@ -703,6 +2284,7 @@ function normalizeFactionRow(raw: Record<string, unknown>): Faction {
     id: String(raw.id ?? ''),
     novelId: String(raw.novelId ?? ''),
     name: String(raw.name ?? ''),
+    createdInChapterId: String(raw.createdInChapterId ?? '').trim() || null,
     leader: String(raw.leader ?? ''),
     notes: String(raw.notes ?? ''),
     attributes: attributes.length > 0 ? attributes : undefined,
@@ -734,6 +2316,7 @@ function getAllFactions(): Faction[] {
 
 function saveAllFactions(items: Faction[]): void {
   localStorage.setItem(FACTIONS_KEY, JSON.stringify(items))
+  emitStorageChange()
 }
 
 export function getFactionsByNovelId(novelId: string): Faction[] {
@@ -755,6 +2338,7 @@ export function createFaction(input: NewFactionInput): Faction {
     id: uid(),
     novelId: input.novelId,
     name: input.name.trim() || '未命名势力',
+    createdInChapterId: input.createdInChapterId?.trim() || null,
     leader: input.leader.trim(),
     notes: input.notes.trim(),
     attributes: attrsIn.length > 0 ? attrsIn : undefined,
@@ -791,65 +2375,11 @@ export function deleteFaction(factionId: string): boolean {
   const next = all.filter((f) => f.id !== factionId)
   if (next.length === beforeLen) return false
   saveAllFactions(next)
+  removeFactionLastChangedFields(factionId)
   const mems = getAllCharacterFactionMemberships()
   const nextMems = mems.filter((m) => m.factionId !== factionId)
   if (nextMems.length !== mems.length) saveAllCharacterFactionMemberships(nextMems)
   return true
-}
-
-function getAllIssues(): StoryIssue[] {
-  const raw = localStorage.getItem(ISSUES_KEY)
-  if (!raw) return []
-  try {
-    return JSON.parse(raw) as StoryIssue[]
-  } catch {
-    return []
-  }
-}
-
-function saveAllIssues(items: StoryIssue[]): void {
-  localStorage.setItem(ISSUES_KEY, JSON.stringify(items))
-}
-
-export function getIssuesByNovelId(novelId: string): StoryIssue[] {
-  return getAllIssues()
-    .filter((i) => i.novelId === novelId)
-    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-}
-
-export function createIssue(input: NewStoryIssueInput): StoryIssue {
-  const all = getAllIssues()
-  const now = nowIso()
-  const item: StoryIssue = {
-    id: uid(),
-    novelId: input.novelId,
-    title: input.title.trim() || '未命名问题',
-    type: input.type,
-    status: 'open',
-    plan: input.plan.trim(),
-    notes: input.notes.trim(),
-    createdAt: now,
-    updatedAt: now,
-  }
-  all.push(item)
-  saveAllIssues(all)
-  return item
-}
-
-export function updateIssue(
-  partial: Pick<StoryIssue, 'id'> & Partial<StoryIssue>
-): StoryIssue | null {
-  const all = getAllIssues()
-  const idx = all.findIndex((i) => i.id === partial.id)
-  if (idx < 0) return null
-  const updated: StoryIssue = {
-    ...all[idx],
-    ...partial,
-    updatedAt: nowIso(),
-  }
-  all[idx] = updated
-  saveAllIssues(all)
-  return updated
 }
 
 function getAllTimelineEvents(): TimelineEvent[] {
@@ -997,3 +2527,152 @@ export function moveTimelineEvent(eventId: string, direction: 'up' | 'down'): bo
   return true
 }
 
+
+// ─── Foreshadow Plants ──────────────────────────────────────────────────────
+
+function getAllForeshadows(): ForeshadowPlant[] {
+  const raw = localStorage.getItem(FORESHADOWS_KEY)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown[]
+    if (!Array.isArray(parsed)) return []
+    return parsed as ForeshadowPlant[]
+  } catch {
+    return []
+  }
+}
+
+function saveAllForeshadows(items: ForeshadowPlant[]): void {
+  localStorage.setItem(FORESHADOWS_KEY, JSON.stringify(items))
+}
+
+export function getForeshadowsByNovelId(novelId: string): ForeshadowPlant[] {
+  return getAllForeshadows()
+    .filter((f) => f.novelId === novelId)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+}
+
+export function createForeshadowPlant(input: NewForeshadowPlantInput): ForeshadowPlant {
+  const all = getAllForeshadows()
+  const now = nowIso()
+  const plant: ForeshadowPlant = {
+    id: uid(),
+    novelId: input.novelId,
+    title: input.title.trim() || input.plantText.slice(0, 20) || '未命名伏笔',
+    plantText: input.plantText,
+    plantChapterId: input.plantChapterId,
+    plantChapterNo: input.plantChapterNo,
+    plantChapterTitle: input.plantChapterTitle,
+    plantStart: typeof input.plantStart === 'number' ? Math.max(0, Math.floor(input.plantStart)) : undefined,
+    plantEnd: typeof input.plantEnd === 'number' ? Math.max(0, Math.floor(input.plantEnd)) : undefined,
+    description: input.description.trim(),
+    expectedFulfillChapterNo:
+      typeof input.expectedFulfillChapterNo === 'number' && input.expectedFulfillChapterNo > 0
+        ? Math.floor(input.expectedFulfillChapterNo)
+        : null,
+    expectedFulfillNotes: input.expectedFulfillNotes?.trim() ?? '',
+    status: 'open',
+    fulfillments: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+  all.push(plant)
+  saveAllForeshadows(all)
+  return plant
+}
+
+export function addForeshadowFulfillment(
+  plantId: string,
+  input: NewForeshadowFulfillmentInput,
+): ForeshadowPlant | null {
+  const all = getAllForeshadows()
+  const idx = all.findIndex((f) => f.id === plantId)
+  if (idx < 0) return null
+  const fulfillment: ForeshadowFulfillment = {
+    id: uid(),
+    fulfillText: input.fulfillText,
+    fulfillChapterId: input.fulfillChapterId,
+    fulfillChapterNo: input.fulfillChapterNo,
+    fulfillChapterTitle: input.fulfillChapterTitle,
+    fulfillStart:
+      typeof input.fulfillStart === 'number' ? Math.max(0, Math.floor(input.fulfillStart)) : undefined,
+    fulfillEnd: typeof input.fulfillEnd === 'number' ? Math.max(0, Math.floor(input.fulfillEnd)) : undefined,
+    notes: input.notes.trim(),
+    createdAt: nowIso(),
+  }
+  const updated: ForeshadowPlant = {
+    ...all[idx],
+    fulfillments: [...(all[idx].fulfillments ?? []), fulfillment],
+    status: 'fulfilled',
+    updatedAt: nowIso(),
+  }
+  all[idx] = updated
+  saveAllForeshadows(all)
+  return updated
+}
+
+export function removeForeshadowFulfillment(
+  plantId: string,
+  fulfillmentId: string,
+): ForeshadowPlant | null {
+  const all = getAllForeshadows()
+  const idx = all.findIndex((f) => f.id === plantId)
+  if (idx < 0) return null
+  const fulfillments = (all[idx].fulfillments ?? []).filter((f) => f.id !== fulfillmentId)
+  const updated: ForeshadowPlant = {
+    ...all[idx],
+    fulfillments,
+    status: fulfillments.length === 0 ? 'open' : 'fulfilled',
+    updatedAt: nowIso(),
+  }
+  all[idx] = updated
+  saveAllForeshadows(all)
+  return updated
+}
+
+export function updateForeshadowFulfillment(
+  plantId: string,
+  fulfillmentId: string,
+  partial: Partial<Pick<ForeshadowFulfillment, 'fulfillText' | 'notes'>>,
+): ForeshadowPlant | null {
+  const all = getAllForeshadows()
+  const idx = all.findIndex((f) => f.id === plantId)
+  if (idx < 0) return null
+  const list = [...(all[idx].fulfillments ?? [])]
+  const ffIdx = list.findIndex((f) => f.id === fulfillmentId)
+  if (ffIdx < 0) return null
+  list[ffIdx] = {
+    ...list[ffIdx],
+    fulfillText:
+      partial.fulfillText !== undefined ? String(partial.fulfillText ?? '').trim() : list[ffIdx].fulfillText,
+    notes: partial.notes !== undefined ? String(partial.notes ?? '').trim() : list[ffIdx].notes,
+  }
+  const updated: ForeshadowPlant = {
+    ...all[idx],
+    fulfillments: list,
+    updatedAt: nowIso(),
+  }
+  all[idx] = updated
+  saveAllForeshadows(all)
+  return updated
+}
+
+export function updateForeshadowPlant(
+  partial: Pick<ForeshadowPlant, 'id'> & Partial<ForeshadowPlant>,
+): ForeshadowPlant | null {
+  const all = getAllForeshadows()
+  const idx = all.findIndex((f) => f.id === partial.id)
+  if (idx < 0) return null
+  const updated: ForeshadowPlant = { ...all[idx], ...partial, updatedAt: nowIso() }
+  all[idx] = updated
+  saveAllForeshadows(all)
+  return updated
+}
+
+export function deleteForeshadowPlant(plantId: string): boolean {
+  const all = getAllForeshadows()
+  const next = all.filter((f) => f.id !== plantId)
+  if (next.length === all.length) return false
+  saveAllForeshadows(next)
+  return true
+}

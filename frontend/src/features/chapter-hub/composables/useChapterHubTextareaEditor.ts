@@ -9,9 +9,10 @@ import {
   type Ref,
 } from 'vue'
 import { updateChapter } from '../../../lib/storage'
+import type { CharacterChangeEvent, FactionChangeEvent } from '../../../lib/storage'
 import { buildEntityPreviewLines } from '../entityPreview'
 import { scrollCaretIntoView } from '../caretGeometry'
-import type { Chapter, Character, Faction } from '../../../types'
+import type { Chapter, Character, Faction, ForeshadowPlant } from '../../../types'
 
 export const CHAPTER_HUB_FIRST_LINE_INDENT = '　　'
 
@@ -21,6 +22,11 @@ export function useChapterHubTextareaEditor(deps: {
   chapters: Ref<Chapter[]>
   characters: Ref<Character[]>
   factions: Ref<Faction[]>
+  foreshadows: Ref<ForeshadowPlant[]> | ComputedRef<ForeshadowPlant[]>
+  /** 角色变更历史 Map（characterId -> events[]），用于正文底色区间计算 */
+  characterHistories?: ComputedRef<Map<string, CharacterChangeEvent[]>>
+  /** 势力变更历史 Map（factionId -> events[]） */
+  factionHistories?: ComputedRef<Map<string, FactionChangeEvent[]>>
   chapterTextareaRef: Ref<HTMLTextAreaElement | null>
   nameSuggestOpen: Ref<boolean>
   nameSuggestList: Ref<Array<{ id: string; name: string; kind: 'character' | 'faction' }>>
@@ -41,6 +47,9 @@ export function useChapterHubTextareaEditor(deps: {
     chapters,
     characters,
     factions,
+    foreshadows,
+    characterHistories,
+    factionHistories,
     chapterTextareaRef,
     nameSuggestOpen,
     nameSuggestList,
@@ -62,7 +71,16 @@ export function useChapterHubTextareaEditor(deps: {
   const hasTextareaSelection = ref(false)
 
   const entityPreviewLines = computed(() =>
-    buildEntityPreviewLines(selectedChapter.value?.content ?? '', characters.value, factions.value)
+    buildEntityPreviewLines(
+      selectedChapter.value?.content ?? '',
+      characters.value,
+      factions.value,
+      foreshadows.value,
+      selectedChapter.value?.id ?? null,
+      characterHistories?.value,
+      chapters.value,
+      factionHistories?.value,
+    )
   )
 
   const shouldShowEntityOverlay = computed(
@@ -89,7 +107,28 @@ export function useChapterHubTextareaEditor(deps: {
     }
   }
 
+  function isAltEnter(e: KeyboardEvent): boolean {
+    return e.altKey && (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter')
+  }
+
+  function clearChapterTextareaInteractionState(options?: { blurTextarea?: boolean; collapseSelection?: boolean }): void {
+    const ta = chapterTextareaRef.value
+    if (ta && options?.collapseSelection) {
+      const pos = ta.selectionEnd ?? ta.value.length
+      ta.setSelectionRange(pos, pos)
+    }
+    if (ta && options?.blurTextarea && document.activeElement === ta) {
+      ta.blur()
+    }
+    isChapterTextareaFocused.value = false
+    hasTextareaSelection.value = false
+    resetNameSuggest()
+    closeCtxMenu()
+    onEntityNameLeave()
+  }
+
   watch(selectedChapterId, async () => {
+    clearChapterTextareaInteractionState({ blurTextarea: true, collapseSelection: true })
     await nextTick()
     void ensureFirstLineIndent(false)
   })
@@ -103,10 +142,7 @@ export function useChapterHubTextareaEditor(deps: {
       return
     }
 
-    if (
-      e.altKey &&
-      (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13)
-    ) {
+    if (isAltEnter(e)) {
       e.preventDefault()
       openCtxMenuFromSelection()
       return
@@ -173,10 +209,7 @@ export function useChapterHubTextareaEditor(deps: {
     if (!ta) return
     if (document.activeElement !== ta) return
 
-    if (
-      e.altKey &&
-      (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13)
-    ) {
+    if (isAltEnter(e)) {
       e.preventDefault()
       e.stopPropagation()
       openCtxMenuFromSelection()
@@ -249,11 +282,16 @@ export function useChapterHubTextareaEditor(deps: {
     updateNameSuggestion(ta)
   }
 
+  function onWindowBlur(): void {
+    clearChapterTextareaInteractionState({ blurTextarea: true, collapseSelection: true })
+  }
+
   onMounted(() => {
     if (typeof window === 'undefined') return
     window.addEventListener('scroll', onWindowViewportChange, true)
     window.addEventListener('resize', onWindowViewportChange)
     window.addEventListener('keydown', onGlobalKeydownCapture, true)
+    window.addEventListener('blur', onWindowBlur)
   })
 
   onUnmounted(() => {
@@ -261,6 +299,7 @@ export function useChapterHubTextareaEditor(deps: {
     window.removeEventListener('scroll', onWindowViewportChange, true)
     window.removeEventListener('resize', onWindowViewportChange)
     window.removeEventListener('keydown', onGlobalKeydownCapture, true)
+    window.removeEventListener('blur', onWindowBlur)
   })
 
   return {

@@ -11,8 +11,7 @@
     "strict": true,
     "types": ["node"],
     "lib": ["ES2022", "DOM"],
-    "skipLibCheck": true,
-    "baseUrl": "."
+    "skipLibCheck": true
   },
   "include": ["src"]
 }

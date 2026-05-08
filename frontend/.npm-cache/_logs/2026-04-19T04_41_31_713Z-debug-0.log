@@ -1,0 +1,283 @@
+0 verbose cli E:\Download\nodejs\node.exe E:\Download\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@10.9.2
+2 info using node@v23.9.0
+3 silly config load:file:E:\Download\nodejs\node_modules\npm\npmrc
+4 silly config load:file:D:\Novel writing\frontend\.npmrc
+5 silly config load:file:C:\Users\chiaoyunao\.npmrc
+6 silly config load:file:E:\Program Files\node-v18.18.0-win-x64\node_global\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install"
+9 verbose logfile logs-max:10 dir:D:\Novel writing\frontend\.npm-cache\_logs\2026-04-19T04_41_31_713Z-
+10 verbose logfile D:\Novel writing\frontend\.npm-cache\_logs\2026-04-19T04_41_31_713Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+13 silly idealTree buildDeps
+14 silly reify mark retired [ 'D:\\Novel writing\\frontend\\node_modules\\konva' ]
+15 silly reify moves {
+15 silly reify   'D:\\Novel writing\\frontend\\node_modules\\konva': 'D:\\Novel writing\\frontend\\node_modules\\.konva-I802WcrZ'
+15 silly reify }
+16 silly audit bulk request {
+16 silly audit   '@babel/helper-string-parser': [ '7.27.1' ],
+16 silly audit   '@babel/helper-validator-identifier': [ '7.28.5' ],
+16 silly audit   '@babel/parser': [ '7.29.2' ],
+16 silly audit   '@babel/types': [ '7.29.0' ],
+16 silly audit   '@emnapi/core': [ '1.9.1' ],
+16 silly audit   '@emnapi/runtime': [ '1.9.1' ],
+16 silly audit   '@emnapi/wasi-threads': [ '1.2.0' ],
+16 silly audit   '@jridgewell/sourcemap-codec': [ '1.5.5' ],
+16 silly audit   '@napi-rs/wasm-runtime': [ '1.1.2' ],
+16 silly audit   '@oxc-project/types': [ '0.122.0' ],
+16 silly audit   '@rolldown/binding-android-arm64': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-darwin-arm64': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-darwin-x64': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-freebsd-x64': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-linux-arm-gnueabihf': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-linux-arm64-gnu': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-linux-arm64-musl': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-linux-ppc64-gnu': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-linux-s390x-gnu': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-linux-x64-gnu': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-linux-x64-musl': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-openharmony-arm64': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-wasm32-wasi': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-win32-arm64-msvc': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/binding-win32-x64-msvc': [ '1.0.0-rc.12' ],
+16 silly audit   '@rolldown/pluginutils': [ '1.0.0-rc.2', '1.0.0-rc.12' ],
+16 silly audit   '@tybys/wasm-util': [ '0.10.1' ],
+16 silly audit   '@types/node': [ '25.5.0' ],
+16 silly audit   '@vitejs/plugin-vue': [ '6.0.5' ],
+16 silly audit   '@vue/compiler-core': [ '3.5.31' ],
+16 silly audit   '@vue/compiler-dom': [ '3.5.31' ],
+16 silly audit   '@vue/compiler-sfc': [ '3.5.31' ],
+16 silly audit   '@vue/compiler-ssr': [ '3.5.31' ],
+16 silly audit   '@vue/devtools-api': [ '6.6.4' ],
+16 silly audit   '@vue/reactivity': [ '3.5.31' ],
+16 silly audit   '@vue/runtime-core': [ '3.5.31' ],
+16 silly audit   '@vue/runtime-dom': [ '3.5.31' ],
+16 silly audit   '@vue/server-renderer': [ '3.5.31' ],
+16 silly audit   '@vue/shared': [ '3.5.31' ],
+16 silly audit   csstype: [ '3.2.3' ],
+16 silly audit   'detect-libc': [ '2.1.2' ],
+16 silly audit   entities: [ '7.0.1' ],
+16 silly audit   'estree-walker': [ '2.0.2' ],
+16 silly audit   fdir: [ '6.5.0' ],
+16 silly audit   fsevents: [ '2.3.3' ],
+16 silly audit   lightningcss: [ '1.32.0' ],
+16 silly audit   'lightningcss-android-arm64': [ '1.32.0' ],
+16 silly audit   'lightningcss-darwin-arm64': [ '1.32.0' ],
+16 silly audit   'lightningcss-darwin-x64': [ '1.32.0' ],
+16 silly audit   'lightningcss-freebsd-x64': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-arm-gnueabihf': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-arm64-gnu': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-arm64-musl': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-x64-gnu': [ '1.32.0' ],
+16 silly audit   'lightningcss-linux-x64-musl': [ '1.32.0' ],
+16 silly audit   'lightningcss-win32-arm64-msvc': [ '1.32.0' ],
+16 silly audit   'lightningcss-win32-x64-msvc': [ '1.32.0' ],
+16 silly audit   'magic-string': [ '0.30.21' ],
+16 silly audit   nanoid: [ '3.3.11' ],
+16 silly audit   picocolors: [ '1.1.1' ],
+16 silly audit   picomatch: [ '4.0.4' ],
+16 silly audit   postcss: [ '8.5.8' ],
+16 silly audit   rolldown: [ '1.0.0-rc.12' ],
+16 silly audit   'source-map-js': [ '1.2.1' ],
+16 silly audit   three: [ '0.183.2' ],
+16 silly audit   tinyglobby: [ '0.2.15' ],
+16 silly audit   tslib: [ '2.8.1' ],
+16 silly audit   typescript: [ '6.0.2' ],
+16 silly audit   'undici-types': [ '7.18.2' ],
+16 silly audit   vite: [ '8.0.3' ],
+16 silly audit   vue: [ '3.5.31' ],
+16 silly audit   'vue-router': [ '4.6.4' ],
+16 silly audit   yaml: [ '2.8.3' ]
+16 silly audit }
+17 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-win32-arm64-msvc
+18 silly reify mark deleted [
+18 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-win32-arm64-msvc'
+18 silly reify ]
+19 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-linux-x64-musl
+20 silly reify mark deleted [
+20 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-linux-x64-musl'
+20 silly reify ]
+21 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-linux-x64-gnu
+22 silly reify mark deleted [
+22 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-linux-x64-gnu'
+22 silly reify ]
+23 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-linux-arm64-musl
+24 silly reify mark deleted [
+24 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-linux-arm64-musl'
+24 silly reify ]
+25 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-linux-arm64-gnu
+26 silly reify mark deleted [
+26 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-linux-arm64-gnu'
+26 silly reify ]
+27 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-linux-arm-gnueabihf
+28 silly reify mark deleted [
+28 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-linux-arm-gnueabihf'
+28 silly reify ]
+29 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-freebsd-x64
+30 silly reify mark deleted [
+30 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-freebsd-x64'
+30 silly reify ]
+31 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-darwin-x64
+32 silly reify mark deleted [
+32 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-darwin-x64'
+32 silly reify ]
+33 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-darwin-arm64
+34 silly reify mark deleted [
+34 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-darwin-arm64'
+34 silly reify ]
+35 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\lightningcss-android-arm64
+36 silly reify mark deleted [
+36 silly reify   'D:\\Novel writing\\frontend\\node_modules\\lightningcss-android-arm64'
+36 silly reify ]
+37 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\fsevents
+38 silly reify mark deleted [ 'D:\\Novel writing\\frontend\\node_modules\\fsevents' ]
+39 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-win32-arm64-msvc
+40 silly reify mark deleted [
+40 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-win32-arm64-msvc'
+40 silly reify ]
+41 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-wasm32-wasi
+42 silly reify mark deleted [
+42 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-wasm32-wasi'
+42 silly reify ]
+43 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@napi-rs\wasm-runtime
+44 silly reify mark deleted [ 'D:\\Novel writing\\frontend\\node_modules\\@napi-rs\\wasm-runtime' ]
+45 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@emnapi\core
+46 silly reify mark deleted [ 'D:\\Novel writing\\frontend\\node_modules\\@emnapi\\core' ]
+47 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@emnapi\runtime
+48 silly reify mark deleted [ 'D:\\Novel writing\\frontend\\node_modules\\@emnapi\\runtime' ]
+49 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@tybys\wasm-util
+50 silly reify mark deleted [ 'D:\\Novel writing\\frontend\\node_modules\\@tybys\\wasm-util' ]
+51 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@emnapi\wasi-threads
+52 silly reify mark deleted [ 'D:\\Novel writing\\frontend\\node_modules\\@emnapi\\wasi-threads' ]
+53 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\tslib
+54 silly reify mark deleted [ 'D:\\Novel writing\\frontend\\node_modules\\tslib' ]
+55 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-openharmony-arm64
+56 silly reify mark deleted [
+56 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-openharmony-arm64'
+56 silly reify ]
+57 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-linux-x64-musl
+58 silly reify mark deleted [
+58 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-linux-x64-musl'
+58 silly reify ]
+59 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-linux-x64-gnu
+60 silly reify mark deleted [
+60 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-linux-x64-gnu'
+60 silly reify ]
+61 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-linux-s390x-gnu
+62 silly reify mark deleted [
+62 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-linux-s390x-gnu'
+62 silly reify ]
+63 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-linux-ppc64-gnu
+64 silly reify mark deleted [
+64 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-linux-ppc64-gnu'
+64 silly reify ]
+65 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-linux-arm64-musl
+66 silly reify mark deleted [
+66 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-linux-arm64-musl'
+66 silly reify ]
+67 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-linux-arm64-gnu
+68 silly reify mark deleted [
+68 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-linux-arm64-gnu'
+68 silly reify ]
+69 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-linux-arm-gnueabihf
+70 silly reify mark deleted [
+70 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-linux-arm-gnueabihf'
+70 silly reify ]
+71 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-freebsd-x64
+72 silly reify mark deleted [
+72 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-freebsd-x64'
+72 silly reify ]
+73 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-darwin-x64
+74 silly reify mark deleted [
+74 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-darwin-x64'
+74 silly reify ]
+75 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-darwin-arm64
+76 silly reify mark deleted [
+76 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-darwin-arm64'
+76 silly reify ]
+77 verbose reify failed optional dependency D:\Novel writing\frontend\node_modules\@rolldown\binding-android-arm64
+78 silly reify mark deleted [
+78 silly reify   'D:\\Novel writing\\frontend\\node_modules\\@rolldown\\binding-android-arm64'
+78 silly reify ]
+79 http cache tslib@https://registry.npmmirror.com/tslib/-/tslib-2.8.1.tgz 0ms (cache hit)
+80 http cache @tybys/wasm-util@https://registry.npmmirror.com/@tybys/wasm-util/-/wasm-util-0.10.1.tgz 0ms (cache hit)
+81 http cache @napi-rs/wasm-runtime@https://registry.npmmirror.com/@napi-rs/wasm-runtime/-/wasm-runtime-1.1.2.tgz 0ms (cache hit)
+82 http cache @emnapi/runtime@https://registry.npmmirror.com/@emnapi/runtime/-/runtime-1.9.1.tgz 0ms (cache hit)
+83 http cache @emnapi/wasi-threads@https://registry.npmmirror.com/@emnapi/wasi-threads/-/wasi-threads-1.2.0.tgz 0ms (cache hit)
+84 http cache @emnapi/core@https://registry.npmmirror.com/@emnapi/core/-/core-1.9.1.tgz 0ms (cache hit)
+85 http fetch POST 404 https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk 333ms (cache skip)
+86 silly audit bulk request failed [object Object]
+87 http fetch POST 404 https://registry.npmmirror.com/-/npm/v1/security/audits/quick 62ms (cache skip)
+88 verbose audit error HttpErrorGeneral: 404 Not Found - POST https://registry.npmmirror.com/-/npm/v1/security/audits/quick - [NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet
+88 verbose audit error     at E:\Download\nodejs\node_modules\npm\node_modules\npm-registry-fetch\lib\check-response.js:103:15
+88 verbose audit error     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+88 verbose audit error     at async [getReport] (E:\Download\nodejs\node_modules\npm\node_modules\@npmcli\arborist\lib\audit-report.js:336:21)
+88 verbose audit error     at async AuditReport.run (E:\Download\nodejs\node_modules\npm\node_modules\@npmcli\arborist\lib\audit-report.js:106:19)
+88 verbose audit error     at async Arborist.reify (E:\Download\nodejs\node_modules\npm\node_modules\@npmcli\arborist\lib\arborist\reify.js:268:24)
+88 verbose audit error     at async Install.exec (E:\Download\nodejs\node_modules\npm\lib\commands\install.js:150:5)
+88 verbose audit error     at async Npm.exec (E:\Download\nodejs\node_modules\npm\lib\npm.js:207:9)
+88 verbose audit error     at async module.exports (E:\Download\nodejs\node_modules\npm\lib\cli\entry.js:74:5) {
+88 verbose audit error   headers: [Object: null prototype] {
+88 verbose audit error     server: [ 'Tengine' ],
+88 verbose audit error     date: [ 'Sun, 19 Apr 2026 04:41:33 GMT' ],
+88 verbose audit error     'content-type': [ 'application/json' ],
+88 verbose audit error     'transfer-encoding': [ 'chunked' ],
+88 verbose audit error     connection: [ 'keep-alive' ],
+88 verbose audit error     'strict-transport-security': [ 'max-age=5184000' ],
+88 verbose audit error     via: [ 'kunlun16.cn5230[,404666]' ],
+88 verbose audit error     'timing-allow-origin': [ '*' ],
+88 verbose audit error     eagleid: [ '6f30472d17765736933005953e' ],
+88 verbose audit error     'x-fetch-attempts': [ '1' ],
+88 verbose audit error     'x-local-cache-status': [ 'skip' ]
+88 verbose audit error   },
+88 verbose audit error   statusCode: 404,
+88 verbose audit error   code: 'E404',
+88 verbose audit error   method: 'POST',
+88 verbose audit error   uri: 'https://registry.npmmirror.com/-/npm/v1/security/audits/quick',
+88 verbose audit error   body: {
+88 verbose audit error     error: '[NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet'
+88 verbose audit error   },
+88 verbose audit error   pkgid: undefined
+88 verbose audit error }
+89 silly audit error [object Object]
+90 silly audit report null
+91 silly ADD
+92 silly ADD
+93 silly ADD
+94 silly ADD
+95 silly ADD
+96 silly ADD
+97 silly ADD
+98 silly ADD
+99 silly ADD
+100 silly ADD
+101 silly ADD
+102 silly ADD
+103 silly ADD
+104 silly ADD
+105 silly ADD
+106 silly ADD
+107 silly ADD
+108 silly ADD
+109 silly ADD
+110 silly ADD
+111 silly ADD
+112 silly ADD
+113 silly ADD
+114 silly ADD
+115 silly ADD
+116 silly ADD
+117 silly ADD
+118 silly ADD
+119 silly ADD
+120 silly ADD
+121 silly ADD
+122 silly REMOVE node_modules/konva
+123 verbose cwd D:\Novel writing\frontend
+124 verbose os Windows_NT 10.0.26100
+125 verbose node v23.9.0
+126 verbose npm  v10.9.2
+127 verbose exit 0
+128 info ok

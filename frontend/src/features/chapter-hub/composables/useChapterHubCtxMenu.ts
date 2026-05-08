@@ -14,6 +14,7 @@ import {
   resolveFactionCoveringSelection,
   trimSelectionRange,
 } from '../entitySelectionResolve'
+import { findCharacterByLabel, someCharacterHasLabel } from '../../../lib/characterLabels'
 import type { Character, CharacterFactionMembership, Faction, Novel } from '../../../types'
 
 export function useChapterHubCtxMenu(deps: {
@@ -24,9 +25,23 @@ export function useChapterHubCtxMenu(deps: {
   factions: Ref<Faction[]>
   characterFactionMemberships: Ref<CharacterFactionMembership[]>
   chapterTextareaRef: Ref<HTMLTextAreaElement | null>
+  /** 伏笔弹窗打开时禁止再打开选区菜单（避免 setTimeout(0) 在 close 之后把菜单又打开） */
+  foreshadowModalOpen?: Ref<boolean>
 }) {
-  const { novelId, novel, selectedChapter, characters, factions, characterFactionMemberships, chapterTextareaRef } =
-    deps
+  const {
+    novelId,
+    novel,
+    selectedChapter,
+    characters,
+    factions,
+    characterFactionMemberships,
+    chapterTextareaRef,
+    foreshadowModalOpen,
+  } = deps
+
+  function isForeshadowModalBlockingCtxMenu(): boolean {
+    return foreshadowModalOpen?.value === true
+  }
 
   const ctxMenuOpen = ref(false)
   const ctxMenuX = ref(0)
@@ -42,7 +57,17 @@ export function useChapterHubCtxMenu(deps: {
     ctxMenuRange.value = null
   }
 
+  function collapseSelectionAndBlurTextarea(): void {
+    const ta = chapterTextareaRef.value
+    if (!ta) return
+    const pos = ta.selectionEnd ?? ta.value.length
+    ta.setSelectionRange(pos, pos)
+    // “添加为角色/势力”完成后立即退出正文编辑态，避免菜单被选区回弹重新打开
+    ta.blur()
+  }
+
   function openCtxMenuForSelection(selStart: number, selEnd: number): void {
+    if (isForeshadowModalBlockingCtxMenu()) return
     const ta = chapterTextareaRef.value
     if (!ta) return
 
@@ -81,6 +106,7 @@ export function useChapterHubCtxMenu(deps: {
   }
 
   function openCtxMenuAtPoint(selStart: number, selEnd: number, x0: number, y0: number): void {
+    if (isForeshadowModalBlockingCtxMenu()) return
     const ta = chapterTextareaRef.value
     if (!ta) return
 
@@ -178,6 +204,7 @@ export function useChapterHubCtxMenu(deps: {
     createCharacter({
       novelId: novel.value.id,
       name,
+      createdInChapterId: selectedChapter.value?.id ?? null,
       firstAppearanceChapterNo: selectedChapter.value?.chapterNo ?? null,
       age: '',
       gender: '',
@@ -188,6 +215,7 @@ export function useChapterHubCtxMenu(deps: {
     })
     characters.value = getCharactersByNovelId(novelId.value)
     closeCtxMenu()
+    window.setTimeout(collapseSelectionAndBlurTextarea, 0)
   }
 
   function addSelectionAsFaction(): void {
@@ -211,7 +239,7 @@ export function useChapterHubCtxMenu(deps: {
       }
     }
 
-    const isCharacter = characters.value.some((c) => c.name.trim() === name)
+    const isCharacter = someCharacterHasLabel(characters.value, name)
     if (isCharacter) {
       ctxMenuNotice.value = '该名称已是角色，不能创建为势力'
       return
@@ -226,11 +254,13 @@ export function useChapterHubCtxMenu(deps: {
     createFaction({
       novelId: novel.value.id,
       name,
+      createdInChapterId: selectedChapter.value?.id ?? null,
       leader: '',
       notes: '',
     })
     factions.value = getFactionsByNovelId(novelId.value)
     closeCtxMenu()
+    window.setTimeout(collapseSelectionAndBlurTextarea, 0)
   }
 
   const ctxMenuSelectedCharacter = computed(() => {
@@ -242,7 +272,7 @@ export function useChapterHubCtxMenu(deps: {
     }
     const name = ctxMenuSelection.value.trim()
     if (!name) return null
-    return characters.value.find((c) => c.name.trim() === name) ?? null
+    return findCharacterByLabel(characters.value, name)
   })
 
   const ctxMenuSelectedFaction = computed(() => {
@@ -281,7 +311,7 @@ export function useChapterHubCtxMenu(deps: {
     }
     const name = ctxMenuSelection.value.trim()
     if (!name) return true
-    return !characters.value.some((c) => c.name.trim() === name)
+    return !someCharacterHasLabel(characters.value, name)
   })
 
   function ctxMenuFactionIsCurrent(factionId: string): boolean {
@@ -321,6 +351,7 @@ export function useChapterHubCtxMenu(deps: {
     ctxMenuX,
     ctxMenuY,
     ctxMenuSelection,
+    ctxMenuRange,
     ctxMenuNotice,
     ctxMenuSelectedCharacter,
     ctxMenuSelectedFaction,
