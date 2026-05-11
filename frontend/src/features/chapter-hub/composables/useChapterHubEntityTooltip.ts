@@ -4,7 +4,7 @@ import {
   getFactionStateAtPosition,
   type EntityMembershipSnapshot,
 } from '../../../lib/storage'
-import type { Category, Chapter, Character, Faction } from '../../../types'
+import type { Category, Chapter, Character, Faction, Item } from '../../../types'
 
 export type FactionTooltipMemberRow = {
   name: string
@@ -19,14 +19,16 @@ export function useChapterHubEntityTooltip(deps: {
   factions: Ref<Faction[]>
   categories: Ref<Category[]>
   characters: Ref<Character[]>
+  items: Ref<Item[]>
   chapters: Ref<Chapter[]>
   currentChapterId: Ref<string>
 }) {
-  const { factions, categories, characters, chapters, currentChapterId } = deps
+  const { factions, categories, characters, items, chapters, currentChapterId } = deps
 
   const entityTooltipOpen = ref(false)
   const entityTooltipCharacter = ref<Character | null>(null)
   const entityTooltipFaction = ref<Faction | null>(null)
+  const entityTooltipItem = ref<Item | null>(null)
   const entityTooltipAnchorRect = ref<DOMRect | null>(null)
   const entityTooltipTextRange = ref<{ start: number; end: number } | null>(null)
   const entityTooltipCharacterMemberships = ref<EntityMembershipSnapshot[]>([])
@@ -86,6 +88,40 @@ export function useChapterHubEntityTooltip(deps: {
       .filter((name) => name.trim())
   })
 
+  const entityTooltipCharacterHeldItemLines = computed(() => {
+    const c = entityTooltipCharacter.value
+    if (!c) return [] as string[]
+    return items.value
+      .filter((item) => item.ownerType === 'character' && item.ownerId === c.id)
+      .map((item) => item.name)
+      .filter((name) => name.trim())
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans'))
+  })
+
+  const entityTooltipFactionHeldItemLines = computed(() => {
+    const f = entityTooltipFaction.value
+    if (!f) return [] as string[]
+    return items.value
+      .filter((item) => item.ownerType === 'faction' && item.ownerId === f.id)
+      .map((item) => item.name)
+      .filter((name) => name.trim())
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans'))
+  })
+
+  const entityTooltipItemOwnerLabel = computed(() => {
+    const item = entityTooltipItem.value
+    if (!item) return ''
+    if (item.ownerType === 'character' && item.ownerId) {
+      const character = characters.value.find((c) => c.id === item.ownerId)
+      return character ? `角色：${character.name}` : '未绑定'
+    }
+    if (item.ownerType === 'faction' && item.ownerId) {
+      const faction = factions.value.find((f) => f.id === item.ownerId)
+      return faction ? `势力：${faction.name}` : '未绑定'
+    }
+    return '未绑定'
+  })
+
   /** 势力悬停：成员总数 + 仅前 N 条（见 FACTION_TOOLTIP_MEMBER_LIMIT） */
   const entityTooltipFactionMembers = computed((): { total: number; rows: FactionTooltipMemberRow[] } => {
     const f = entityTooltipFaction.value
@@ -116,6 +152,7 @@ export function useChapterHubEntityTooltip(deps: {
           ? getCharacterStateAtPosition(c.id, currentChapterId.value, textRange.start, chapters.value)
           : null
       entityTooltipFaction.value = null
+      entityTooltipItem.value = null
       entityTooltipFactionMemberships.value = []
       entityTooltipCharacter.value = resolved?.character ?? c
       entityTooltipCharacterMemberships.value = resolved?.memberships ?? []
@@ -144,9 +181,35 @@ export function useChapterHubEntityTooltip(deps: {
           ? getFactionStateAtPosition(f.id, currentChapterId.value, textRange.start, chapters.value)
           : null
       entityTooltipCharacter.value = null
+      entityTooltipItem.value = null
       entityTooltipCharacterMemberships.value = []
       entityTooltipFaction.value = resolved?.faction ?? f
       entityTooltipFactionMemberships.value = resolved?.memberships ?? []
+      entityTooltipOpen.value = true
+      entityTooltipAnchorRect.value = anchorRect
+      entityTooltipTextRange.value = textRange
+      entityTooltipX.value = e.clientX
+      entityTooltipY.value = e.clientY
+    }, 140)
+  }
+
+  function onItemNameEnter(
+    e: MouseEvent,
+    item: Item,
+    anchorRect: DOMRect | null,
+    textRange: { start: number; end: number } | null = null,
+  ): void {
+    if (openTimer) clearTimeout(openTimer)
+    if (closeTimer) {
+      clearTimeout(closeTimer)
+      closeTimer = null
+    }
+    openTimer = window.setTimeout(() => {
+      entityTooltipCharacter.value = null
+      entityTooltipCharacterMemberships.value = []
+      entityTooltipFaction.value = null
+      entityTooltipFactionMemberships.value = []
+      entityTooltipItem.value = items.value.find((x) => x.id === item.id) ?? item
       entityTooltipOpen.value = true
       entityTooltipAnchorRect.value = anchorRect
       entityTooltipTextRange.value = textRange
@@ -166,6 +229,7 @@ export function useChapterHubEntityTooltip(deps: {
       entityTooltipOpen.value = false
       entityTooltipCharacter.value = null
       entityTooltipFaction.value = null
+      entityTooltipItem.value = null
       entityTooltipCharacterMemberships.value = []
       entityTooltipFactionMemberships.value = []
       entityTooltipAnchorRect.value = null
@@ -183,16 +247,21 @@ export function useChapterHubEntityTooltip(deps: {
     entityTooltipOpen,
     entityTooltipCharacter,
     entityTooltipFaction,
+    entityTooltipItem,
+    entityTooltipItemOwnerLabel,
     entityTooltipAnchorRect,
     entityTooltipTextRange,
     entityTooltipX,
     entityTooltipY,
     entityTooltipCharacterFactionLines,
     entityTooltipCharacterCategoryLines,
+    entityTooltipCharacterHeldItemLines,
     entityTooltipFactionCategoryLines,
+    entityTooltipFactionHeldItemLines,
     entityTooltipFactionMembers,
     onEntityNameEnter,
     onFactionNameEnter,
+    onItemNameEnter,
     onEntityNameLeave,
   }
 }

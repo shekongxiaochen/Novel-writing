@@ -3,9 +3,9 @@ import { updateChapter } from '../../../lib/storage'
 import { characterMatchLabels } from '../../../lib/characterLabels'
 import { getCaretPixelOffset, scrollCaretIntoView } from '../caretGeometry'
 import { getTypingPrefixInfo, resolveNamePrefix } from '../nameSuggestUtils'
-import type { Chapter, Character, Faction } from '../../../types'
+import type { Chapter, Character, Faction, Item } from '../../../types'
 
-type NameSuggestRow = { id: string; name: string; kind: 'character' | 'faction' }
+type NameSuggestRow = { id: string; name: string; kind: 'character' | 'faction' | 'item' }
 
 function sortNameSuggestRows(rows: NameSuggestRow[]): NameSuggestRow[] {
   return [...rows].sort((a, b) => {
@@ -18,11 +18,12 @@ function sortNameSuggestRows(rows: NameSuggestRow[]): NameSuggestRow[] {
 export function useChapterHubNameSuggest(deps: {
   characters: Ref<Character[]>
   factions: Ref<Faction[]>
+  items: Ref<Item[]>
   selectedChapter: ComputedRef<Chapter | null>
   chapters: Ref<Chapter[]>
   chapterTextareaRef: Ref<HTMLTextAreaElement | null>
 }) {
-  const { characters, factions, selectedChapter, chapters, chapterTextareaRef } = deps
+  const { characters, factions, items, selectedChapter, chapters, chapterTextareaRef } = deps
 
   const nameSuggestOpen = ref(false)
   const nameSuggestList = ref<NameSuggestRow[]>([])
@@ -59,7 +60,8 @@ export function useChapterHubNameSuggest(deps: {
 
     const characterNames = characters.value.flatMap((c) => characterMatchLabels(c)).filter(Boolean)
     const factionNames = factions.value.map((f) => f.name).filter(Boolean)
-    const allNames = [...characterNames, ...factionNames]
+    const itemNames = items.value.map((item) => item.name).filter(Boolean)
+    const allNames = [...characterNames, ...factionNames, ...itemNames]
     const resolved = prefixRaw ? resolveNamePrefix(prefixRaw, allNames) : null
     const prefix = resolved?.prefix ?? prefixRaw
 
@@ -83,6 +85,11 @@ export function useChapterHubNameSuggest(deps: {
         startsWithMatches.push({ id: f.id, name: f.name, kind: 'faction' })
       }
     }
+    for (const item of items.value) {
+      if (item.name && item.name.toLowerCase().startsWith(normalizedPrefix)) {
+        startsWithMatches.push({ id: `item:${item.id}`, name: item.name, kind: 'item' })
+      }
+    }
 
     const includeMatches: NameSuggestRow[] = []
     for (const c of characters.value) {
@@ -98,6 +105,11 @@ export function useChapterHubNameSuggest(deps: {
         includeMatches.push({ id: f.id, name: f.name, kind: 'faction' })
       }
     }
+    for (const item of items.value) {
+      if (item.name && !item.name.toLowerCase().startsWith(normalizedPrefix) && item.name.includes(prefix)) {
+        includeMatches.push({ id: `item:${item.id}`, name: item.name, kind: 'item' })
+      }
+    }
 
     const allCharacterRows: NameSuggestRow[] = characters.value.flatMap((c) =>
       characterMatchLabels(c).map((label) => ({
@@ -111,9 +123,14 @@ export function useChapterHubNameSuggest(deps: {
       name: f.name,
       kind: 'faction' as const,
     }))
+    const allItemRows: NameSuggestRow[] = items.value.map((item) => ({
+      id: `item:${item.id}`,
+      name: item.name,
+      kind: 'item' as const,
+    }))
 
     const list = sortNameSuggestRows(
-      prefix ? [...startsWithMatches, ...includeMatches] : [...allCharacterRows, ...allFactionRows],
+      prefix ? [...startsWithMatches, ...includeMatches] : [...allCharacterRows, ...allFactionRows, ...allItemRows],
     ).slice(0, 10)
 
     if (list.length === 0) {

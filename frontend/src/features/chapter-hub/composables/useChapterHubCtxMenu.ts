@@ -3,19 +3,22 @@ import {
   createCharacter,
   createCharacterFactionMembership,
   createFaction,
+  createItem,
   deleteCharacterFactionMembership,
   getCharacterFactionMembershipsByNovelId,
   getCharactersByNovelId,
   getFactionsByNovelId,
+  getItemsByNovelId,
 } from '../../../lib/storage'
 import { getCaretPixelOffset } from '../caretGeometry'
 import {
   resolveCharacterCoveringSelection,
   resolveFactionCoveringSelection,
+  resolveItemCoveringSelection,
   trimSelectionRange,
 } from '../entitySelectionResolve'
 import { findCharacterByLabel, someCharacterHasLabel } from '../../../lib/characterLabels'
-import type { Character, CharacterFactionMembership, Faction, Novel } from '../../../types'
+import type { Character, CharacterFactionMembership, Faction, Item, Novel } from '../../../types'
 
 export function useChapterHubCtxMenu(deps: {
   novelId: ComputedRef<string>
@@ -23,6 +26,7 @@ export function useChapterHubCtxMenu(deps: {
   selectedChapter: ComputedRef<{ id: string; chapterNo: number } | null>
   characters: Ref<Character[]>
   factions: Ref<Faction[]>
+  items: Ref<Item[]>
   characterFactionMemberships: Ref<CharacterFactionMembership[]>
   chapterTextareaRef: Ref<HTMLTextAreaElement | null>
   /** 伏笔弹窗打开时禁止再打开选区菜单（避免 setTimeout(0) 在 close 之后把菜单又打开） */
@@ -34,6 +38,7 @@ export function useChapterHubCtxMenu(deps: {
     selectedChapter,
     characters,
     factions,
+    items,
     characterFactionMemberships,
     chapterTextareaRef,
     foreshadowModalOpen,
@@ -199,6 +204,11 @@ export function useChapterHubCtxMenu(deps: {
         ctxMenuNotice.value = `该选区已在势力名称「${fc.name ?? ''}」内`
         return
       }
+      const item = resolveItemCoveringSelection(text, r.start, r.end, items.value)
+      if (item) {
+        ctxMenuNotice.value = `该选区已在物品名称「${item.name ?? ''}」内`
+        return
+      }
     }
 
     createCharacter({
@@ -237,6 +247,11 @@ export function useChapterHubCtxMenu(deps: {
         ctxMenuNotice.value = '该选区已在势力名称内，不能重复创建'
         return
       }
+      const item = resolveItemCoveringSelection(text, r.start, r.end, items.value)
+      if (item) {
+        ctxMenuNotice.value = '该选区已在物品名称内，不能创建为势力'
+        return
+      }
     }
 
     const isCharacter = someCharacterHasLabel(characters.value, name)
@@ -259,6 +274,50 @@ export function useChapterHubCtxMenu(deps: {
       notes: '',
     })
     factions.value = getFactionsByNovelId(novelId.value)
+    closeCtxMenu()
+    window.setTimeout(collapseSelectionAndBlurTextarea, 0)
+  }
+
+  function addSelectionAsItem(): void {
+    if (!novel.value) return
+    const name = ctxMenuSelection.value.trim()
+    if (!name) return
+
+    const ta = chapterTextareaRef.value
+    const r = ctxMenuRange.value
+    if (ta && r && r.end > r.start) {
+      const text = ta.value
+      const ch = resolveCharacterCoveringSelection(text, r.start, r.end, characters.value)
+      if (ch) {
+        ctxMenuNotice.value = '该选区已属于角色，不能创建为物品'
+        return
+      }
+      const fc = resolveFactionCoveringSelection(text, r.start, r.end, factions.value)
+      if (fc) {
+        ctxMenuNotice.value = '该选区已在势力名称内，不能创建为物品'
+        return
+      }
+      const item = resolveItemCoveringSelection(text, r.start, r.end, items.value)
+      if (item) {
+        ctxMenuNotice.value = '该选区已在物品名称内，不能重复创建'
+        return
+      }
+    }
+
+    const existed = items.value.some((item) => (item.name ?? '').trim() === name)
+    if (existed) {
+      ctxMenuNotice.value = '已存在此物品'
+      return
+    }
+
+    createItem({
+      novelId: novel.value.id,
+      name,
+      summary: '',
+      ownerType: null,
+      ownerId: null,
+    })
+    items.value = getItemsByNovelId(novelId.value)
     closeCtxMenu()
     window.setTimeout(collapseSelectionAndBlurTextarea, 0)
   }
@@ -287,9 +346,21 @@ export function useChapterHubCtxMenu(deps: {
     return factions.value.find((f) => (f.name ?? '').trim() === name) ?? null
   })
 
-  /** 选区已落在已有角色或势力名内时不展示「添加为」 */
+  const ctxMenuSelectedItem = computed(() => {
+    const ta = chapterTextareaRef.value
+    const r = ctxMenuRange.value
+    if (ta && r && r.end > r.start) {
+      const resolved = resolveItemCoveringSelection(ta.value, r.start, r.end, items.value)
+      if (resolved) return resolved
+    }
+    const name = ctxMenuSelection.value.trim()
+    if (!name) return null
+    return items.value.find((item) => (item.name ?? '').trim() === name) ?? null
+  })
+
+  /** 选区已落在已有角色、势力或物品名内时不展示「添加为」 */
   const ctxMenuShowAddAs = computed(() => {
-    return !ctxMenuSelectedCharacter.value && !ctxMenuSelectedFaction.value
+    return !ctxMenuSelectedCharacter.value && !ctxMenuSelectedFaction.value && !ctxMenuSelectedItem.value
   })
 
   const ctxMenuBoundFactionSummary = computed(() => {
@@ -355,6 +426,7 @@ export function useChapterHubCtxMenu(deps: {
     ctxMenuNotice,
     ctxMenuSelectedCharacter,
     ctxMenuSelectedFaction,
+    ctxMenuSelectedItem,
     ctxMenuShowAddAs,
     ctxMenuBoundFactionSummary,
     ctxMenuCanAddAsFaction,
@@ -364,6 +436,7 @@ export function useChapterHubCtxMenu(deps: {
     closeCtxMenu,
     addSelectionAsCharacter,
     addSelectionAsFaction,
+    addSelectionAsItem,
     ctxMenuFactionIsCurrent,
     toggleFactionMembershipForSelectedCharacter,
   }

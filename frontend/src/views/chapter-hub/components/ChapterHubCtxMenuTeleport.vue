@@ -5,6 +5,7 @@
         <p v-if="notice" class="chapter-hub__ctx-notice">{{ notice }}</p>
         <p v-if="selectedCharacter" class="chapter-hub__ctx-entity-title">角色：{{ selectedCharacter.name }}</p>
         <p v-else-if="selectedFaction && !selectedCharacter" class="chapter-hub__ctx-entity-title">势力：{{ selectedFaction.name }}</p>
+        <p v-else-if="selectedItem && !selectedCharacter && !selectedFaction" class="chapter-hub__ctx-entity-title">物品：{{ selectedItem.name }}</p>
         <div v-if="showAddAs" class="chapter-hub__ctx-parent">
           添加为
           <div class="chapter-hub__ctx-sub">
@@ -17,6 +18,7 @@
             >
               势力
             </button>
+            <button type="button" @click="emit('addItem')">物品</button>
           </div>
         </div>
         <div v-if="selectedCharacter" class="chapter-hub__ctx-parent">
@@ -60,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Character, Faction } from '../../../types'
+import type { Character, Faction, Item } from '../../../types'
 
 withDefaults(
   defineProps<{
@@ -71,6 +73,8 @@ withDefaults(
   selectedCharacter: Character | null
   /** 选区落在已有势力名内（且未识别为角色） */
   selectedFaction: Faction | null
+  /** 选区落在已有物品名内 */
+  selectedItem: Item | null
   /** 为 false 时不展示「添加为」整块 */
   showAddAs: boolean
   /** 已加入势力名称列表（顿号分隔） */
@@ -91,6 +95,7 @@ const emit = defineEmits<{
   close: []
   addCharacter: []
   addFaction: []
+  addItem: []
   toggleFaction: [factionId: string]
   setForeshadow: []
   resolveForeshadow: []

@@ -26,34 +26,10 @@
   <main
     v-else
     class="cursor-shell cursor-shell--novel"
-    :class="{
-      'is-sidebar-collapsed': isShellRegionCollapsed('chapterNav'),
-      'is-resizing-sidebar': isResizingSidebar,
-      'cursor-shell--topbar-collapsed': isShellRegionCollapsed('topbar'),
-      'cursor-shell--chapter-tabs-collapsed': isShellRegionCollapsed('chapterTabs'),
-      'cursor-shell--right-panel-entry-collapsed': isShellRegionCollapsed('rightPanel'),
-    }"
+    :class="{ 'is-sidebar-collapsed': sidebarCollapsed, 'is-resizing-sidebar': isResizingSidebar }"
     :style="{ '--novel-sidebar-width': `${sidebarWidth}px` }"
   >
-    <div v-if="route.name === 'novel-chapter-writing'" class="cursor-shell__chrome-strip" aria-label="写作区折叠控制">
-      <button type="button" @click="toggleShellRegion('topbar')">
-        {{ isShellRegionCollapsed('topbar') ? '展开顶部' : '收起顶部' }} · Alt+1
-      </button>
-      <button type="button" @click="toggleShellRegion('chapterNav')">
-        {{ isShellRegionCollapsed('chapterNav') ? '展开目录' : '收起目录' }} · Alt+2
-      </button>
-      <button type="button" @click="toggleShellRegion('chapterTabs')">
-        {{ isShellRegionCollapsed('chapterTabs') ? '展开标签' : '收起标签' }} · Alt+3
-      </button>
-      <button type="button" @click="toggleShellRegion('rightPanel')">
-        {{ isShellRegionCollapsed('rightPanel') ? '展开面板入口' : '收起面板入口' }} · Alt+4
-      </button>
-      <button type="button" class="cursor-shell__chrome-strip-primary" @click="toggleAllShellChrome">
-        {{ allShellChromeCollapsed ? '展开全部' : '只留正文' }} · Alt+\
-      </button>
-    </div>
-
-    <header v-show="!isShellRegionCollapsed('topbar')" class="cursor-shell__menu-bar">
+    <header class="cursor-shell__menu-bar">
       <button
         v-for="tab in workspaceTabs"
         :key="tab.key"
@@ -75,17 +51,8 @@
       <button
         type="button"
         class="cursor-shell__collapse-btn cursor-shell__collapse-btn--menu"
-        title="收起顶部菜单（Alt+1）"
-        aria-label="收起顶部菜单"
-        @click="toggleShellRegion('topbar')"
-      >
-        顶
-      </button>
-      <button
-        type="button"
-        class="cursor-shell__collapse-btn cursor-shell__collapse-btn--menu"
-        :title="isShellRegionCollapsed('chapterNav') ? '展开章节导航（Alt+2）' : '收起章节导航（Alt+2）'"
-        :aria-label="isShellRegionCollapsed('chapterNav') ? '展开章节导航' : '收起章节导航'"
+        :title="sidebarCollapsed ? '展开章节导航' : '收起章节导航'"
+        :aria-label="sidebarCollapsed ? '展开章节导航' : '收起章节导航'"
         @click="toggleSidebar"
       >
         <span class="cursor-shell__collapse-icon" aria-hidden="true"></span>
@@ -106,15 +73,6 @@
         </template>
       </div>
     </header>
-    <button
-      v-if="isShellRegionCollapsed('chapterNav') && route.name === 'novel-chapter-writing'"
-      type="button"
-      class="cursor-shell__collapse-rail cursor-shell__collapse-rail--chapters"
-      title="展开章节导航（Alt+2）"
-      @click="toggleShellRegion('chapterNav')"
-    >
-      目录
-    </button>
     <aside class="cursor-shell__sidebar cursor-shell__sidebar--chapters">
       <div class="cursor-shell__brand-row">
         <div class="cursor-shell__brand">{{ currentNovel?.title || '作品' }}</div>
@@ -154,22 +112,8 @@
     </aside>
     <div class="cursor-shell__resize-handle" @mousedown.prevent="startResizeSidebar"></div>
     <section class="cursor-shell__main">
-      <div
-        v-if="route.name === 'novel-chapter-writing'"
-        class="cursor-shell__chapter-top"
-        :class="{ 'cursor-shell__chapter-top--collapsed': isShellRegionCollapsed('chapterTabs') }"
-      >
-        <button
-          v-if="isShellRegionCollapsed('chapterTabs')"
-          type="button"
-          class="cursor-shell__chapter-top-restore"
-          title="展开章节标签栏（Alt+3）"
-          @click="toggleShellRegion('chapterTabs')"
-        >
-          展开章节标签 · Alt+3
-        </button>
-        <template v-else>
-          <div class="cursor-shell__chapter-tabs" role="tablist" aria-label="打开的章节">
+      <div v-if="route.name === 'novel-chapter-writing'" class="cursor-shell__chapter-top">
+        <div class="cursor-shell__chapter-tabs" role="tablist" aria-label="打开的章节">
           <button
             v-for="ch in openChapters"
             :key="ch.id"
@@ -206,32 +150,14 @@
             type="button"
             class="cursor-shell__chapter-top-btn cursor-shell__chapter-top-btn--secondary"
             :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'entities' }"
-            :disabled="!activeChapterId || isShellRegionCollapsed('rightPanel')"
+            :disabled="!activeChapterId"
             @click="toggleChapterEntities"
             title="展开/收起：本章角色/势力"
           >
             角色/势力
           </button>
-          <button
-            type="button"
-            class="cursor-shell__chapter-top-btn cursor-shell__chapter-top-btn--ghost"
-            title="收起右侧面板入口（Alt+4）"
-            @click="toggleShellRegion('rightPanel')"
-          >
-            收起面板
-          </button>
-          </div>
-        </template>
+        </div>
       </div>
-      <button
-        v-if="route.name === 'novel-chapter-writing' && isShellRegionCollapsed('rightPanel')"
-        type="button"
-        class="cursor-shell__right-panel-mini"
-        title="展开右侧面板入口（Alt+4）"
-        @click="toggleShellRegion('rightPanel')"
-      >
-        面板
-      </button>
       <div class="cursor-shell__content" :class="{ 'cursor-shell__content--writing': route.name === 'novel-chapter-writing' }">
         <RouterView />
       </div>
@@ -264,10 +190,10 @@
                 placeholder="写下这一章发生了什么、推进了什么、留下了什么钩子（建议 2-6 句）。"
               />
               <div class="cursor-shell__right-panel-actions">
-                <button type="button" class="cursor-shell__right-panel-btn" @click="resetChapterSummaryDraft" :disabled="!activeChapterId">
-                  重置
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="cancelChapterSummary" :disabled="!activeChapterId">
+                  取消
                 </button>
-                <button type="button" class="cursor-shell__right-panel-btn cursor-shell__right-panel-btn--primary" @click="saveChapterSummary" :disabled="!activeChapterId">
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="saveChapterSummary" :disabled="!activeChapterId">
                   保存
                 </button>
               </div>
@@ -429,6 +355,12 @@
     </Teleport>
   </main>
 
+  <SaveToast
+    :open="chapterSummarySaveToastOpen"
+    title="保存成功"
+    message="章节总结已保存。"
+  />
+
   <ThemePickerPopover
     :open="isThemePickerOpen"
     :return-focus-el="themePickerReturnFocusEl"
@@ -455,12 +387,12 @@ import {
 } from './lib/storage'
 import type { Chapter, Novel } from './types'
 import type { CharacterChangeDetail } from './lib/storage'
-import { focusMode } from './composables/useFocusMode'
 import { currentThemeOption } from './composables/useTheme'
 import { useAuth } from './composables/useAuth'
 import { Teleport } from 'vue'
 import { menuPoems } from './data/menuPoems'
 import ThemePickerPopover from './components/ThemePickerPopover.vue'
+import SaveToast from './components/SaveToast.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -495,18 +427,8 @@ const chapterEditorAnnotationValue = ref('')
 const chapterEditorInputRef = ref<HTMLInputElement | null>(null)
 const chapterDeleteConfirmOpen = ref(false)
 const chapterDeletePreview = ref<ReturnType<typeof getChapterDeletePreview>>(null)
-type NovelShellCollapseRegion = 'topbar' | 'chapterNav' | 'chapterTabs' | 'rightPanel'
-type NovelShellCollapseState = Record<NovelShellCollapseRegion, boolean>
-
-const defaultShellCollapseState = (): NovelShellCollapseState => ({
-  topbar: false,
-  chapterNav: false,
-  chapterTabs: false,
-  rightPanel: false,
-})
-
-const shellCollapseState = ref<NovelShellCollapseState>(defaultShellCollapseState())
 const chapterNavRef = ref<HTMLElement | null>(null)
+const sidebarCollapsed = ref(false)
 const sidebarWidth = ref(272)
 const isResizingSidebar = ref(false)
 const openChapterIds = ref<string[]>([])
@@ -515,7 +437,6 @@ const { isLoggedIn, displayName, logout } = useAuth()
 
 const SIDEBAR_WIDTH_KEY = 'novel-writing.sidebar-width'
 const SIDEBAR_COLLAPSED_KEY = 'novel-writing.sidebar-collapsed'
-const SHELL_COLLAPSE_KEY_PREFIX = 'novel-writing.shell-collapse.'
 const OPEN_CHAPTERS_KEY_PREFIX = 'novel-writing.open-chapters.'
 const SIDEBAR_MIN = 248
 const SIDEBAR_MAX = 520
@@ -537,88 +458,6 @@ const currentNovelId = computed(() => {
   const t = String(id ?? '').trim()
   return t || ''
 })
-
-const allShellChromeCollapsed = computed(() =>
-  shellCollapseState.value.topbar &&
-    shellCollapseState.value.chapterNav &&
-    shellCollapseState.value.chapterTabs &&
-    shellCollapseState.value.rightPanel,
-)
-
-function normalizeShellCollapseState(raw: unknown): NovelShellCollapseState {
-  const base = defaultShellCollapseState()
-  if (!raw || typeof raw !== 'object') return base
-  const row = raw as Partial<Record<NovelShellCollapseRegion, unknown>>
-  return {
-    topbar: row.topbar === true,
-    chapterNav: row.chapterNav === true,
-    chapterTabs: row.chapterTabs === true,
-    rightPanel: row.rightPanel === true,
-  }
-}
-
-function shellCollapseKey(): string {
-  return `${SHELL_COLLAPSE_KEY_PREFIX}${currentNovelId.value || 'global'}`
-}
-
-function persistShellCollapseState(): void {
-  if (!currentNovelId.value) return
-  try {
-    localStorage.setItem(shellCollapseKey(), JSON.stringify(shellCollapseState.value))
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, shellCollapseState.value.chapterNav ? '1' : '0')
-  } catch {
-    /* ignore */
-  }
-}
-
-function restoreShellCollapseState(): void {
-  const base = defaultShellCollapseState()
-  if (!currentNovelId.value) {
-    shellCollapseState.value = base
-    return
-  }
-  try {
-    const raw = localStorage.getItem(shellCollapseKey())
-    if (raw) {
-      shellCollapseState.value = normalizeShellCollapseState(JSON.parse(raw))
-      return
-    }
-    shellCollapseState.value = {
-      ...base,
-      chapterNav: localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1',
-    }
-  } catch {
-    shellCollapseState.value = base
-  }
-}
-
-function isShellRegionCollapsed(region: NovelShellCollapseRegion): boolean {
-  return shellCollapseState.value[region]
-}
-
-function setShellRegionCollapsed(region: NovelShellCollapseRegion, collapsed: boolean): void {
-  shellCollapseState.value = { ...shellCollapseState.value, [region]: collapsed }
-  if (region === 'rightPanel' && collapsed) rightPanelOpen.value = false
-  persistShellCollapseState()
-}
-
-function toggleShellRegion(region: NovelShellCollapseRegion): void {
-  setShellRegionCollapsed(region, !shellCollapseState.value[region])
-}
-
-function toggleAllShellChrome(): void {
-  const next = !allShellChromeCollapsed.value
-  shellCollapseState.value = {
-    topbar: next,
-    chapterNav: next,
-    chapterTabs: next,
-    rightPanel: next,
-  }
-  if (next) rightPanelOpen.value = false
-  persistShellCollapseState()
-}
-
-
 const activeChapterId = computed(() => {
   const q = String(route.query.chapterId ?? '').trim()
   if (q) return q
@@ -635,6 +474,7 @@ const workspaceTabs = [
   { key: 'write' as const, label: '写作' },
   { key: 'outline' as const, label: '大纲' },
   { key: 'characters' as const, label: '角色' },
+  { key: 'items' as const, label: '物品' },
   { key: 'factions' as const, label: '势力' },
   { key: 'categories' as const, label: '分类' },
   { key: 'issues' as const, label: '伏笔' },
@@ -701,6 +541,8 @@ function scrollChapterNavToActive(chapterId: string): void {
 const rightPanelOpen = ref(false)
 const rightPanelActive = ref<'summary' | 'entities'>('summary')
 const chapterSummaryDraft = ref('')
+const chapterSummarySaveToastOpen = ref(false)
+let chapterSummarySaveToastTimer: number | null = null
 
 const activeChapterForPanels = computed(() => {
   const id = activeChapterId.value
@@ -709,7 +551,6 @@ const activeChapterForPanels = computed(() => {
 })
 
 function toggleChapterSummary(): void {
-  if (isShellRegionCollapsed('rightPanel')) return
   if (rightPanelOpen.value && rightPanelActive.value === 'summary') {
     rightPanelOpen.value = false
     return
@@ -719,7 +560,6 @@ function toggleChapterSummary(): void {
 }
 
 function toggleChapterEntities(): void {
-  if (isShellRegionCollapsed('rightPanel')) return
   if (rightPanelOpen.value && rightPanelActive.value === 'entities') {
     rightPanelOpen.value = false
     return
@@ -735,15 +575,29 @@ function closeRightPanel(): void {
   rightPanelOpen.value = false
 }
 
-function resetChapterSummaryDraft(): void {
+function showChapterSummarySavedToast(): void {
+  chapterSummarySaveToastOpen.value = true
+  if (chapterSummarySaveToastTimer != null) window.clearTimeout(chapterSummarySaveToastTimer)
+  chapterSummarySaveToastTimer = window.setTimeout(() => {
+    chapterSummarySaveToastOpen.value = false
+    chapterSummarySaveToastTimer = null
+  }, 1800)
+}
+
+function cancelChapterSummary(): void {
   chapterSummaryDraft.value = activeChapterForPanels.value?.annotation ?? ''
+  closeRightPanel()
 }
 
 function saveChapterSummary(): void {
   const ch = activeChapterForPanels.value
   if (!ch) return
-  updateChapter({ id: ch.id, annotation: chapterSummaryDraft.value.trim() })
+  const summary = chapterSummaryDraft.value.trim()
+  updateChapter({ id: ch.id, annotation: summary })
+  chapterSummaryDraft.value = summary
   reloadNovelContext()
+  closeRightPanel()
+  showChapterSummarySavedToast()
 }
 
 watch(
@@ -1098,7 +952,12 @@ function closeDeleteChapterConfirm(): void {
 }
 
 function toggleSidebar(): void {
-  toggleShellRegion('chapterNav')
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
 }
 
 function createChapterFromSidebar(): void {
@@ -1241,37 +1100,6 @@ function persistOpenChapters(): void {
   }
 }
 
-function onShellCollapseShortcut(e: KeyboardEvent): void {
-  if (route.name !== 'novel-chapter-writing') return
-  if (focusMode.value) return
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return
-  const key = e.key
-  if (key === '1') {
-    e.preventDefault()
-    toggleShellRegion('topbar')
-    return
-  }
-  if (key === '2') {
-    e.preventDefault()
-    toggleShellRegion('chapterNav')
-    return
-  }
-  if (key === '3') {
-    e.preventDefault()
-    toggleShellRegion('chapterTabs')
-    return
-  }
-  if (key === '4') {
-    e.preventDefault()
-    toggleShellRegion('rightPanel')
-    return
-  }
-  if (key === '\\') {
-    e.preventDefault()
-    toggleAllShellChrome()
-  }
-}
-
 function onGlobalChapterSwitch(e: KeyboardEvent): void {
   if (route.name !== 'novel-chapter-writing') return
   if (!e.ctrlKey || e.key !== 'Tab') return
@@ -1293,7 +1121,7 @@ function onNovelDataChanged(): void {
 }
 
 function startResizeSidebar(e: MouseEvent): void {
-  if (isShellRegionCollapsed('chapterNav')) return
+  if (sidebarCollapsed.value) return
   const startX = e.clientX
   const startWidth = sidebarWidth.value
   isResizingSidebar.value = true
@@ -1325,6 +1153,7 @@ function startResizeSidebar(e: MouseEvent): void {
 try {
   const savedW = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? '')
   if (Number.isFinite(savedW) && savedW >= SIDEBAR_MIN && savedW <= SIDEBAR_MAX) sidebarWidth.value = savedW
+  sidebarCollapsed.value = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
 } catch {
   /* ignore */
 }
@@ -1332,7 +1161,6 @@ try {
 onMounted(() => window.addEventListener('storage', onStorage))
 onMounted(() => window.addEventListener('novel-writing:changed', onNovelDataChanged))
 onMounted(() => window.addEventListener('pointerdown', closeChapterAreaMenu))
-onMounted(() => window.addEventListener('keydown', onShellCollapseShortcut))
 onMounted(() => window.addEventListener('keydown', onGlobalChapterSwitch))
 onMounted(() => window.addEventListener('keydown', onEscapeCloseChapterModal))
 onMounted(() => {
@@ -1346,15 +1174,15 @@ onMounted(() => {
 onUnmounted(() => window.removeEventListener('storage', onStorage))
 onUnmounted(() => window.removeEventListener('novel-writing:changed', onNovelDataChanged))
 onUnmounted(() => window.removeEventListener('pointerdown', closeChapterAreaMenu))
-onUnmounted(() => window.removeEventListener('keydown', onShellCollapseShortcut))
 onUnmounted(() => window.removeEventListener('keydown', onGlobalChapterSwitch))
 onUnmounted(() => window.removeEventListener('keydown', onEscapeCloseChapterModal))
 onUnmounted(() => {
   if (poemRotateTimer != null) window.clearInterval(poemRotateTimer)
   poemRotateTimer = null
+  if (chapterSummarySaveToastTimer != null) window.clearTimeout(chapterSummarySaveToastTimer)
+  chapterSummarySaveToastTimer = null
 })
 watch(() => route.fullPath, reloadNovelContext, { immediate: true })
-watch(() => currentNovelId.value, restoreShellCollapseState, { immediate: true })
 
 function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return

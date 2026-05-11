@@ -150,6 +150,39 @@
                   </div>
                 </section>
 
+                <section class="chapter-hub__faction-panel">
+                  <div class="chapter-hub__faction-panel-head">
+                    <h3 class="chapter-hub__faction-panel-title">绑定物品</h3>
+                    <p class="chapter-hub__faction-panel-hint">
+                      点击物品切换绑定状态；选择已被占用的物品会在保存后转移持有者
+                    </p>
+                  </div>
+                  <div class="chapter-hub__faction-panel-inner">
+                    <p v-if="items.length === 0" class="chapter-hub__faction-empty">
+                      本书暂无物品。请先到工作台「物品」页创建物品，再回到此处绑定。
+                    </p>
+                    <label v-if="items.length > 0" class="chapter-hub__faction-field chapter-hub__faction-field--full">
+                      <span class="chapter-hub__faction-field-label">搜索物品</span>
+                      <input v-model="itemQuery" class="chapter-hub__faction-input" maxlength="40" />
+                    </label>
+                    <div v-if="items.length > 0" class="faction-row__attrs" style="margin-top: 10px">
+                      <small
+                        v-for="item in itemPickerRows"
+                        :key="`fmi-${item.id}`"
+                        class="muted faction-row__attr-chip category-bind-chip"
+                        :class="item.bound ? 'category-bind-chip--bound' : 'category-bind-chip--unbound'"
+                        @click="toggleItem(item.id)"
+                      >
+                        <span class="category-bind-chip__state">{{ item.bound ? '已绑定' : '未绑定' }}</span>
+                        {{ item.name }} · {{ item.transferHint }}
+                      </small>
+                    </div>
+                    <p v-if="items.length > 0 && itemPickerRows.length === 0" class="chapter-hub__faction-empty">
+                      没有匹配的物品。
+                    </p>
+                  </div>
+                </section>
+
                 <p v-if="errorMsg" class="chapter-hub__faction-modal-error" role="alert">{{ errorMsg }}</p>
               </div>
 
@@ -188,20 +221,23 @@ import ConfirmDialog from '../../../components/ConfirmDialog.vue'
 import {
   buildFactionStateSnapshot,
   getCharacterFactionMembershipsByNovelId,
+  getFactionsByNovelId,
   normalizeCategoryIds,
   recordFactionChangeFields,
+  replaceItemOwnersForEntity,
   replaceMembershipsForFaction,
   type CharacterChangeDetail,
   type FactionStateSnapshot,
   updateFaction,
 } from '../../../lib/storage'
 import { characterMatchLabels } from '../../../lib/characterLabels'
-import type { Category, Character, Faction } from '../../../types'
+import type { Category, Character, Faction, Item } from '../../../types'
 
 const props = defineProps<{
   open: boolean
   novelId: string
   characters: Character[]
+  items: Item[]
   categories?: Category[]
   faction: Faction | null
   /** 从章节正文打开时传入，用于修改记录锚点 */
@@ -220,7 +256,9 @@ const draft = reactive({
 })
 
 const memberQuery = ref('')
+const itemQuery = ref('')
 const memberCharIds = ref<string[]>([])
+const itemIds = ref<string[]>([])
 const memberDescByCharId = reactive<Record<string, string>>({})
 const memberDescComposing = reactive<Record<string, boolean>>({})
 const errorMsg = ref('')
@@ -229,12 +267,38 @@ const factionHubCancelConfirmOpen = ref(false)
 const initialDraft = ref({
   name: '',
   memberCharIds: [] as string[],
+  itemIds: [] as string[],
   memberDescByCharId: {} as Record<string, string>,
   categoryIds: [] as string[],
 })
 
 function characterName(characterId: string): string {
   return props.characters.find((c) => c.id === characterId)?.name ?? '未知'
+}
+
+function normalizeItemIds(ids: string[]): string[] {
+  return Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-Hans'))
+}
+
+function itemName(itemId: string): string {
+  return props.items.find((item) => item.id === itemId)?.name ?? itemId
+}
+
+function itemOwnerLabel(item: Item): string {
+  if (item.ownerType === 'character' && item.ownerId) return `角色：${characterName(item.ownerId)}`
+  if (item.ownerType === 'faction' && item.ownerId) {
+    const name = getFactionsByNovelId(props.novelId).find((f) => f.id === item.ownerId)?.name
+    return name ? `势力：${name}` : '未知势力'
+  }
+  return '未绑定'
+}
+
+function itemTransferHint(item: Item): string {
+  const f = props.faction
+  if (!f) return ''
+  if (!item.ownerType || !item.ownerId) return '保存后绑定到当前势力'
+  if (item.ownerType === 'faction' && item.ownerId === f.id) return '当前势力已绑定'
+  return `保存后将转移自：${itemOwnerLabel(item)}`
 }
 
 const pinyinCollator = new Intl.Collator('zh-Hans-u-co-pinyin', { sensitivity: 'base', numeric: true })
@@ -274,6 +338,24 @@ const factionMemberOptions = computed(() => {
   return [...unbound, ...bound]
 })
 
+const itemPickerRows = computed(() => {
+  const q = itemQuery.value.trim().toLowerCase()
+  const rows = props.items
+    .filter((item) => item.novelId === props.novelId)
+    .filter((item) => !q || `${item.name ?? ''} ${item.summary ?? ''}`.toLowerCase().includes(q))
+    .map((item) => ({
+      ...item,
+      bound: itemIds.value.includes(item.id),
+      transferHint: itemTransferHint(item),
+    }))
+  return rows.sort((a, b) => {
+    const groupA = a.bound ? 0 : !a.ownerType ? 1 : 2
+    const groupB = b.bound ? 0 : !b.ownerType ? 1 : 2
+    if (groupA !== groupB) return groupA - groupB
+    return pinyinCollator.compare(a.name ?? '', b.name ?? '')
+  })
+})
+
 function hasUnsavedChanges(): boolean {
   if (fieldChanged('name')) return true
   const oldCat = [...initialDraft.value.categoryIds].join('|')
@@ -282,6 +364,9 @@ function hasUnsavedChanges(): boolean {
   const oldIds = [...initialDraft.value.memberCharIds].sort().join('|')
   const nowIds = [...memberCharIds.value].sort().join('|')
   if (oldIds !== nowIds) return true
+  const oldItemIds = [...initialDraft.value.itemIds].sort().join('|')
+  const nowItemIds = normalizeItemIds(itemIds.value).join('|')
+  if (oldItemIds !== nowItemIds) return true
   return memberCharIds.value.some((id) => memberDescriptionChanged(id))
 }
 
@@ -292,14 +377,21 @@ function syncFromFaction(f: Faction | null): void {
 
   const mems = getCharacterFactionMembershipsByNovelId(props.novelId).filter((m) => m.factionId === f.id)
   memberCharIds.value = mems.map((m) => m.characterId)
+  itemIds.value = normalizeItemIds(
+    props.items
+      .filter((item) => item.novelId === props.novelId && item.ownerType === 'faction' && item.ownerId === f.id)
+      .map((item) => item.id),
+  )
   Object.keys(memberDescByCharId).forEach((k) => delete memberDescByCharId[k])
   mems.forEach((m) => {
     memberDescByCharId[m.characterId] = (m.description ?? '').trim()
   })
   memberQuery.value = ''
+  itemQuery.value = ''
   initialDraft.value = {
     name: draft.name.trim(),
     memberCharIds: [...memberCharIds.value].sort(),
+    itemIds: normalizeItemIds(itemIds.value),
     memberDescByCharId: Object.fromEntries(mems.map((m) => [m.characterId, (m.description ?? '').trim()])),
     categoryIds: [...normalizeCategoryIds(f.categoryIds)].sort(),
   }
@@ -313,6 +405,7 @@ function resetInitialDraftFromCurrent(): void {
   initialDraft.value = {
     name: draft.name.trim(),
     memberCharIds: [...memberCharIds.value].sort(),
+    itemIds: normalizeItemIds(itemIds.value),
     memberDescByCharId: descByCharId,
     categoryIds: [...normalizeCategoryIds(draft.categoryIds)].sort(),
   }
@@ -336,6 +429,16 @@ function toggleMember(characterId: string): void {
     delete memberDescByCharId[characterId]
     delete memberDescComposing[characterId]
   }
+}
+
+function toggleItem(itemId: string): void {
+  const id = String(itemId ?? '').trim()
+  if (!id) return
+  const ids = [...itemIds.value]
+  const idx = ids.indexOf(id)
+  if (idx >= 0) ids.splice(idx, 1)
+  else ids.push(id)
+  itemIds.value = ids
 }
 
 watch(
@@ -460,6 +563,14 @@ function computeFactionHubSaveChangePayload(): {
       rows.map((m) => `${characterName(m.characterId)}:${m.description}`).join('；')
     pushDetail('memberships', '势力档案/绑定角色', fmt(memB), fmt(memA))
   }
+  const itemA = normalizeItemIds(itemIds.value)
+  const itemB = normalizeItemIds(init.itemIds)
+  const itemsChanged = itemA.length !== itemB.length || itemA.some((id, i) => id !== itemB[i])
+  if (itemsChanged) {
+    changed.add('items')
+    const label = (ids: string[]) => ids.map((id) => itemName(id)).join('、')
+    pushDetail('items', '势力档案/绑定物品', label(itemB), label(itemA))
+  }
   const fields = Array.from(changed)
   const fieldValues: Record<string, string> = {}
   if (fields.includes('name')) fieldValues.name = name
@@ -471,6 +582,9 @@ function computeFactionHubSaveChangePayload(): {
   }
   if (fields.includes('memberships')) {
     fieldValues.memberships = memA.map((m) => `${characterName(m.characterId)}:${m.description}`).join('；')
+  }
+  if (fields.includes('items')) {
+    fieldValues.items = itemA.map((id) => itemName(id)).join('、')
   }
   return { fields, details, fieldValues }
 }
@@ -525,6 +639,7 @@ function onSubmit(): void {
       description: limitMemberDesc((memberDescByCharId[id] ?? '').trim()),
     })),
   )
+  replaceItemOwnersForEntity(props.novelId, 'faction', f.id, itemIds.value)
   if (changePayload.fields.length > 0) {
     recordFactionChangeFields(f.id, changePayload.fields, {
       ...(chId ? { chapterId: chId } : {}),

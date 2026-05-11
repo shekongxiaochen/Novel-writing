@@ -67,6 +67,24 @@
                       {{ token.text }}
                     </span>
                     <span
+                      v-else-if="token.item"
+                      class="chapter-hub__entity-name chapter-hub__entity-name--item"
+                      :class="foreshadowAugmentClass(token.foreshadow)"
+                      :data-range-start="token.range?.start ?? ''"
+                      :data-range-end="token.range?.end ?? ''"
+                      role="link"
+                      tabindex="0"
+                      @wheel="onEntityWheel"
+                      @pointerdown.stop.prevent
+                      @mousedown.stop.prevent
+                      @mouseenter="onItemMouseEnter($event, token)"
+                      @mouseleave="onItemMouseLeave(token)"
+                      @click.stop.prevent="emit('goItem', token.item!, token.range ?? null)"
+                      @keydown.enter.prevent="emit('goItem', token.item!, token.range ?? null)"
+                    >
+                      {{ token.text }}
+                    </span>
+                    <span
                       v-else-if="token.foreshadow"
                       class="chapter-hub__foreshadow-mark"
                       :class="{
@@ -114,39 +132,6 @@
               @blur="onTextareaBlur"
             />
           </div>
-          <div class="chapter-hub__legend" aria-label="正文标记图例">
-            <span class="chapter-hub__legend-title">标记说明</span>
-            <div class="chapter-hub__legend-list">
-              <span class="chapter-hub__legend-item">
-                <span class="chapter-hub__legend-swatch chapter-hub__entity-name chapter-hub__entity-name--link">角色</span>
-                <span class="chapter-hub__legend-copy">角色名</span>
-              </span>
-              <span class="chapter-hub__legend-item">
-                <span class="chapter-hub__legend-swatch chapter-hub__entity-name chapter-hub__entity-name--faction">势力</span>
-                <span class="chapter-hub__legend-copy">势力名</span>
-              </span>
-              <span class="chapter-hub__legend-item">
-                <span class="chapter-hub__legend-swatch chapter-hub__entity-name chapter-hub__entity-name--link chapter-hub__entity-name--anchor-edit">角色更改</span>
-                <span class="chapter-hub__legend-copy">此处更改角色信息</span>
-              </span>
-              <span class="chapter-hub__legend-item">
-                <span class="chapter-hub__legend-swatch chapter-hub__entity-name chapter-hub__entity-name--faction chapter-hub__entity-name--anchor-edit-faction">势力更改</span>
-                <span class="chapter-hub__legend-copy">此处更改势力信息</span>
-              </span>
-              <span class="chapter-hub__legend-item">
-                <span class="chapter-hub__legend-swatch chapter-hub__foreshadow-mark">伏笔</span>
-                <span class="chapter-hub__legend-copy">埋下的伏笔</span>
-              </span>
-              <span class="chapter-hub__legend-item">
-                <span class="chapter-hub__legend-swatch chapter-hub__foreshadow-mark chapter-hub__foreshadow-mark--resolved">已回收</span>
-                <span class="chapter-hub__legend-copy">已回收的铺垫</span>
-              </span>
-              <span class="chapter-hub__legend-item">
-                <span class="chapter-hub__legend-swatch chapter-hub__foreshadow-mark chapter-hub__foreshadow-mark--fulfill">回收处</span>
-                <span class="chapter-hub__legend-copy">回收伏笔的位置</span>
-              </span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -156,7 +141,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { EntityToken } from '../../../features/chapter-hub/types'
-import type { Character, Faction } from '../../../types'
+import type { Character, Faction, Item } from '../../../types'
 
 const props = defineProps<{
   content: string
@@ -234,6 +219,14 @@ function onFactionMouseEnter(e: MouseEvent, token: EntityToken): void {
   }
 }
 
+function onItemMouseEnter(e: MouseEvent, token: EntityToken): void {
+  if (token.item) {
+    const el = e.currentTarget as HTMLElement | null
+    const rect = el ? pickAnchorRectFromWrappedInline(el, e.clientX, e.clientY) : null
+    emit('itemEnter', e, token.item, rect, token.range ?? null)
+  }
+}
+
 function pickAnchorRectFromWrappedInline(el: HTMLElement, x: number, y: number): DOMRect {
   const rects = Array.from(el.getClientRects())
   const hit = rects.find((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)
@@ -242,6 +235,10 @@ function pickAnchorRectFromWrappedInline(el: HTMLElement, x: number, y: number):
 
 function onFactionMouseLeave(token: EntityToken): void {
   if (token.faction) emit('entityLeave')
+}
+
+function onItemMouseLeave(token: EntityToken): void {
+  if (token.item) emit('entityLeave')
 }
 
 function focusTextareaAtPosition(pos: number): void {
@@ -398,12 +395,19 @@ const emit = defineEmits<{
     anchorRect: DOMRect | null,
     textRange: { start: number; end: number } | null,
   ]
+  itemEnter: [
+    event: MouseEvent,
+    item: Item,
+    anchorRect: DOMRect | null,
+    textRange: { start: number; end: number } | null,
+  ]
   entityLeave: []
   foreshadowEnter: [event: MouseEvent, meta: NonNullable<EntityToken['foreshadow']>]
   foreshadowLeave: []
   foreshadowClick: [meta: NonNullable<EntityToken['foreshadow']>]
   goCharacter: [character: Character, textRange: { start: number; end: number } | null]
   goFaction: [faction: Faction, textRange: { start: number; end: number } | null]
+  goItem: [item: Item, textRange: { start: number; end: number } | null]
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)

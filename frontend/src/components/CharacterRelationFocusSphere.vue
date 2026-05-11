@@ -148,13 +148,14 @@ function makeTextSprite(text: string, opts?: { fontSize?: number }) {
 
   const theme = document.documentElement.getAttribute('data-theme') || 'light'
   const isDark = theme === 'dark'
+  const isBlueprint = theme === 'blueprint'
 
   const padX = 18
   const padY = 10
   const radius = 14
-  const textColor = isDark ? '#efe4d4' : '#1c1a17'
-  const bgColor = isDark ? 'rgba(33, 29, 24, 0.84)' : 'rgba(250, 246, 237, 0.86)'
-  const borderColor = isDark ? 'rgba(211, 197, 181, 0.38)' : 'rgba(42, 38, 34, 0.35)'
+  const textColor = isBlueprint ? '#e0f2fe' : isDark ? '#efe4d4' : '#1c1a17'
+  const bgColor = isBlueprint ? 'rgba(15, 23, 42, 0.86)' : isDark ? 'rgba(33, 29, 24, 0.84)' : 'rgba(250, 246, 237, 0.86)'
+  const borderColor = isBlueprint ? 'rgba(125, 211, 252, 0.42)' : isDark ? 'rgba(211, 197, 181, 0.38)' : 'rgba(42, 38, 34, 0.35)'
 
   const metrics = ctx.measureText(t)
   const textW = Math.min(metrics.width, canvas.width - 2 * padX)
@@ -320,6 +321,12 @@ function build() {
 
   const lineColor = isDark ? 0xe2e8f0 : 0x334155
   const lineOpacity = isDark ? 0.32 : 0.22
+  const relationByDirection = new Map<string, string>()
+  for (const r of props.relations) {
+    const relationType = String(r.relationType ?? '').trim()
+    if (!relationType) continue
+    relationByDirection.set(`${r.fromCharacterId}->${r.toCharacterId}`, relationType)
+  }
 
   const drawDirectedRelation = (fromId: string, toId: string) => {
     const a = positionsById.get(fromId)
@@ -359,6 +366,17 @@ function build() {
     const line = new THREE.Line(lineGeo, lineMat)
     scene!.add(line)
     relationLines.push(line)
+
+    const relationType = relationByDirection.get(`${fromId}->${toId}`) ?? ''
+    if (relationType) {
+      const label = makeTextSprite(relationType, { fontSize: Math.max(22, Math.round(38 * renderScale)) })
+      label.position.copy(curve.getPoint(0.5))
+      label.position.y += 16 * renderScale
+      label.scale.multiplyScalar(Math.max(0.72, renderScale * 0.8))
+      ;(label.material as THREE.SpriteMaterial).opacity = 0.96
+      scene!.add(label)
+      relationLabels.push(label)
+    }
 
     const p0 = curve.getPoint(0.86)
     const p1 = curve.getPoint(0.96)
@@ -549,7 +567,15 @@ onBeforeUnmount(() => {
     linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 98%, transparent), color-mix(in srgb, var(--color-surface-muted) 82%, transparent));
 }
 
-:root:not([data-theme='dark']) .focus-sphere-wrap {
+[data-theme='blueprint'] .focus-sphere-wrap {
+  background:
+    radial-gradient(ellipse at 28% 18%, rgba(56, 189, 248, 0.16) 0%, rgba(56, 189, 248, 0.06) 36%, rgba(255, 255, 255, 0) 68%),
+    radial-gradient(ellipse at 78% 84%, rgba(129, 140, 248, 0.12) 0%, rgba(129, 140, 248, 0.04) 34%, rgba(255, 255, 255, 0) 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 96%, #020617 4%), color-mix(in srgb, var(--color-surface-muted) 82%, #020617 18%));
+  border-color: rgba(125, 211, 252, 0.2);
+}
+
+:root:not([data-theme='dark']):not([data-theme='blueprint']) .focus-sphere-wrap {
   background:
     radial-gradient(ellipse at 28% 18%, rgba(47, 111, 237, 0.08) 0%, rgba(47, 111, 237, 0.03) 36%, rgba(255, 255, 255, 0) 68%),
     radial-gradient(ellipse at 78% 84%, rgba(15, 159, 203, 0.07) 0%, rgba(15, 159, 203, 0.02) 34%, rgba(255, 255, 255, 0) 70%),

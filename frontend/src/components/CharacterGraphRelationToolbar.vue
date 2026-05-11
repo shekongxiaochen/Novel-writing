@@ -1,7 +1,7 @@
 <template>
   <div v-if="focusCharacterId && anchorCharacter" class="character-graph-relation-toolbar">
     <div class="characters-graph-ui__link-mode">
-      <label v-if="panelMode === 'edit'" class="characters-graph-ui__field">
+      <label class="characters-graph-ui__field">
         <span class="characters-graph-ui__field-label">搜索角色</span>
         <input
           v-model="relationEditSearchQuery"
@@ -35,7 +35,7 @@
       <p v-if="linkSuccess" class="characters-graph-ui__link-success">{{ linkSuccess }}</p>
 
       <div class="character-graph-relation-toolbar__body scrollbar-paper">
-        <div v-if="panelMode === 'edit'" class="chapter-hub__relation-edit-scroll">
+        <div class="chapter-hub__relation-edit-scroll">
           <template v-if="relationEditVisibleRows.length > 0">
             <div
               v-for="row in relationEditVisibleRows"
@@ -93,59 +93,52 @@
               <div class="chapter-hub__relation-add-form scrollbar-paper">
                 <label class="chapter-hub__relation-edit-field">
                   <span>对方角色</span>
-                  <div class="workspace-dd">
+                  <div class="relation-target-dd">
                     <button
                       type="button"
-                      class="workspace-dd__btn workspace-dd__btn--compact character-panel__input"
+                      class="workspace-dd__btn workspace-dd__btn--compact character-panel__input relation-target-dd__btn"
                       :class="{ 'workspace-dd__btn--open': relationAddTargetDropdownOpen }"
-                      data-dd-key="workspace-relation-add-target"
-                      :disabled="relationTargetUnlinked.length === 0"
                       @click="toggleRelationAddTargetDropdown"
                     >
                       <span class="workspace-dd__btn-text">{{ relationAddTargetDropdownLabel }}</span>
                       <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
                     </button>
-                    <div
-                      v-if="relationAddTargetDropdownOpen"
-                      class="workspace-dd__panel scrollbar-paper chapter-hub__relation-add-dd-panel"
-                      :class="[
-                        relationAddTargetPanelDirectionClass,
-                        { 'workspace-dd__panel--max4': relationAddFilteredCandidates.length > 4 },
-                      ]"
-                      data-dd-panel-key="workspace-relation-add-target"
-                      :style="relationAddTargetPanelStyle"
-                      role="listbox"
-                    >
-                      <div class="workspace-dd__search">
+                    <div v-if="relationAddTargetDropdownOpen" class="relation-target-dd__panel" role="listbox">
+                      <div class="relation-target-dd__search">
                         <input
                           v-model="relationAddTargetQuery"
                           type="search"
-                          class="workspace-dd__search-input"
+                          class="workspace-dd__search-input relation-target-dd__search-input"
                           placeholder="搜索角色名…"
                           autocomplete="off"
                         />
                       </div>
-                      <button
-                        type="button"
-                        class="workspace-dd__item"
-                        :class="{ 'workspace-dd__item--active': !targetBId }"
-                        @click="selectRelationAddTarget('')"
-                      >
-                        请选择尚未与球心建立关系的角色…
-                      </button>
-                      <button
-                        v-for="c in relationAddFilteredCandidates"
-                        :key="`rel-new-${c.id}`"
-                        type="button"
-                        class="workspace-dd__item"
-                        :class="{ 'workspace-dd__item--active': targetBId === c.id }"
-                        @click="selectRelationAddTarget(c.id)"
-                      >
-                        {{ c.name || '未命名角色' }}
-                      </button>
-                      <p v-if="relationAddFilteredCandidates.length === 0" class="muted chapter-hub__relation-add-empty">
-                        无匹配角色
-                      </p>
+                      <div class="relation-target-dd__list scrollbar-paper">
+                        <button
+                          type="button"
+                          class="workspace-dd__item"
+                          :class="{ 'workspace-dd__item--active': !targetBId }"
+                          @click="selectRelationAddTarget('')"
+                        >
+                          请选择尚未与球心建立关系的角色…
+                        </button>
+                        <button
+                          v-for="c in relationAddFilteredTargets"
+                          :key="`rel-new-${c.id}`"
+                          type="button"
+                          class="workspace-dd__item"
+                          :class="{ 'workspace-dd__item--active': targetBId === c.id }"
+                          @click="selectRelationAddTarget(c.id)"
+                        >
+                          {{ c.name || '未命名角色' }}
+                        </button>
+                        <p v-if="relationTargetUnlinked.length === 0" class="muted relation-target-dd__empty">
+                          本作中已没有可与球心新建关系的角色。
+                        </p>
+                        <p v-else-if="relationAddFilteredTargets.length === 0" class="muted relation-target-dd__empty">
+                          没有匹配的角色。
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </label>
@@ -319,9 +312,7 @@ const relationEditModalOpen = ref(false)
 const relationAddModalOpen = ref(false)
 const relationAddDialogRef = ref<HTMLElement | null>(null)
 const relationAddTargetDropdownOpen = ref(false)
-const relationAddTargetPanelStyle = ref<Record<string, string>>({})
 const relationAddTargetQuery = ref('')
-const relationAddTargetPanelDirection = ref<'up' | 'down'>('down')
 
 type RelationDraftRow = {
   targetCharacterId: string
@@ -361,20 +352,12 @@ const relationTargetUnlinked = computed(() =>
 )
 
 const targetBName = computed(() => props.characters.find((c) => c.id === targetBId.value)?.name ?? '')
-const relationAddFilteredCandidates = computed(() => {
+const relationAddTargetDropdownLabel = computed(() => targetBName.value || '请选择尚未与球心建立关系的角色…')
+const relationAddFilteredTargets = computed(() => {
   const q = relationAddTargetQuery.value.trim().toLowerCase()
   if (!q) return relationTargetUnlinked.value
   return relationTargetUnlinked.value.filter((c) => String(c.name ?? '').toLowerCase().includes(q))
 })
-
-const relationAddTargetDropdownLabel = computed(() => {
-  if (!targetBId.value) return '请选择尚未与球心建立关系的角色…'
-  return targetBName.value || '请选择尚未与球心建立关系的角色…'
-})
-
-const relationAddTargetPanelDirectionClass = computed(() =>
-  relationAddTargetPanelDirection.value === 'up' ? 'workspace-dd__panel--up' : 'workspace-dd__panel--down',
-)
 
 function selectRelationAddTarget(id: string): void {
   targetBId.value = id
@@ -388,52 +371,9 @@ function selectRelationAddTarget(id: string): void {
 }
 
 function toggleRelationAddTargetDropdown(): void {
-  if (relationTargetUnlinked.value.length === 0) return
   relationAddTargetDropdownOpen.value = !relationAddTargetDropdownOpen.value
-  if (relationAddTargetDropdownOpen.value) {
-    void nextTick(() => positionRelationAddTargetPanel())
-  } else {
-    relationAddTargetQuery.value = ''
-  }
+  if (!relationAddTargetDropdownOpen.value) relationAddTargetQuery.value = ''
 }
-
-function positionRelationAddTargetPanel(): void {
-  if (typeof window === 'undefined') return
-  const btn = document.querySelector<HTMLElement>('[data-dd-key="workspace-relation-add-target"]')
-  const panel = document.querySelector<HTMLElement>('[data-dd-panel-key="workspace-relation-add-target"]')
-  if (!btn || !panel) return
-  const rect = btn.getBoundingClientRect()
-  const pad = 8
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const panelH = panel.offsetHeight || 240
-  const below = vh - rect.bottom - pad
-  const above = rect.top - pad
-  const openUp = below < Math.min(Math.max(panelH, 180), 360) && above > below
-  relationAddTargetPanelDirection.value = openUp ? 'up' : 'down'
-
-  const w = rect.width
-  const left = Math.max(8, Math.min(rect.left, vw - w - 8))
-  const top = openUp ? Math.max(8, rect.top - pad - panelH) : Math.min(vh - 8, rect.bottom + pad)
-  relationAddTargetPanelStyle.value = {
-    left: `${Math.round(left)}px`,
-    width: `${Math.round(w)}px`,
-    top: `${Math.round(top)}px`,
-  }
-}
-
-function onDocPointerDownForRelationAddTarget(e: MouseEvent): void {
-  if (!relationAddTargetDropdownOpen.value) return
-  const t = e.target
-  if (!(t instanceof Node)) return
-  const btn = document.querySelector<HTMLElement>('[data-dd-key="workspace-relation-add-target"]')
-  const panel = document.querySelector<HTMLElement>('[data-dd-panel-key="workspace-relation-add-target"]')
-  if (btn?.contains(t)) return
-  if (panel?.contains(t)) return
-  relationAddTargetDropdownOpen.value = false
-  relationAddTargetQuery.value = ''
-}
-
 
 const canSaveNewRelation = computed(() => {
   return !!anchorCharacter.value && !!targetBId.value && !!typeFromA.value.trim() && !!typeFromB.value.trim()
@@ -550,9 +490,7 @@ function closeRelationEditModal(): void {
 }
 
 function openRelationAddModal(): void {
-  panelMode.value = 'edit'
   relationEditModalOpen.value = false
-  linkMode.value = true
   linkError.value = ''
   linkSuccess.value = ''
   clearFormFields()
@@ -562,7 +500,6 @@ function openRelationAddModal(): void {
 
 function closeRelationAddModal(): void {
   relationAddModalOpen.value = false
-  linkMode.value = false
   clearFormFields()
 }
 
@@ -629,7 +566,6 @@ function submitBidirectional(): void {
   emit('relationsChanged')
   clearFormFields()
   relationAddModalOpen.value = false
-  linkMode.value = false
   linkError.value = ''
   linkSuccess.value = '双向关系已新增。'
 }
@@ -664,26 +600,6 @@ watch(
     syncRelationDraftRows()
   }
 )
-
-watch(relationAddTargetDropdownOpen, (open) => {
-  if (typeof document === 'undefined') return
-  document.removeEventListener('pointerdown', onDocPointerDownForRelationAddTarget, true)
-  if (open) document.addEventListener('pointerdown', onDocPointerDownForRelationAddTarget, true)
-})
-
-watch(
-  () => [relationAddModalOpen.value, relationAddTargetDropdownOpen.value] as const,
-  ([modalOpen, ddOpen]) => {
-    if (!modalOpen) {
-      relationAddTargetDropdownOpen.value = false
-      relationAddTargetQuery.value = ''
-      return
-    }
-    if (!ddOpen) return
-    void nextTick(() => positionRelationAddTargetPanel())
-  },
-)
-
 
 watch(panelMode, (mode) => {
   linkMode.value = mode === 'add'
