@@ -6,6 +6,7 @@ import {
   getCharactersByNovelId,
   getChaptersByNovelId,
   getFactionsByNovelId,
+  getItemsByNovelId,
   getNovelById,
   getOutlineByNovelId,
   getOutlineStorylinesByNovelId,
@@ -16,6 +17,7 @@ import type {
   Character,
   CharacterFactionMembership,
   Faction,
+  Item,
   Novel,
   OutlineItem,
   OutlineStoryline,
@@ -29,6 +31,7 @@ export function useChapterHubData() {
   const chapters = ref<Chapter[]>([])
   const characters = ref<Character[]>([])
   const factions = ref<Faction[]>([])
+  const items = ref<Item[]>([])
   const categories = ref<Category[]>([])
   const characterFactionMemberships = ref<CharacterFactionMembership[]>([])
   const outlineItems = ref<OutlineItem[]>([])
@@ -49,6 +52,7 @@ export function useChapterHubData() {
     outlineStorylines.value = getOutlineStorylinesByNovelId(novelId.value)
     characters.value = getCharactersByNovelId(novelId.value)
     factions.value = getFactionsByNovelId(novelId.value)
+    items.value = getItemsByNovelId(novelId.value)
     categories.value = getCategoriesByNovelId(novelId.value)
     characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(novelId.value)
   }
@@ -107,6 +111,7 @@ export function useChapterHubData() {
     chapters,
     characters,
     factions,
+    items,
     categories,
     characterFactionMemberships,
     outlineItems,

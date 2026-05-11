@@ -1,4 +1,4 @@
-import type { Character, Faction } from '../../types'
+import type { Character, Faction, Item } from '../../types'
 
 export type EntityToken = {
   text: string
@@ -9,6 +9,7 @@ export type EntityToken = {
   }
   character: Character | null
   faction: Faction | null
+  item: Item | null
   foreshadow:
     | null
     | {

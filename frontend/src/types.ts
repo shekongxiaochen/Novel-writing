@@ -234,6 +234,30 @@ export type NewFactionInput = {
   categoryIds?: string[]
 }
 
+export type ItemOwnerType = 'character' | 'faction'
+
+export type Item = {
+  id: string
+  novelId: string
+  name: string
+  summary: string
+  ownerType?: ItemOwnerType | null
+  ownerId?: string | null
+  firstAppearanceChapterNo?: number | null
+  attributes?: CharacterAttribute[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type NewItemInput = {
+  novelId: string
+  name: string
+  summary: string
+  ownerType?: ItemOwnerType | null
+  ownerId?: string | null
+  attributes?: CharacterAttribute[]
+}
+
 /** 单条"填坑"记录 — 对应某处正文解决了该伏笔 */
 export type ForeshadowFulfillment = {
   id: string

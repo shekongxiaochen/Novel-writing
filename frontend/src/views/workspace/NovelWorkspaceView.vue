@@ -27,6 +27,14 @@
           <button
             type="button"
             class="tab"
+            :class="{ active: activeTab === 'items' }"
+            @click="switchTab('items')"
+          >
+            物品
+          </button>
+          <button
+            type="button"
+            class="tab"
             :class="{ active: activeTab === 'factions' }"
             @click="switchTab('factions')"
           >
@@ -67,558 +75,370 @@
       </div>
     </section>
 
-    <section class="card outline-console-card" v-if="activeTab === 'outline'">
-      <div class="section-header outline-console-head">
-        <div>
-          <h2>大纲控制台</h2>
-          <p class="muted outline-console-head__desc">把情节点、故事线、章节落地、人物势力和伏笔放在同一张结构图里。</p>
+    <section class="card outline-console-card outline-console-card--map-only" v-if="activeTab === 'outline'">
+      <header class="outline-map-hero">
+        <div class="outline-map-hero__copy">
+          <span class="outline-map-hero__eyebrow">Outline</span>
+          <h2>大纲</h2>
+          <p class="muted">管理情节点、章节绑定和推进状态，保持结构清晰、编辑直接。</p>
         </div>
-        <span class="section-header__count muted">{{ filteredOutlineItems.length }} / {{ outlineItems.length }} 个情节点</span>
-      </div>
-
-      <div v-if="outlineItems.length > 0" class="outline-console-overview">
-        <div class="outline-console-overview__stat outline-console-overview__stat--hero">
-          <span class="outline-console-overview__label">结构节点</span>
-          <strong>{{ outlineConsoleStats.total }}</strong>
-          <small>已落章节 {{ outlineConsoleStats.linked }}</small>
-        </div>
-        <div class="outline-console-overview__stat">
-          <span class="outline-console-overview__label">进度</span>
-          <strong>{{ outlineConsoleStats.done }} / {{ outlineConsoleStats.total }}</strong>
-          <small>进行中 {{ outlineConsoleStats.doing }} · 待写 {{ outlineConsoleStats.todo }}</small>
-        </div>
-        <div class="outline-console-overview__stat">
-          <span class="outline-console-overview__label">人物覆盖</span>
-          <strong>{{ outlineConsoleStats.withCharacters }}</strong>
-          <small>势力 {{ outlineConsoleStats.withFactions }} · 伏笔 {{ outlineConsoleStats.withForeshadows }}</small>
-        </div>
-        <div class="outline-console-overview__stat">
-          <span class="outline-console-overview__label">故事线</span>
-          <strong>{{ outlineStorylines.length }}</strong>
-          <small>{{ outlineStorylines.length ? outlineStorylines.map(s => s.name).slice(0, 3).join(' / ') : '先建立主线或支线' }}</small>
-        </div>
-      </div>
-
-      <section class="outline-storyline-console">
-        <div class="outline-storyline-console__head">
+        <dl class="outline-map-hero__stats" aria-label="大纲统计">
           <div>
-            <h3>故事线</h3>
-            <p class="muted">主线、支线、人物线会成为情节点的结构坐标。</p>
+            <dt>情节点</dt>
+            <dd>{{ outlineConsoleStats.total }}</dd>
           </div>
+          <div>
+            <dt>已完成</dt>
+            <dd>{{ outlineConsoleStats.done }}</dd>
+          </div>
+          <div>
+            <dt>已绑定</dt>
+            <dd>{{ outlineConsoleStats.linked }}</dd>
+          </div>
+          <div>
+            <dt>故事线</dt>
+            <dd>{{ outlineStorylines.length }}</dd>
+          </div>
+        </dl>
+        <div class="outline-map-hero__actions">
+          <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
         </div>
-        <form class="outline-storyline-form" @submit.prevent="handleCreateOutlineStoryline">
-          <input v-model="outlineStorylineForm.name" maxlength="40" placeholder="故事线名称，如：王都阴谋" />
-          <select v-model="outlineStorylineForm.type">
-            <option value="main">主线</option>
-            <option value="subplot">支线</option>
-            <option value="character">人物线</option>
-            <option value="romance">感情线</option>
-            <option value="antagonist">反派线</option>
-            <option value="world">世界线</option>
-            <option value="custom">自定义</option>
-          </select>
-          <input v-model="outlineStorylineForm.color" type="color" class="outline-storyline-form__color" title="故事线颜色" />
-          <input v-model="outlineStorylineForm.description" maxlength="80" placeholder="一句话描述（可选）" />
-          <button type="submit" class="btn-primary">＋ 添加故事线</button>
-        </form>
-        <div class="outline-storyline-strip" v-if="outlineStorylines.length > 0">
-          <article v-for="(line, idx) in outlineStorylines" :key="line.id" class="outline-storyline-chip-card" :style="{ '--storyline-color': line.color }">
-            <div class="outline-storyline-chip-card__main">
-              <span class="outline-storyline-chip-card__dot"></span>
-              <strong>{{ line.name }}</strong>
-              <em>{{ outlineStorylineTypeText(line.type) }}</em>
-              <small>{{ outlineItems.filter(item => (item.storylineIds ?? []).includes(line.id)).length }} 节点</small>
-            </div>
-            <p v-if="line.description" class="muted">{{ line.description }}</p>
-            <div class="outline-storyline-chip-card__actions">
-              <button type="button" :disabled="idx === 0" @click="moveStoryline(line.id, 'up')">上移</button>
-              <button type="button" :disabled="idx === outlineStorylines.length - 1" @click="moveStoryline(line.id, 'down')">下移</button>
-              <button type="button" @click="outlineFilter.storylineId = line.id">筛选</button>
-              <button type="button" class="outline-storyline-chip-card__danger" @click="deleteStoryline(line.id)">移除</button>
-            </div>
-          </article>
-        </div>
-      </section>
+      </header>
 
-      <form class="outline-add-form outline-add-form--console" @submit.prevent="handleCreateOutline">
-        <input
-          v-model="outlineForm.title"
-          class="outline-add-form__title"
-          placeholder="情节点标题…"
-          maxlength="80"
-          required
+      <div v-if="outlineItems.length === 0" class="outline-map-empty-state">
+        <h2>先建立第一张情节导图</h2>
+        <p class="muted">创建第一个节点后，这里会直接呈现思维导图和右侧编辑区。</p>
+        <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
+      </div>
+      <div v-else class="outline-map-workspace">
+        <OutlineMindMapCanvas
+          :nodes="outlineMapNodes"
+          :edges="outlineMapEdges"
+          :scene-width="outlineMapSceneWidth"
+          :scene-height="outlineMapSceneHeight"
+          :active-outline-id="activeOutlineMapId"
+          mode="workspace"
+          @select-node="selectOutlineMindMapNode"
+          @create-child="createOutlineNodeFromMindMap('child', $event)"
+          @create-sibling="createOutlineNodeFromMindMap('sibling', $event)"
+          @create-root="createOutlineNodeFromMindMap('root')"
         />
-        <input
-          v-model="outlineForm.summary"
-          class="outline-add-form__summary"
-          placeholder="摘要（可选）"
-          maxlength="240"
+
+        <OutlineMindMapInspector
+          :item="activeOutlineMapItem"
+          :chapters="chapters"
+          :linked-chapters="activeOutlineMapLinkedChapters"
+          :assoc-start="activeOutlineAssocStart"
+          :assoc-end="activeOutlineAssocEnd"
+          :assoc-dirty="activeOutlineAssocDirty"
+          @patch="patchOutlineFromMindMap"
+          @cycle-status="cycleOutlineStatus"
+          @delete-node="handleDeleteOutline"
+          @jump-chapter="jumpToWritingChapterFromOutline"
+          @set-assoc-start="setOutlineAssocStart"
+          @set-assoc-end="setOutlineAssocEnd"
+          @apply-assoc="requestApplyOutlineAssoc"
+          @cancel-assoc="requestCancelOutlineAssoc"
         />
-        <button type="submit" class="btn-primary outline-add-form__btn">＋ 添加节点</button>
-        <select v-model="outlineForm.level" class="outline-add-form__level">
-          <option value="scene">场景节点</option>
-          <option value="chapter">章节节点</option>
-          <option value="act">幕节点</option>
-          <option value="volume">卷节点</option>
-        </select>
-        <div class="outline-add-form__guide">
-          <p class="muted outline-add-form__guide-hint">不会写大纲时可按四句法：事件 → 冲突 → 结果 → 钩子</p>
-          <div v-if="outlineStorylines.length > 0" class="outline-form-storylines">
-            <button
-              v-for="line in outlineStorylines"
-              :key="`new-ol-line-${line.id}`"
-              type="button"
-              class="outline-card__bind-chip outline-card__bind-chip--storyline"
-              :class="{ 'outline-card__bind-chip--active': outlineForm.storylineIds.includes(line.id) }"
-              :style="{ '--storyline-color': line.color }"
-              @click="toggleOutlineFormStoryline(line.id)"
-            >{{ line.name }}</button>
-          </div>
-          <div class="outline-add-form__guide-grid">
-            <input
-              v-model="outlineTemplate.event"
-              class="outline-add-form__guide-input"
-              maxlength="50"
-              placeholder="事件：谁做了什么"
-            />
-            <input
-              v-model="outlineTemplate.conflict"
-              class="outline-add-form__guide-input"
-              maxlength="50"
-              placeholder="冲突：为什么难"
-            />
-            <input
-              v-model="outlineTemplate.result"
-              class="outline-add-form__guide-input"
-              maxlength="50"
-              placeholder="结果：局面怎么变了"
-            />
-            <input
-              v-model="outlineTemplate.hook"
-              class="outline-add-form__guide-input"
-              maxlength="50"
-              placeholder="钩子：下一步问题"
-            />
-          </div>
-          <div class="outline-add-form__guide-grid outline-add-form__guide-grid--context">
-            <input v-model="outlineForm.timeLabel" class="outline-add-form__guide-input" maxlength="40" placeholder="时间：三日后 / 雨夜" />
-            <input v-model="outlineForm.location" class="outline-add-form__guide-input" maxlength="40" placeholder="地点：旧城 / 王宫" />
-            <select v-model="outlineForm.povCharacterId" class="outline-add-form__guide-input">
-              <option value="">POV：不指定</option>
-              <option v-for="c in characters" :key="`new-outline-pov-${c.id}`" :value="c.id">POV：{{ c.name }}</option>
-            </select>
-            <select v-model="outlineForm.tension" class="outline-add-form__guide-input">
-              <option :value="1">张力：低潮</option>
-              <option :value="2">张力：铺垫</option>
-              <option :value="3">张力：推进</option>
-              <option :value="4">张力：紧张</option>
-              <option :value="5">张力：爆点</option>
-            </select>
-          </div>
-          <div class="outline-add-form__guide-grid">
-            <input v-model="outlineForm.goal" class="outline-add-form__guide-input" maxlength="80" placeholder="目标：这场戏要完成什么" />
-            <input v-model="outlineForm.conflict" class="outline-add-form__guide-input" maxlength="80" placeholder="冲突：阻碍来自哪里" />
-            <input v-model="outlineForm.twist" class="outline-add-form__guide-input" maxlength="80" placeholder="转折：中段发生什么变化" />
-            <input v-model="outlineForm.suspense" class="outline-add-form__guide-input" maxlength="80" placeholder="悬念：下一章想让读者追什么" />
-          </div>
-          <div class="outline-add-form__guide-actions">
-            <button
-              type="button"
-              class="btn-secondary outline-add-form__guide-btn"
-              :disabled="!canFillOutlineSummaryFromTemplate"
-              @click="fillOutlineSummaryFromTemplate"
-            >
-              用四句法填充摘要
-            </button>
-          </div>
-        </div>
-      </form>
-      <div v-if="outlineItems.length > 0" class="outline-filter-row">
-        <input v-model="outlineFilter.keyword" class="outline-filter-row__search" maxlength="40" placeholder="搜索标题/摘要/目标/冲突/故事线…" />
-        <select v-model="outlineFilter.stage" class="outline-filter-row__select">
-          <option value="">全部阶段</option>
-          <option value="idea">待构思</option>
-          <option value="drafted">已成型</option>
-          <option value="written">已写入正文</option>
-          <option value="resolved">已回收伏笔</option>
-        </select>
-        <select v-model="outlineFilter.level" class="outline-filter-row__select">
-          <option value="">全部层级</option>
-          <option value="volume">卷</option>
-          <option value="act">幕</option>
-          <option value="chapter">章</option>
-          <option value="scene">场景</option>
-        </select>
-        <select v-model="outlineFilter.storylineId" class="outline-filter-row__select">
-          <option value="">全部故事线</option>
-          <option v-for="line in outlineStorylines" :key="`filter-line-${line.id}`" :value="line.id">{{ line.name }}</option>
-        </select>
-        <div class="outline-filter-row__mode outline-filter-row__mode--wide">
-          <button
-            type="button"
-            class="outline-filter-row__mode-btn"
-            :class="{ 'outline-filter-row__mode-btn--active': outlineViewMode === 'console' }"
-            @click="outlineViewMode = 'console'"
-          >控制台</button>
-          <button
-            type="button"
-            class="outline-filter-row__mode-btn"
-            :class="{ 'outline-filter-row__mode-btn--active': outlineViewMode === 'storyline' }"
-            @click="outlineViewMode = 'storyline'"
-          >故事线</button>
-          <button
-            type="button"
-            class="outline-filter-row__mode-btn"
-            :class="{ 'outline-filter-row__mode-btn--active': outlineViewMode === 'structure' }"
-            @click="outlineViewMode = 'structure'"
-          >结构</button>
-          <button
-            type="button"
-            class="outline-filter-row__mode-btn"
-            :class="{ 'outline-filter-row__mode-btn--active': outlineViewMode === 'rhythm' }"
-            @click="outlineViewMode = 'rhythm'"
-          >节奏</button>
-        </div>
       </div>
 
-      <div v-if="outlineItems.length > 0" class="outline-progress">
-        <div class="outline-progress__bar">
-          <div
-            class="outline-progress__fill outline-progress__fill--done"
-            :style="{ width: `${Math.round(outlineConsoleStats.done / Math.max(outlineConsoleStats.total, 1) * 100)}%` }"
-          />
-          <div
-            class="outline-progress__fill outline-progress__fill--doing"
-            :style="{ width: `${Math.round(outlineConsoleStats.doing / Math.max(outlineConsoleStats.total, 1) * 100)}%` }"
-          />
-        </div>
-        <span class="muted outline-progress__label">
-          完成 {{ outlineConsoleStats.done }} /
-          进行中 {{ outlineConsoleStats.doing }} /
-          待写 {{ outlineConsoleStats.todo }}
-        </span>
-      </div>
-
-      <p v-if="outlineItems.length === 0" class="muted">暂无节点，在上方添加第一个情节点。</p>
-      <p v-else-if="filteredOutlineItems.length === 0" class="muted">没有符合筛选条件的情节点。</p>
-      <div v-else-if="outlineViewMode === 'structure'" class="outline-groups outline-groups--structure">
-        <section v-for="group in groupedOutlineItems" :key="`og-${group.level}`" class="outline-group-card">
-          <h3 class="outline-group-card__title">{{ group.label }}</h3>
-          <p class="muted outline-group-card__count">{{ group.items.length }} 个节点</p>
-          <div class="outline-group-card__items outline-group-card__items--stack">
-            <span v-for="item in group.items" :key="`og-item-${item.id}`" class="outline-group-card__item">
-              #{{ item.order }} {{ item.title }} · {{ outlineStorylineNames(item) }}
-            </span>
-          </div>
-        </section>
-      </div>
-      <div v-else-if="outlineViewMode === 'storyline'" class="outline-storyline-groups">
-        <section v-for="group in outlineStorylineGroups" :key="`sg-${group.id}`" class="outline-storyline-group" :style="{ '--storyline-color': group.storyline?.color ?? '#64748b' }">
-          <div class="outline-storyline-group__head">
-            <span class="outline-storyline-group__dot"></span>
-            <h3>{{ group.label }}</h3>
-            <small>{{ group.items.length }} 个节点</small>
-          </div>
-          <ul class="outline-storyline-group__items">
-            <li v-for="item in group.items" :key="`sg-item-${item.id}`">
-              <span>#{{ item.order }}</span>
-              <strong>{{ item.title }}</strong>
-              <em>{{ outlineLevelText(item.level) }} · {{ outlineTensionText(item.tension) }}</em>
-            </li>
-          </ul>
-        </section>
-      </div>
-      <div v-else-if="outlineViewMode === 'rhythm'" class="outline-rhythm-board">
-        <article v-for="row in outlineRhythmItems" :key="`rhythm-${row.item.id}`" class="outline-rhythm-row">
-          <div class="outline-rhythm-row__meta">
-            <span>#{{ row.item.order }}</span>
-            <strong>{{ row.item.title }}</strong>
-            <small>{{ outlineStorylineNames(row.item) }} · {{ row.linkedCount ? `已落 ${row.linkedCount} 章` : '未落章节' }}</small>
-          </div>
-          <div class="outline-rhythm-row__bar" :data-tension="row.tension">
-            <i v-for="n in 5" :key="`rhythm-${row.item.id}-${n}`" :class="{ 'is-on': n <= row.tension }"></i>
-          </div>
-          <span class="outline-rhythm-row__label">{{ outlineTensionText(row.tension) }}</span>
-        </article>
-      </div>
-      <ul v-else class="outline-list">
-        <li v-for="(item, idx) in filteredOutlineItems" :id="`outline-card-${item.id}`" :key="item.id" class="outline-card">
-          <!-- 卡片头部 -->
-          <div class="outline-card__head">
-            <div class="outline-card__index-col">
-              <span class="outline-card__num muted">#{{ item.order }}</span>
-              <div class="outline-card__move">
-                <button
-                  type="button"
-                  class="outline-card__move-btn"
-                  :disabled="idx === 0 && filteredOutlineItems.length === outlineItems.length"
-                  title="上移"
-                  @click="moveOutline(item.id, 'up')"
-                >▲</button>
-                <button
-                  type="button"
-                  class="outline-card__move-btn"
-                  :disabled="idx === filteredOutlineItems.length - 1 && filteredOutlineItems.length === outlineItems.length"
-                  title="下移"
-                  @click="moveOutline(item.id, 'down')"
-                >▼</button>
-              </div>
-            </div>
-
-            <div class="outline-card__body">
-              <input
-                class="outline-card__title-input"
-                type="text"
-                :value="item.title"
-                maxlength="80"
-                placeholder="情节点标题"
-                @change="onOutlineTitleChange(item.id, $event)"
-              />
-              <input
-                class="outline-card__summary-input"
-                type="text"
-                :value="item.summary"
-                maxlength="240"
-                placeholder="摘要（可选）"
-                @change="onOutlineSummaryChange(item.id, $event)"
-              />
-              <div class="outline-card__meta-row outline-card__meta-row--context">
-                <select class="outline-card__level-select" :value="item.level ?? 'scene'" @change="onOutlineLevelChange(item.id, $event)">
-                  <option value="scene">场景</option>
-                  <option value="chapter">章</option>
-                  <option value="act">幕</option>
-                  <option value="volume">卷</option>
-                </select>
-                <span class="outline-card__level-badge">{{ outlineLevelText(item.level) }}</span>
-                <select class="outline-card__level-select outline-card__tension-select" :value="normalizeOutlineTensionForUi(item.tension)" @change="onOutlineTensionChange(item.id, $event)">
-                  <option :value="1">低潮</option>
-                  <option :value="2">铺垫</option>
-                  <option :value="3">推进</option>
-                  <option :value="4">紧张</option>
-                  <option :value="5">爆点</option>
-                </select>
-                <span class="outline-card__level-badge">张力 {{ normalizeOutlineTensionForUi(item.tension) }}</span>
-              </div>
-              <div class="outline-card__storylines" v-if="outlineStorylines.length > 0">
-                <button
-                  v-for="line in outlineStorylines"
-                  :key="`ol-line-${item.id}-${line.id}`"
-                  type="button"
-                  class="outline-card__bind-chip outline-card__bind-chip--storyline"
-                  :class="{ 'outline-card__bind-chip--active': isOutlineStorylineBound(item, line.id) }"
-                  :style="{ '--storyline-color': line.color }"
-                  @click="toggleOutlineStorylineBind(item.id, line.id)"
-                >{{ line.name }}</button>
-              </div>
-              <div class="outline-card__context-grid">
-                <input class="outline-card__plot-input" :value="item.timeLabel ?? ''" maxlength="80" placeholder="时间" @change="onOutlineContextFieldChange(item.id, 'timeLabel', $event)" />
-                <input class="outline-card__plot-input" :value="item.location ?? ''" maxlength="80" placeholder="地点" @change="onOutlineContextFieldChange(item.id, 'location', $event)" />
-                <select class="outline-card__plot-input" :value="item.povCharacterId ?? ''" @change="onOutlinePovChange(item.id, $event)">
-                  <option value="">POV：不指定</option>
-                  <option v-for="c in characters" :key="`ol-pov-${item.id}-${c.id}`" :value="c.id">POV：{{ c.name }}</option>
-                </select>
-                <span class="outline-card__context-summary">{{ outlineStorylineNames(item) }} · {{ outlinePovName(item) }} · {{ outlineTensionText(item.tension) }}</span>
-              </div>
-              <div class="outline-card__plot-grid">
-                <input class="outline-card__plot-input" :value="item.goal ?? ''" maxlength="120" placeholder="目标" @change="onOutlineFieldChange(item.id, 'goal', $event)" />
-                <input class="outline-card__plot-input" :value="item.conflict ?? ''" maxlength="120" placeholder="冲突" @change="onOutlineFieldChange(item.id, 'conflict', $event)" />
-                <input class="outline-card__plot-input" :value="item.twist ?? ''" maxlength="120" placeholder="转折" @change="onOutlineFieldChange(item.id, 'twist', $event)" />
-                <input class="outline-card__plot-input" :value="item.result ?? ''" maxlength="120" placeholder="结果" @change="onOutlineFieldChange(item.id, 'result', $event)" />
-                <input class="outline-card__plot-input outline-card__plot-input--wide" :value="item.suspense ?? ''" maxlength="120" placeholder="悬念/钩子" @change="onOutlineFieldChange(item.id, 'suspense', $event)" />
-              </div>
-              <div class="outline-card__ai-actions">
-                <button type="button" class="btn-secondary" :disabled="!!outlineAiLoadingById[item.id]" @click="enhanceOutlineByAi(item.id, 'conflict')">AI补冲突</button>
-                <button type="button" class="btn-secondary" :disabled="!!outlineAiLoadingById[item.id]" @click="enhanceOutlineByAi(item.id, 'twist')">AI补转折</button>
-                <button type="button" class="btn-secondary" :disabled="!!outlineAiLoadingById[item.id]" @click="enhanceOutlineByAi(item.id, 'suspense')">AI补悬念</button>
-                <button type="button" class="btn-primary" :disabled="!!outlineAiLoadingById[item.id]" @click="enhanceOutlineByAi(item.id, 'full')">
-                  {{ outlineAiLoadingById[item.id] ? '生成中…' : 'AI一键补全' }}
-                </button>
-              </div>
-              <details class="outline-card__bind">
-                <summary>关联角色（{{ (item.characterIds ?? []).length }}）</summary>
-                <div class="outline-card__bind-chips">
-                  <button
-                    v-for="c in characters"
-                    :key="`ol-char-${item.id}-${c.id}`"
-                    type="button"
-                    class="outline-card__bind-chip"
-                    :class="{ 'outline-card__bind-chip--active': isOutlineCharacterBound(item, c.id) }"
-                    @click="toggleOutlineCharacterBind(item.id, c.id)"
-                  >
-                    {{ c.name }}
-                  </button>
-                  <span v-if="characters.length === 0" class="muted">暂无角色可关联</span>
-                </div>
-                <p class="muted outline-card__bind-summary">已关联：{{ outlineCharacterNames(item) }}</p>
-              </details>
-              <details class="outline-card__bind">
-                <summary>关联势力（{{ (item.factionIds ?? []).length }}）</summary>
-                <div class="outline-card__bind-chips">
-                  <button
-                    v-for="f in factions"
-                    :key="`ol-faction-${item.id}-${f.id}`"
-                    type="button"
-                    class="outline-card__bind-chip"
-                    :class="{ 'outline-card__bind-chip--active': isOutlineFactionBound(item, f.id) }"
-                    @click="toggleOutlineFactionBind(item.id, f.id)"
-                  >
-                    {{ f.name }}
-                  </button>
-                  <span v-if="factions.length === 0" class="muted">暂无势力可关联</span>
-                </div>
-                <p class="muted outline-card__bind-summary">已关联：{{ outlineFactionNames(item) }}</p>
-              </details>
-              <details class="outline-card__bind">
-                <summary>关联伏笔（{{ (item.foreshadowIds ?? []).length }}）</summary>
-                <div class="outline-card__bind-chips">
-                  <button
-                    v-for="fz in foreshadows"
-                    :key="`ol-fz-${item.id}-${fz.id}`"
-                    type="button"
-                    class="outline-card__bind-chip"
-                    :class="{ 'outline-card__bind-chip--active': isOutlineForeshadowBound(item, fz.id) }"
-                    @click="toggleOutlineForeshadowBind(item.id, fz.id)"
-                  >
-                    {{ fz.title }}
-                  </button>
-                  <span v-if="foreshadows.length === 0" class="muted">暂无伏笔可关联</span>
-                </div>
-                <p class="muted outline-card__bind-summary">已关联：{{ outlineForeshadowNames(item) }}</p>
-              </details>
-            </div>
-
-            <div class="outline-card__right">
-              <!-- 状态标签（可点击切换） -->
-              <button
-                type="button"
-                class="outline-status-btn"
-                :class="`outline-status-btn--${item.status}`"
-                :title="'点击切换状态：当前 ' + outlineStatusText(item.status)"
-                @click="cycleOutlineStatus(item.id)"
-              >{{ outlineStatusText(item.status) }}</button>
-              <button
-                type="button"
-                class="outline-status-btn outline-status-btn--plot"
-                :title="'点击切换情节阶段：当前 ' + plotStageText(item.plotStage)"
-                @click="cycleOutlinePlotStage(item.id)"
-              >{{ plotStageText(item.plotStage) }}</button>
-
-              <!-- 关联章节展示 -->
-              <button
-                type="button"
-                class="outline-card__assoc-btn"
-                :class="{ 'outline-card__assoc-btn--has': getLinkedChaptersCount(item.id) > 0 }"
-                :title="chapters.length === 0 ? '尚无章节可关联' : (expandedOutlineId === item.id ? '收起' : '管理关联章节')"
-                :disabled="chapters.length === 0"
-                @click="toggleOutlineAssocPanel(item.id)"
-              >
-                <span class="outline-card__assoc-icon">§</span>
-                <span>{{ getLinkedChaptersCount(item.id) > 0 ? `已落 ${getLinkedChaptersCount(item.id)} 章` : '尚未落地' }}</span>
-              </button>
-
-              <button
-                type="button"
-                class="outline-card__del-btn"
-                title="删除该情节点"
-                @click="handleDeleteOutline(item.id)"
-              >删除</button>
-            </div>
-          </div>
-
-          <!-- 关联章节选择器（展开） -->
-          <div v-if="expandedOutlineId === item.id" class="outline-card__assoc-panel">
-            <p class="outline-card__assoc-hint muted">设置起止章节后，点击按钮按区间关联章节</p>
-            <div class="outline-assoc-range">
-              <label class="timeline-add-form__field">
-                <span>开始章节</span>
-                <div class="workspace-dd">
-                  <button
-                    type="button"
-                    class="workspace-dd__btn workspace-dd__btn--compact"
-                    :class="{ 'workspace-dd__btn--open': outlineAssocStartDropdownOpenId === item.id }"
-                    :data-dd-key="`outline-assoc-start-${item.id}`"
-                    @click="toggleOutlineAssocStartDropdown(item.id)"
-                  >
-                    <span class="workspace-dd__btn-text">{{ outlineAssocStartLabel(item.id) }}</span>
-                    <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
-                  </button>
-                  <div
-                    v-if="outlineAssocStartDropdownOpenId === item.id"
-                    class="workspace-dd__panel scrollbar-paper"
-                    :class="dropdownPanelDirectionClass(`outline-assoc-start-${item.id}`)"
-                    :data-dd-panel-key="`outline-assoc-start-${item.id}`"
-                    role="listbox"
-                  >
-                    <button
-                      type="button"
-                      class="workspace-dd__item"
-                      :class="{ 'workspace-dd__item--active': (outlineAssocStartByItemId[item.id] ?? '') === '' }"
-                      @click="setOutlineAssocStart(item.id, '')"
-                    >
-                      不设置
-                    </button>
-                    <button
-                      v-for="ch in chapters"
-                      :key="`oa-s-${item.id}-${ch.id}`"
-                      type="button"
-                      class="workspace-dd__item"
-                      :class="{ 'workspace-dd__item--active': (outlineAssocStartByItemId[item.id] ?? '') === String(ch.chapterNo) }"
-                      @click="setOutlineAssocStart(item.id, String(ch.chapterNo))"
-                    >
-                      {{ chapterDisplayLabel(ch) }}
-                    </button>
+      <Teleport to="body">
+        <Transition name="confirm">
+          <div v-if="outlineCreateOpen" class="confirm-overlay" role="presentation" @click.self="closeOutlineCreate">
+            <div class="confirm-dialog workspace-outline-dialog workspace-outline-create-dialog" role="dialog" aria-modal="true">
+              <div class="confirm-dialog__accent" aria-hidden="true" />
+              <div class="confirm-dialog__body workspace-outline-dialog__body">
+                <h2 class="confirm-dialog__title">新增情节点</h2>
+                <p class="muted workspace-outline-dialog__sub">只填写最关键的信息：标题、状态、目标和简介。</p>
+                <form class="outline-dialog-form" @submit.prevent="submitOutlineCreate">
+                  <div class="workspace-outline-dialog__scroll scrollbar-paper">
+                    <div class="outline-dialog-grid outline-dialog-grid--primary outline-dialog-grid--simple">
+                      <label class="outline-dialog-field outline-dialog-field--wide">
+                        <span>标题 *</span>
+                        <input v-model="outlineForm.title" maxlength="80" required autocomplete="off" placeholder="情节点标题…" />
+                      </label>
+                      <label class="outline-dialog-field">
+                        <span>状态</span>
+                        <select v-model="outlineForm.status">
+                          <option value="todo">待写</option>
+                          <option value="doing">进行中</option>
+                          <option value="done">已完成</option>
+                        </select>
+                      </label>
+                      <label class="outline-dialog-field outline-dialog-field--wide">
+                        <span>目标</span>
+                        <input v-model="outlineForm.goal" maxlength="120" placeholder="这个节点要完成什么" />
+                      </label>
+                      <label class="outline-dialog-field outline-dialog-field--wide">
+                        <span>简介</span>
+                        <textarea v-model="outlineForm.summary" maxlength="240" rows="4" placeholder="一句话说明这个节点发生什么" />
+                      </label>
+                    </div>
                   </div>
-                </div>
-              </label>
-              <label class="timeline-add-form__field">
-                <span>结束章节</span>
-                <div class="workspace-dd">
-                  <button
-                    type="button"
-                    class="workspace-dd__btn workspace-dd__btn--compact"
-                    :class="{ 'workspace-dd__btn--open': outlineAssocEndDropdownOpenId === item.id }"
-                    :data-dd-key="`outline-assoc-end-${item.id}`"
-                    @click="toggleOutlineAssocEndDropdown(item.id)"
-                  >
-                    <span class="workspace-dd__btn-text">{{ outlineAssocEndLabel(item.id) }}</span>
-                    <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
-                  </button>
-                  <div
-                    v-if="outlineAssocEndDropdownOpenId === item.id"
-                    class="workspace-dd__panel scrollbar-paper"
-                    :class="dropdownPanelDirectionClass(`outline-assoc-end-${item.id}`)"
-                    :data-dd-panel-key="`outline-assoc-end-${item.id}`"
-                    role="listbox"
-                  >
-                    <button
-                      type="button"
-                      class="workspace-dd__item"
-                      :class="{ 'workspace-dd__item--active': (outlineAssocEndByItemId[item.id] ?? '') === '' }"
-                      @click="setOutlineAssocEnd(item.id, '')"
-                    >
-                      不设置
-                    </button>
-                    <button
-                      v-for="ch in chapters"
-                      :key="`oa-e-${item.id}-${ch.id}`"
-                      type="button"
-                      class="workspace-dd__item"
-                      :class="{ 'workspace-dd__item--active': (outlineAssocEndByItemId[item.id] ?? '') === String(ch.chapterNo) }"
-                      @click="setOutlineAssocEnd(item.id, String(ch.chapterNo))"
-                    >
-                      {{ chapterDisplayLabel(ch) }}
-                    </button>
+                  <div class="confirm-dialog__actions workspace-outline-dialog__actions">
+                    <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeOutlineCreate">取消</button>
+                    <button type="submit" class="confirm-dialog__btn confirm-dialog__btn--danger">添加节点</button>
                   </div>
-                </div>
-              </label>
-              <div class="outline-assoc-range__actions">
-                <button type="button" class="btn-secondary" @click="requestCancelOutlineAssoc(item.id)">取消</button>
-                <button type="button" class="btn-primary" @click="requestApplyOutlineAssoc(item.id)">确认</button>
+                </form>
               </div>
             </div>
           </div>
-        </li>
-      </ul>
+        </Transition>
+      </Teleport>
+
+      <Teleport to="body">
+        <Transition name="confirm">
+          <div
+            v-if="outlineDetailOpenId && activeOutlineDetailItem"
+            class="confirm-overlay"
+            role="presentation"
+            @click.self="closeOutlineDetail"
+          >
+            <div class="confirm-dialog workspace-outline-dialog workspace-outline-detail-dialog" role="dialog" aria-modal="true">
+              <div class="confirm-dialog__accent" aria-hidden="true" />
+              <div class="confirm-dialog__body workspace-outline-dialog__body">
+                <h2 class="confirm-dialog__title">编辑情节点 · #{{ activeOutlineDetailItem.order }}</h2>
+                <p class="muted workspace-outline-dialog__sub">{{ activeOutlineDetailItem.title || '未命名情节点' }}</p>
+                <div class="workspace-outline-dialog__scroll scrollbar-paper">
+                  <section class="outline-dialog-section">
+                    <h3>基础信息</h3>
+                    <div class="outline-dialog-grid outline-dialog-grid--primary">
+                      <label class="outline-dialog-field outline-dialog-field--wide">
+                        <span>标题</span>
+                        <input
+                          :value="activeOutlineDetailItem.title"
+                          maxlength="80"
+                          placeholder="情节点标题"
+                          @change="onOutlineTitleChange(activeOutlineDetailItem.id, $event)"
+                        />
+                      </label>
+                      <label class="outline-dialog-field outline-dialog-field--wide">
+                        <span>摘要</span>
+                        <input
+                          :value="activeOutlineDetailItem.summary"
+                          maxlength="240"
+                          placeholder="摘要（可选）"
+                          @change="onOutlineSummaryChange(activeOutlineDetailItem.id, $event)"
+                        />
+                      </label>
+                      <label class="outline-dialog-field">
+                        <span>层级</span>
+                        <select :value="activeOutlineDetailItem.level ?? 'scene'" @change="onOutlineLevelChange(activeOutlineDetailItem.id, $event)">
+                          <option value="scene">场景</option>
+                          <option value="chapter">章</option>
+                          <option value="act">幕</option>
+                          <option value="volume">卷</option>
+                        </select>
+                      </label>
+                      <label class="outline-dialog-field">
+                        <span>张力</span>
+                        <select :value="normalizeOutlineTensionForUi(activeOutlineDetailItem.tension)" @change="onOutlineTensionChange(activeOutlineDetailItem.id, $event)">
+                          <option :value="1">低潮</option>
+                          <option :value="2">铺垫</option>
+                          <option :value="3">推进</option>
+                          <option :value="4">紧张</option>
+                          <option :value="5">爆点</option>
+                        </select>
+                      </label>
+                      <label class="outline-dialog-field">
+                        <span>POV</span>
+                        <select :value="activeOutlineDetailItem.povCharacterId ?? ''" @change="onOutlinePovChange(activeOutlineDetailItem.id, $event)">
+                          <option value="">不指定</option>
+                          <option v-for="c in characters" :key="`ol-pov-${activeOutlineDetailItem.id}-${c.id}`" :value="c.id">{{ c.name }}</option>
+                        </select>
+                      </label>
+                      <label class="outline-dialog-field">
+                        <span>时间</span>
+                        <input :value="activeOutlineDetailItem.timeLabel ?? ''" maxlength="80" placeholder="时间" @change="onOutlineContextFieldChange(activeOutlineDetailItem.id, 'timeLabel', $event)" />
+                      </label>
+                      <label class="outline-dialog-field">
+                        <span>地点</span>
+                        <input :value="activeOutlineDetailItem.location ?? ''" maxlength="80" placeholder="地点" @change="onOutlineContextFieldChange(activeOutlineDetailItem.id, 'location', $event)" />
+                      </label>
+                    </div>
+                  </section>
+
+                  <section class="outline-dialog-section">
+                    <h3>情节推进</h3>
+                    <div class="outline-dialog-grid">
+                      <input :value="activeOutlineDetailItem.goal ?? ''" maxlength="120" placeholder="目标" @change="onOutlineFieldChange(activeOutlineDetailItem.id, 'goal', $event)" />
+                      <input :value="activeOutlineDetailItem.conflict ?? ''" maxlength="120" placeholder="冲突" @change="onOutlineFieldChange(activeOutlineDetailItem.id, 'conflict', $event)" />
+                      <input :value="activeOutlineDetailItem.twist ?? ''" maxlength="120" placeholder="转折" @change="onOutlineFieldChange(activeOutlineDetailItem.id, 'twist', $event)" />
+                      <input :value="activeOutlineDetailItem.result ?? ''" maxlength="120" placeholder="结果" @change="onOutlineFieldChange(activeOutlineDetailItem.id, 'result', $event)" />
+                      <input :value="activeOutlineDetailItem.suspense ?? ''" maxlength="120" placeholder="悬念/钩子" @change="onOutlineFieldChange(activeOutlineDetailItem.id, 'suspense', $event)" />
+                    </div>
+                    <div class="outline-card__ai-actions outline-dialog-ai-actions">
+                      <button type="button" class="btn-secondary" :disabled="!!outlineAiLoadingById[activeOutlineDetailItem.id]" @click="enhanceOutlineByAi(activeOutlineDetailItem.id, 'conflict')">AI补冲突</button>
+                      <button type="button" class="btn-secondary" :disabled="!!outlineAiLoadingById[activeOutlineDetailItem.id]" @click="enhanceOutlineByAi(activeOutlineDetailItem.id, 'twist')">AI补转折</button>
+                      <button type="button" class="btn-secondary" :disabled="!!outlineAiLoadingById[activeOutlineDetailItem.id]" @click="enhanceOutlineByAi(activeOutlineDetailItem.id, 'suspense')">AI补悬念</button>
+                      <button type="button" class="btn-primary" :disabled="!!outlineAiLoadingById[activeOutlineDetailItem.id]" @click="enhanceOutlineByAi(activeOutlineDetailItem.id, 'full')">
+                        {{ outlineAiLoadingById[activeOutlineDetailItem.id] ? '生成中…' : 'AI一键补全' }}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section class="outline-dialog-section">
+                    <h3>故事线</h3>
+                    <div v-if="outlineStorylines.length > 0" class="outline-form-storylines">
+                      <button
+                        v-for="line in outlineStorylines"
+                        :key="`ol-line-${activeOutlineDetailItem.id}-${line.id}`"
+                        type="button"
+                        class="outline-card__bind-chip outline-card__bind-chip--storyline"
+                        :class="{ 'outline-card__bind-chip--active': isOutlineStorylineBound(activeOutlineDetailItem, line.id) }"
+                        :style="{ '--storyline-color': line.color }"
+                        @click="toggleOutlineStorylineBind(activeOutlineDetailItem.id, line.id)"
+                      >{{ line.name }}</button>
+                    </div>
+                    <p v-else class="muted">暂无故事线可关联。</p>
+                  </section>
+
+                  <section class="outline-dialog-section">
+                    <h3>关联对象</h3>
+                    <details class="outline-card__bind" open>
+                      <summary>关联角色（{{ (activeOutlineDetailItem.characterIds ?? []).length }}）</summary>
+                      <div class="outline-card__bind-chips outline-dialog-bind-chips">
+                        <button
+                          v-for="c in characters"
+                          :key="`ol-char-${activeOutlineDetailItem.id}-${c.id}`"
+                          type="button"
+                          class="outline-card__bind-chip"
+                          :class="{ 'outline-card__bind-chip--active': isOutlineCharacterBound(activeOutlineDetailItem, c.id) }"
+                          @click="toggleOutlineCharacterBind(activeOutlineDetailItem.id, c.id)"
+                        >
+                          {{ c.name }}
+                        </button>
+                        <span v-if="characters.length === 0" class="muted">暂无角色可关联</span>
+                      </div>
+                      <p class="muted outline-card__bind-summary">已关联：{{ outlineCharacterNames(activeOutlineDetailItem) }}</p>
+                    </details>
+                    <details class="outline-card__bind">
+                      <summary>关联势力（{{ (activeOutlineDetailItem.factionIds ?? []).length }}）</summary>
+                      <div class="outline-card__bind-chips outline-dialog-bind-chips">
+                        <button
+                          v-for="f in factions"
+                          :key="`ol-faction-${activeOutlineDetailItem.id}-${f.id}`"
+                          type="button"
+                          class="outline-card__bind-chip"
+                          :class="{ 'outline-card__bind-chip--active': isOutlineFactionBound(activeOutlineDetailItem, f.id) }"
+                          @click="toggleOutlineFactionBind(activeOutlineDetailItem.id, f.id)"
+                        >
+                          {{ f.name }}
+                        </button>
+                        <span v-if="factions.length === 0" class="muted">暂无势力可关联</span>
+                      </div>
+                      <p class="muted outline-card__bind-summary">已关联：{{ outlineFactionNames(activeOutlineDetailItem) }}</p>
+                    </details>
+                    <details class="outline-card__bind">
+                      <summary>关联伏笔（{{ (activeOutlineDetailItem.foreshadowIds ?? []).length }}）</summary>
+                      <div class="outline-card__bind-chips outline-dialog-bind-chips">
+                        <button
+                          v-for="fz in foreshadows"
+                          :key="`ol-fz-${activeOutlineDetailItem.id}-${fz.id}`"
+                          type="button"
+                          class="outline-card__bind-chip"
+                          :class="{ 'outline-card__bind-chip--active': isOutlineForeshadowBound(activeOutlineDetailItem, fz.id) }"
+                          @click="toggleOutlineForeshadowBind(activeOutlineDetailItem.id, fz.id)"
+                        >
+                          {{ fz.title }}
+                        </button>
+                        <span v-if="foreshadows.length === 0" class="muted">暂无伏笔可关联</span>
+                      </div>
+                      <p class="muted outline-card__bind-summary">已关联：{{ outlineForeshadowNames(activeOutlineDetailItem) }}</p>
+                    </details>
+                  </section>
+
+                  <section class="outline-dialog-section">
+                    <h3>落地章节</h3>
+                    <p class="outline-card__assoc-hint muted">设置起止章节后，按区间关联章节。</p>
+                    <div class="outline-assoc-range">
+                      <label class="timeline-add-form__field">
+                        <span>开始章节</span>
+                        <div class="workspace-dd">
+                          <button
+                            type="button"
+                            class="workspace-dd__btn workspace-dd__btn--compact"
+                            :class="{ 'workspace-dd__btn--open': outlineAssocStartDropdownOpenId === activeOutlineDetailItem.id }"
+                            :data-dd-key="`outline-assoc-start-${activeOutlineDetailItem.id}`"
+                            @click="toggleOutlineAssocStartDropdown(activeOutlineDetailItem.id)"
+                          >
+                            <span class="workspace-dd__btn-text">{{ outlineAssocStartLabel(activeOutlineDetailItem.id) }}</span>
+                            <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
+                          </button>
+                          <div
+                            v-if="outlineAssocStartDropdownOpenId === activeOutlineDetailItem.id"
+                            class="workspace-dd__panel scrollbar-paper"
+                            :class="dropdownPanelDirectionClass(`outline-assoc-start-${activeOutlineDetailItem.id}`)"
+                            :data-dd-panel-key="`outline-assoc-start-${activeOutlineDetailItem.id}`"
+                            role="listbox"
+                          >
+                            <button type="button" class="workspace-dd__item" :class="{ 'workspace-dd__item--active': (outlineAssocStartByItemId[activeOutlineDetailItem.id] ?? '') === '' }" @click="setOutlineAssocStart(activeOutlineDetailItem.id, '')">
+                              不设置
+                            </button>
+                            <button
+                              v-for="ch in chapters"
+                              :key="`oa-s-${activeOutlineDetailItem.id}-${ch.id}`"
+                              type="button"
+                              class="workspace-dd__item"
+                              :class="{ 'workspace-dd__item--active': (outlineAssocStartByItemId[activeOutlineDetailItem.id] ?? '') === String(ch.chapterNo) }"
+                              @click="setOutlineAssocStart(activeOutlineDetailItem.id, String(ch.chapterNo))"
+                            >
+                              {{ chapterDisplayLabel(ch) }}
+                            </button>
+                          </div>
+                        </div>
+                      </label>
+                      <label class="timeline-add-form__field">
+                        <span>结束章节</span>
+                        <div class="workspace-dd">
+                          <button
+                            type="button"
+                            class="workspace-dd__btn workspace-dd__btn--compact"
+                            :class="{ 'workspace-dd__btn--open': outlineAssocEndDropdownOpenId === activeOutlineDetailItem.id }"
+                            :data-dd-key="`outline-assoc-end-${activeOutlineDetailItem.id}`"
+                            @click="toggleOutlineAssocEndDropdown(activeOutlineDetailItem.id)"
+                          >
+                            <span class="workspace-dd__btn-text">{{ outlineAssocEndLabel(activeOutlineDetailItem.id) }}</span>
+                            <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
+                          </button>
+                          <div
+                            v-if="outlineAssocEndDropdownOpenId === activeOutlineDetailItem.id"
+                            class="workspace-dd__panel scrollbar-paper"
+                            :class="dropdownPanelDirectionClass(`outline-assoc-end-${activeOutlineDetailItem.id}`)"
+                            :data-dd-panel-key="`outline-assoc-end-${activeOutlineDetailItem.id}`"
+                            role="listbox"
+                          >
+                            <button type="button" class="workspace-dd__item" :class="{ 'workspace-dd__item--active': (outlineAssocEndByItemId[activeOutlineDetailItem.id] ?? '') === '' }" @click="setOutlineAssocEnd(activeOutlineDetailItem.id, '')">
+                              不设置
+                            </button>
+                            <button
+                              v-for="ch in chapters"
+                              :key="`oa-e-${activeOutlineDetailItem.id}-${ch.id}`"
+                              type="button"
+                              class="workspace-dd__item"
+                              :class="{ 'workspace-dd__item--active': (outlineAssocEndByItemId[activeOutlineDetailItem.id] ?? '') === String(ch.chapterNo) }"
+                              @click="setOutlineAssocEnd(activeOutlineDetailItem.id, String(ch.chapterNo))"
+                            >
+                              {{ chapterDisplayLabel(ch) }}
+                            </button>
+                          </div>
+                        </div>
+                      </label>
+                      <div class="outline-assoc-range__actions">
+                        <button type="button" class="btn-secondary" @click="requestCancelOutlineAssoc(activeOutlineDetailItem.id)">取消</button>
+                        <button type="button" class="btn-primary" @click="requestApplyOutlineAssoc(activeOutlineDetailItem.id)">确认</button>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+                <div class="confirm-dialog__actions workspace-outline-dialog__actions">
+                  <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeOutlineDetail">完成</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
 
       <ConfirmDialog
         v-model="outlineDeleteOpen"
@@ -752,6 +572,17 @@
                         >
                           <li v-for="name in categoryNamesByIds(selectedGraphCharacter.categoryIds)" :key="`cc-${name}`">
                             <strong>{{ name }}</strong>
+                          </li>
+                        </ul>
+                        <template v-else>—</template>
+                      </dd>
+                    </div>
+                    <div class="character-panel__spec-item character-panel__spec-item--block">
+                      <dt>持有物品</dt>
+                      <dd>
+                        <ul v-if="graphCharacterHeldItems.length" class="character-panel__faction-list">
+                          <li v-for="item in graphCharacterHeldItems" :key="`wch-${item.id}`">
+                            <strong>{{ item.name }}</strong>
                           </li>
                         </ul>
                         <template v-else>—</template>
@@ -972,13 +803,24 @@
                             <span class="character-panel__field-label">年龄</span>
                             <input v-model="characterDraft.age" class="character-panel__input" maxlength="20" />
                           </label>
-                          <label class="character-panel__field">
+                          <div class="character-panel__field">
                             <span class="character-panel__field-label">性别</span>
-                            <select v-model="characterDraft.gender" class="character-panel__input">
-                              <option value="男">男</option>
-                              <option value="女">女</option>
-                            </select>
-                          </label>
+                            <div class="character-gender-toggle" role="radiogroup" aria-label="性别">
+                              <button
+                                v-for="option in genderOptions"
+                                :key="`draft-gender-${option.value || 'unset'}`"
+                                type="button"
+                                class="character-gender-toggle__option"
+                                :class="{ 'character-gender-toggle__option--active': characterDraft.gender === option.value }"
+                                role="radio"
+                                :aria-checked="characterDraft.gender === option.value"
+                                @click="characterDraft.gender = option.value"
+                              >
+                                <span class="character-gender-toggle__dot" aria-hidden="true">{{ option.mark }}</span>
+                                <span>{{ option.label }}</span>
+                              </button>
+                            </div>
+                          </div>
                           <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                             <div class="character-panel__block-head">
                               <h4 class="character-panel__block-title">别名</h4>
@@ -1008,40 +850,114 @@
                           </section>
                           <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                             <div class="character-panel__block-head">
+                              <h4 class="character-panel__block-title">持有物品</h4>
+                              <span class="character-panel__block-hint">可搜索添加；已持有物品在下拉底部标识且不可重复选择</span>
+                            </div>
+                            <p v-if="items.length === 0" class="muted" style="margin: 0 0 8px">暂无物品，请先到「物品」页创建。</p>
+                            <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterItemPickerOpen }">
+                              <div class="workspace-item-owner-picker__head"><span>持有物品</span></div>
+                              <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleCharacterItemPicker">
+                                <span class="workspace-item-owner-picker__trigger-main">{{ characterDraft.itemIds.length ? `已持有 ${characterDraft.itemIds.length} 件物品` : '选择持有物品…' }}</span>
+                                <span class="workspace-item-owner-picker__chevron">⌄</span>
+                              </button>
+                              <div v-if="characterItemPickerOpen" class="workspace-item-owner-picker__popover workspace-character-picker__popover">
+                                <input v-model="characterDraft.itemQuery" maxlength="40" placeholder="搜索物品…" autocomplete="off" />
+                                <div class="workspace-item-owner-picker__list scrollbar-paper">
+                                  <button
+                                    v-for="row in characterItemPickerRows"
+                                    :key="`char-item-dd-${row.id}`"
+                                    type="button"
+                                    class="workspace-item-owner-picker__option"
+                                    :class="{ active: row.bound, 'workspace-item-owner-picker__option--disabled': row.disabled }"
+                                    :disabled="row.disabled"
+                                    @click="selectCharacterDraftItem(row.id)"
+                                  >
+                                    <span class="workspace-item-owner-picker__mark">物</span>
+                                    <span class="workspace-item-owner-picker__label">{{ row.label }}</span>
+                                    <em>{{ row.meta }}</em>
+                                  </button>
+                                  <p v-if="characterItemPickerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的物品</p>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-if="characterDraft.itemIds.length > 0" class="workspace-character-picker__bound-list">
+                              <span v-for="itemId in characterDraft.itemIds" :key="`char-bound-item-${itemId}`" class="category-bind-chip category-bind-chip--bound workspace-character-picker__bound-chip">
+                                {{ itemNameById(itemId) }}
+                                <button type="button" @click="removeCharacterDraftItem(itemId)">×</button>
+                              </span>
+                            </div>
+                          </section>
+
+                          <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
+                            <div class="character-panel__block-head">
                               <h4 class="character-panel__block-title">分类</h4>
-                              <span class="character-panel__block-hint">可多选；也可在「分类」页从分类侧绑定角色</span>
+                              <span class="character-panel__block-hint">可搜索添加；已绑定分类在下拉底部标识且不可重复选择</span>
                             </div>
                             <p v-if="sortedCategories.length === 0" class="muted" style="margin: 0 0 8px">暂无分类，请在本页下方「分类」中新建。</p>
-                            <div v-else class="character-panel__category-checks" role="group" aria-label="角色分类">
-                              <label
-                                v-for="cat in sortedCategories"
-                                :key="`wcc-${cat.id}`"
-                                class="category-bind-chip character-panel__category-chip"
-                                :class="
-                                  characterDraft.categoryIds.includes(cat.id)
-                                    ? 'category-bind-chip--bound'
-                                    : 'category-bind-chip--unbound'
-                                "
-                                :for="`ws-cat-${cat.id}`"
-                              >
-                                <input
-                                  :id="`ws-cat-${cat.id}`"
-                                  type="checkbox"
-                                  class="visually-hidden"
-                                  :checked="characterDraft.categoryIds.includes(cat.id)"
-                                  @change="toggleCharacterDraftCategory(cat.id)"
-                                />
-                                <span class="category-bind-chip__state" aria-hidden="true">{{
-                                  characterDraft.categoryIds.includes(cat.id) ? '✓' : '+'
-                                }}</span>
-                                <span class="character-panel__category-chip-text">{{ cat.name }}</span>
-                              </label>
+                            <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterCategoryPickerOpen }">
+                              <div class="workspace-item-owner-picker__head"><span>角色分类</span></div>
+                              <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleCharacterCategoryPicker">
+                                <span class="workspace-item-owner-picker__trigger-main">{{ characterDraft.categoryIds.length ? `已绑定 ${characterDraft.categoryIds.length} 个分类` : '选择分类…' }}</span>
+                                <span class="workspace-item-owner-picker__chevron">⌄</span>
+                              </button>
+                              <div v-if="characterCategoryPickerOpen" class="workspace-item-owner-picker__popover workspace-character-picker__popover">
+                                <input v-model="characterDraft.categoryQuery" maxlength="40" placeholder="搜索分类…" autocomplete="off" />
+                                <div class="workspace-item-owner-picker__list scrollbar-paper">
+                                  <button
+                                    v-for="row in characterCategoryPickerRows"
+                                    :key="`char-cat-dd-${row.id}`"
+                                    type="button"
+                                    class="workspace-item-owner-picker__option"
+                                    :class="{ active: row.bound, 'workspace-item-owner-picker__option--disabled': row.disabled }"
+                                    :disabled="row.disabled"
+                                    @click="selectCharacterDraftCategory(row.id)"
+                                  >
+                                    <span class="workspace-item-owner-picker__mark">类</span>
+                                    <span class="workspace-item-owner-picker__label">{{ row.label }}</span>
+                                    <em>{{ row.meta }}</em>
+                                  </button>
+                                  <p v-if="characterCategoryPickerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的分类</p>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-if="characterDraft.categoryIds.length > 0" class="workspace-character-picker__bound-list">
+                              <span v-for="catId in characterDraft.categoryIds" :key="`char-bound-cat-${catId}`" class="category-bind-chip category-bind-chip--bound workspace-character-picker__bound-chip">
+                                {{ categoryNameById(catId) }}
+                                <button type="button" @click="removeCharacterDraftCategory(catId)">×</button>
+                              </span>
                             </div>
                           </section>
                           <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                             <div class="character-panel__block-head">
                               <h4 class="character-panel__block-title">所属势力</h4>
-                              <span class="character-panel__block-hint">可加入多个；同一势力仅一条</span>
+                              <span class="character-panel__block-hint">可搜索添加；已加入势力在下拉底部标识且不可重复选择</span>
+                            </div>
+                            <p v-if="factions.length === 0" class="muted" style="margin: 0 0 8px">暂无势力，请先到「势力」页创建。</p>
+                            <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterMembershipPickerOpen }">
+                              <div class="workspace-item-owner-picker__head"><span>势力关联</span></div>
+                              <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleCharacterMembershipPicker">
+                                <span class="workspace-item-owner-picker__trigger-main">{{ characterDraft.membershipRows.length ? `已加入 ${characterDraft.membershipRows.length} 个势力` : '选择势力…' }}</span>
+                                <span class="workspace-item-owner-picker__chevron">⌄</span>
+                              </button>
+                              <div v-if="characterMembershipPickerOpen" class="workspace-item-owner-picker__popover workspace-character-picker__popover">
+                                <input v-model="characterDraft.membershipQuery" maxlength="40" placeholder="搜索势力…" autocomplete="off" />
+                                <div class="workspace-item-owner-picker__list scrollbar-paper">
+                                  <button
+                                    v-for="row in characterMembershipPickerRows"
+                                    :key="`char-faction-dd-${row.id}`"
+                                    type="button"
+                                    class="workspace-item-owner-picker__option workspace-item-owner-picker__option--faction"
+                                    :class="{ active: row.bound, 'workspace-item-owner-picker__option--disabled': row.disabled }"
+                                    :disabled="row.disabled"
+                                    @click="selectCharacterDraftMembership(row.id)"
+                                  >
+                                    <span class="workspace-item-owner-picker__mark">势</span>
+                                    <span class="workspace-item-owner-picker__label">{{ row.label }}</span>
+                                    <em>{{ row.meta }}</em>
+                                  </button>
+                                  <p v-if="characterMembershipPickerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的势力</p>
+                                </div>
+                              </div>
                             </div>
                             <div
                               v-for="(row, idx) in characterDraft.membershipRows"
@@ -1050,39 +966,7 @@
                             >
                               <label class="character-panel__field character-panel__field--tight">
                                 <span class="character-panel__field-label">势力</span>
-                                <div class="workspace-dd">
-                                  <button
-                                    type="button"
-                                    class="workspace-dd__btn workspace-dd__btn--compact"
-                                    :class="{ 'workspace-dd__btn--open': characterMembershipFactionDropdownOpenId === String(idx) }"
-                                    :data-dd-key="`character-membership-${idx}`"
-                                    @click="toggleCharacterMembershipFactionDropdown(idx)"
-                                  >
-                                    <span class="workspace-dd__btn-text">{{ characterMembershipFactionLabel(row.factionId) }}</span>
-                                    <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
-                                  </button>
-                                  <div
-                                    v-if="characterMembershipFactionDropdownOpenId === String(idx)"
-                                    class="workspace-dd__panel scrollbar-paper"
-                                    :class="[
-                                      dropdownPanelDirectionClass(`character-membership-${idx}`),
-                                      { 'workspace-dd__panel--max4': factions.length > 4 },
-                                    ]"
-                                    :data-dd-panel-key="`character-membership-${idx}`"
-                                    role="listbox"
-                                  >
-                                    <button
-                                      v-for="f in factions"
-                                      :key="`cfd-${f.id}`"
-                                      type="button"
-                                      class="workspace-dd__item"
-                                      :class="{ 'workspace-dd__item--active': row.factionId === f.id }"
-                                      @click="selectCharacterMembershipFaction(idx, f.id)"
-                                    >
-                                      {{ f.name }}
-                                    </button>
-                                  </div>
-                                </div>
+                                <input :value="characterMembershipFactionLabel(row.factionId)" class="character-panel__input" readonly />
                               </label>
                               <label class="character-panel__field">
                                 <span class="character-panel__field-label">在该势力中的描述（最多 120 字）</span>
@@ -1092,9 +976,6 @@
                                 移除
                               </button>
                             </div>
-                            <button type="button" class="character-panel__btn character-panel__btn--dashed" @click="addCharacterDraftMembershipRow">
-                              ＋ 添加势力关联
-                            </button>
                           </section>
                         </div>
 
@@ -1173,13 +1054,24 @@
                       年龄
                       <input v-model="characterForm.age" maxlength="20" />
                     </label>
-                    <label>
-                      性别
-                      <select v-model="characterForm.gender">
-                        <option value="男">男</option>
-                        <option value="女">女</option>
-                      </select>
-                    </label>
+                    <div class="workspace-character-create-dialog__gender-field">
+                      <span class="workspace-character-create-dialog__gender-label">性别</span>
+                      <div class="character-gender-toggle character-gender-toggle--compact" role="radiogroup" aria-label="性别">
+                        <button
+                          v-for="option in genderOptions"
+                          :key="`create-gender-${option.value || 'unset'}`"
+                          type="button"
+                          class="character-gender-toggle__option"
+                          :class="{ 'character-gender-toggle__option--active': characterForm.gender === option.value }"
+                          role="radio"
+                          :aria-checked="characterForm.gender === option.value"
+                          @click="characterForm.gender = option.value"
+                        >
+                          <span class="character-gender-toggle__dot" aria-hidden="true">{{ option.mark }}</span>
+                          <span>{{ option.label }}</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div class="character-custom-fields character-custom-fields--modal workspace-character-create-dialog__section">
@@ -1319,6 +1211,269 @@
       </Teleport>
     </section>
 
+    <section class="card workspace-items-card" v-if="activeTab === 'items'">
+      <div class="workspace-items-hero">
+        <div>
+          <p class="workspace-items-hero__eyebrow">Inventory</p>
+          <h2>物品</h2>
+          <p class="muted workspace-items-hero__sub">记录关键道具、持有者和首次出现章节，让线索与设定不丢失。</p>
+        </div>
+        <button type="button" class="btn-primary workspace-items-hero__btn" @click="openItemCreate">新增物品</button>
+      </div>
+
+      <div class="workspace-items-toolbar">
+        <label class="workspace-items-search">
+          <span>搜索物品</span>
+          <input v-model="itemKeywordFilter" maxlength="40" placeholder="名称 / 简介 / 持有者…" />
+        </label>
+        <div class="workspace-items-count" aria-label="物品数量">
+          <strong>{{ filteredItems.length }}</strong>
+          <span>件物品</span>
+        </div>
+      </div>
+
+      <section v-if="items.length === 0" class="panel workspace-items-empty">
+        <p class="workspace-items-empty__mark">◇</p>
+        <h3>暂无物品</h3>
+        <p class="muted">先记录主角手里的信物、关键钥匙或任何会影响剧情推进的东西。</p>
+        <button type="button" class="btn-primary" @click="openItemCreate">添加第一个物品</button>
+      </section>
+      <p v-else-if="filteredItems.length === 0" class="muted workspace-items-no-result">没有符合条件的物品</p>
+
+      <div v-else class="workspace-item-grid">
+        <article v-for="item in filteredItems" :id="`workspace-item-${item.id}`" :key="item.id" class="workspace-item-card" :class="{ 'workspace-item-card--focused': focusedItemId === item.id }">
+          <div class="workspace-item-card__head">
+            <div>
+              <p class="workspace-item-card__kicker">物品</p>
+              <h3>{{ item.name }}</h3>
+            </div>
+            <div class="workspace-item-card__actions">
+              <button type="button" class="faction-row__edit" @click="openItemEdit(item.id)">修改</button>
+              <button type="button" class="faction-row__delete" @click="openItemDelete(item.id)">删除</button>
+            </div>
+          </div>
+          <div class="workspace-item-card__meta">
+            <span>持有者：{{ itemOwnerLabel(item) }}</span>
+            <span>{{ itemFirstAppearanceLabel(item) }}</span>
+          </div>
+          <p class="workspace-item-card__summary">{{ item.summary || '暂无简介' }}</p>
+          <div v-if="(item.attributes?.length ?? 0) > 0" class="workspace-item-card__attrs">
+            <span v-for="attr in item.attributes" :key="attr.id" class="workspace-item-card__attr">
+              <strong>{{ attr.key }}</strong>
+              <em>{{ attr.value }}</em>
+            </span>
+          </div>
+        </article>
+      </div>
+
+      <ConfirmDialog
+        v-model="itemDeleteOpen"
+        title="删除物品"
+        :message="itemDeleteMessage"
+        confirm-label="删除物品"
+        cancel-label="取消"
+        danger
+        @confirm="confirmItemDelete"
+        @cancel="onItemDeleteDialogCancel"
+      />
+    </section>
+
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div v-if="itemCreateOpen" class="confirm-overlay" role="presentation" @click.self="requestCloseItemCreate">
+          <div class="confirm-dialog workspace-item-dialog" role="dialog" aria-modal="true">
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+            <div class="confirm-dialog__body workspace-item-dialog__body">
+              <h2 class="confirm-dialog__title">新增物品</h2>
+              <p class="muted workspace-item-dialog__sub">只保留必要信息，后续可用自定义字段补充特殊设定。</p>
+              <form class="workspace-item-dialog__form" @submit.prevent="handleCreateItem">
+                <div class="workspace-item-dialog__scroll scrollbar-paper">
+                <div class="form-grid grid-2">
+                  <label>
+                    名称 *
+                    <input v-model="itemForm.name" maxlength="50" required autocomplete="off" />
+                  </label>
+                  <div class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': itemOwnerPickerOpen }">
+                    <div class="workspace-item-owner-picker__head">
+                      <span>持有者</span>
+                    </div>
+                    <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleItemOwnerPicker">
+                      <span class="workspace-item-owner-picker__trigger-main">{{ itemOwnerLabel(parseItemOwnerKey(itemForm.ownerKey)) }}</span>
+                      <span class="workspace-item-owner-picker__chevron">⌄</span>
+                    </button>
+                    <div v-if="itemOwnerPickerOpen" class="workspace-item-owner-picker__popover">
+                      <input v-model="itemOwnerPickerQuery" maxlength="40" placeholder="搜索角色或势力…" autocomplete="off" />
+                      <div class="workspace-item-owner-picker__list scrollbar-paper">
+                        <button
+                          type="button"
+                          class="workspace-item-owner-picker__option workspace-item-owner-picker__option--empty"
+                          :class="{ active: itemForm.ownerKey === '' }"
+                          @click="setItemFormOwner('')"
+                        >
+                          <span class="workspace-item-owner-picker__mark">—</span>
+                          <span>未绑定</span>
+                        </button>
+                        <button
+                          v-for="owner in filteredItemCreateOwnerRows"
+                          :key="`item-owner-${owner.key}`"
+                          type="button"
+                          class="workspace-item-owner-picker__option"
+                          :class="{ active: itemForm.ownerKey === owner.key, [`workspace-item-owner-picker__option--${owner.type}`]: true }"
+                          @click="setItemFormOwner(owner.key)"
+                        >
+                          <span class="workspace-item-owner-picker__mark">{{ owner.type === 'character' ? '角' : '势' }}</span>
+                          <span class="workspace-item-owner-picker__label">{{ owner.label }}</span>
+                          <em>{{ owner.meta }}</em>
+                        </button>
+                        <p v-if="filteredItemCreateOwnerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的持有者</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="muted workspace-item-dialog__derived">首次出现：保存后由正文自动识别</p>
+                <label>
+                  简介
+                  <textarea v-model="itemForm.summary" rows="4" maxlength="500" placeholder="这个物品是什么、为什么重要。" />
+                </label>
+                <section class="character-custom-fields workspace-item-dialog__attrs">
+                  <div class="faction-custom-fields__head">
+                    <p class="character-custom-list__title">自定义字段</p>
+                  </div>
+                  <div v-for="attr in itemForm.attributes" :key="attr.id" class="character-custom-fields__row">
+                    <label class="character-custom-fields__pair">
+                      字段名
+                      <input v-model="attr.key" class="character-custom-fields__input" maxlength="40" />
+                    </label>
+                    <label class="character-custom-fields__pair">
+                      字段说明
+                      <input v-model="attr.value" class="character-custom-fields__input" maxlength="80" />
+                    </label>
+                    <button type="button" class="btn-danger character-custom-fields__remove" @click="removeItemFormRow(attr.id)">删除</button>
+                  </div>
+                  <button type="button" class="btn-primary" @click="addItemFormRow">添加自定义字段</button>
+                </section>
+                <p v-if="itemFormError" class="muted workspace-item-dialog__error">{{ itemFormError }}</p>
+                </div>
+                <div class="confirm-dialog__actions workspace-item-dialog__actions">
+                  <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="requestCloseItemCreate">取消</button>
+                  <button type="submit" class="confirm-dialog__btn confirm-dialog__btn--danger">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div v-if="itemEditOpen" class="confirm-overlay" role="presentation" @click.self="requestCloseItemEdit">
+          <div class="confirm-dialog workspace-item-dialog" role="dialog" aria-modal="true">
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+            <div class="confirm-dialog__body workspace-item-dialog__body">
+              <h2 class="confirm-dialog__title">修改物品</h2>
+              <p class="muted workspace-item-dialog__sub">更新物品当前设定；保存后会回到物品列表。</p>
+              <form class="workspace-item-dialog__form" @submit.prevent="saveItemEdit">
+                <div class="workspace-item-dialog__scroll scrollbar-paper">
+                <div class="form-grid grid-2">
+                  <label>
+                    名称 *
+                    <input v-model="itemEditDraft.name" maxlength="50" required autocomplete="off" />
+                  </label>
+                  <div class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': itemEditOwnerPickerOpen }">
+                    <div class="workspace-item-owner-picker__head">
+                      <span>持有者</span>
+                    </div>
+                    <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleItemEditOwnerPicker">
+                      <span class="workspace-item-owner-picker__trigger-main">{{ itemOwnerLabel(parseItemOwnerKey(itemEditDraft.ownerKey)) }}</span>
+                      <span class="workspace-item-owner-picker__chevron">⌄</span>
+                    </button>
+                    <div v-if="itemEditOwnerPickerOpen" class="workspace-item-owner-picker__popover">
+                      <input v-model="itemEditOwnerPickerQuery" maxlength="40" placeholder="搜索角色或势力…" autocomplete="off" />
+                      <div class="workspace-item-owner-picker__list scrollbar-paper">
+                        <button
+                          type="button"
+                          class="workspace-item-owner-picker__option workspace-item-owner-picker__option--empty"
+                          :class="{ active: itemEditDraft.ownerKey === '' }"
+                          @click="setItemEditOwner('')"
+                        >
+                          <span class="workspace-item-owner-picker__mark">—</span>
+                          <span>未绑定</span>
+                        </button>
+                        <button
+                          v-for="owner in filteredItemEditOwnerRows"
+                          :key="`item-edit-owner-${owner.key}`"
+                          type="button"
+                          class="workspace-item-owner-picker__option"
+                          :class="{ active: itemEditDraft.ownerKey === owner.key, [`workspace-item-owner-picker__option--${owner.type}`]: true }"
+                          @click="setItemEditOwner(owner.key)"
+                        >
+                          <span class="workspace-item-owner-picker__mark">{{ owner.type === 'character' ? '角' : '势' }}</span>
+                          <span class="workspace-item-owner-picker__label">{{ owner.label }}</span>
+                          <em>{{ owner.meta }}</em>
+                        </button>
+                        <p v-if="filteredItemEditOwnerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的持有者</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="muted workspace-item-dialog__derived">{{ itemFirstAppearanceLabel(itemEditDraft) }}</p>
+                <label>
+                  简介
+                  <textarea v-model="itemEditDraft.summary" rows="4" maxlength="500" placeholder="这个物品是什么、为什么重要。" />
+                </label>
+                <section class="character-custom-fields workspace-item-dialog__attrs">
+                  <div class="faction-custom-fields__head">
+                    <p class="character-custom-list__title">自定义字段</p>
+                  </div>
+                  <div v-for="attr in itemEditDraft.attributes" :key="attr.id" class="character-custom-fields__row">
+                    <label class="character-custom-fields__pair">
+                      字段名
+                      <input v-model="attr.key" class="character-custom-fields__input" maxlength="40" />
+                    </label>
+                    <label class="character-custom-fields__pair">
+                      字段说明
+                      <input v-model="attr.value" class="character-custom-fields__input" maxlength="80" />
+                    </label>
+                    <button type="button" class="btn-danger character-custom-fields__remove" @click="removeItemEditRow(attr.id)">删除</button>
+                  </div>
+                  <button type="button" class="btn-primary" @click="addItemEditRow">添加自定义字段</button>
+                </section>
+                <p v-if="itemFormError" class="muted workspace-item-dialog__error">{{ itemFormError }}</p>
+                </div>
+                <div class="confirm-dialog__actions workspace-item-dialog__actions">
+                  <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="requestCloseItemEdit">取消</button>
+                  <button type="submit" class="confirm-dialog__btn confirm-dialog__btn--danger">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <ConfirmDialog
+      v-model="itemCreateCancelConfirmOpen"
+      title="确认取消"
+      message="取消将不保存更改，确定取消吗？"
+      confirm-label="确定取消"
+      cancel-label="继续编辑"
+      danger
+      @confirm="forceCloseItemCreate"
+      @cancel="itemCreateCancelConfirmOpen = false"
+    />
+
+    <ConfirmDialog
+      v-model="itemEditCancelConfirmOpen"
+      title="确认取消"
+      message="取消将不保存更改，确定取消吗？"
+      confirm-label="确定取消"
+      cancel-label="继续编辑"
+      danger
+      @confirm="forceCloseItemEdit"
+      @cancel="itemEditCancelConfirmOpen = false"
+    />
+
     <section class="card" v-if="activeTab === 'factions'">
       <h2>势力</h2>
 
@@ -1382,6 +1537,15 @@
                 </li>
               </ul>
               <span v-else class="muted">暂无成员</span>
+            </div>
+            <div class="faction-row__members">
+              <span class="muted faction-row__members-kicker">持有物品</span>
+              <ul v-if="factionHeldItems(f.id).length" class="faction-row__member-list">
+                <li v-for="item in factionHeldItems(f.id)" :key="`fhi-${item.id}`" class="faction-row__member-item">
+                  <span class="faction-row__member-name">{{ item.name }}</span>
+                </li>
+              </ul>
+              <span v-else class="muted">暂无物品</span>
             </div>
           </div>
         </li>
@@ -1495,6 +1659,31 @@
                       />
                     </label>
                   </div>
+                </div>
+
+                <div class="character-custom-fields faction-custom-fields" style="margin-top: 14px">
+                  <div class="faction-custom-fields__head">
+                    <p class="character-custom-list__title">持有物品</p>
+                  </div>
+                  <p v-if="items.length === 0" class="muted" style="margin: 0 0 8px">暂无物品，请先到「物品」页创建。</p>
+                  <label v-else class="character-custom-fields__pair">
+                    搜索物品
+                    <input v-model="factionEditDraft.itemQuery" class="character-custom-fields__input" maxlength="40" />
+                  </label>
+                  <div v-if="items.length > 0" class="faction-row__attrs" style="margin-top: 10px">
+                    <button
+                      v-for="item in factionEditItemOptions"
+                      :key="`fedit-item-${item.id}`"
+                      type="button"
+                      class="category-bind-chip"
+                      :class="factionEditDraft.itemIds.includes(item.id) ? 'category-bind-chip--bound' : 'category-bind-chip--unbound'"
+                      @click="toggleFactionEditItem(item.id)"
+                    >
+                      <span class="category-bind-chip__state">{{ factionEditDraft.itemIds.includes(item.id) ? '✓' : '+' }}</span>
+                      {{ item.name }} · {{ itemOwnerLabelForDraft(item, 'faction', factionEditId) }}
+                    </button>
+                  </div>
+                  <p v-if="items.length > 0 && factionEditItemOptions.length === 0" class="muted" style="margin: 8px 0 0">没有匹配的物品。</p>
                 </div>
 
                 <p v-if="factionFormError" class="muted" style="color: var(--danger-text); margin-top: 10px">
@@ -2104,15 +2293,16 @@ import {
   createCategory,
   createCharacter,
   createFaction,
+  createItem,
   createOutlineItem,
-  createOutlineStoryline,
   createTimelineEvent,
   deleteCharacter,
   deleteFaction,
+  deleteItem,
   deleteOutlineItem,
-  deleteOutlineStoryline,
   deleteForeshadowPlant,
   getCharacterChangeHistory,
+  replaceItemOwnersForEntity,
   replaceMembershipsForCharacter,
   replaceMembershipsForFaction,
   deleteTimelineEvent,
@@ -2126,12 +2316,11 @@ import {
   getChaptersByNovelId,
   getCharacterRelationsByNovelId,
   getFactionsByNovelId,
+  getItemsByNovelId,
   getNovelById,
   getOutlineByNovelId,
   getOutlineStorylinesByNovelId,
   getTimelineByNovelId,
-  moveOutlineItem,
-  moveOutlineStoryline,
   moveTimelineEvent,
   normalizeCategoryIds,
   recordCharacterChangeWithContext,
@@ -2140,6 +2329,7 @@ import {
   type CharacterChangeDetail,
   updateCharacter,
   updateFaction,
+  updateItem,
   updateChapter,
   updateOutlineItem,
   updateTimelineEvent,
@@ -2155,14 +2345,16 @@ import type {
   CharacterRelation,
   Faction,
   ForeshadowFulfillment,
+  Item,
+  ItemOwnerType,
   ForeshadowPlant,
   NewCharacterInput,
+  NewItemInput,
   OutlineItem,
   OutlineNodeLevel,
   OutlinePlotStage,
   OutlineStatus,
   OutlineStoryline,
-  OutlineStorylineType,
   OutlineTension,
   TimelineEvent,
 } from '../../types'
@@ -2170,16 +2362,24 @@ import CharacterGraphRelationToolbar from '../../components/CharacterGraphRelati
 import CharacterRelationSphere from '../../components/CharacterRelationSphere.vue'
 import CharacterRelationFocusSphere from '../../components/CharacterRelationFocusSphere.vue'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
+import OutlineMindMapCanvas from './components/outline-map/OutlineMindMapCanvas.vue'
+import OutlineMindMapInspector from './components/outline-map/OutlineMindMapInspector.vue'
+import { useOutlineChapterMapping } from '../../features/outline-map/composables/useOutlineChapterMapping'
+import { useOutlineMindMapLayout } from '../../features/outline-map/composables/useOutlineMindMapLayout'
 const route = useRoute()
 const router = useRouter()
 const workspaceChromeAnchorRef = ref<HTMLElement | null>(null)
 watch(workspaceChromeAnchorRef, (el) => setChromeAnchor(el), { immediate: true })
-onUnmounted(() => setChromeAnchor(null))
+onUnmounted(() => {
+  setChromeAnchor(null)
+  if (focusedItemTimer != null) window.clearTimeout(focusedItemTimer)
+})
 
 type WorkspaceTab =
   | 'write'
   | 'outline'
   | 'characters'
+  | 'items'
   | 'factions'
   | 'categories'
   | 'issues'
@@ -2192,6 +2392,11 @@ const chapters = ref<Chapter[]>([])
 const outlineItems = ref<OutlineItem[]>([])
 const outlineStorylines = ref<OutlineStoryline[]>([])
 const expandedOutlineId = ref<string>('')
+const outlineCreateOpen = ref(false)
+const outlineDetailOpenId = ref('')
+const activeOutlineDetailItem = computed(() =>
+  outlineItems.value.find((item) => item.id === outlineDetailOpenId.value) ?? null,
+)
 const outlineAiLoadingById = reactive<Record<string, boolean>>({})
 const outlineFilter = reactive({
   keyword: '',
@@ -2200,12 +2405,7 @@ const outlineFilter = reactive({
   storylineId: '',
 })
 const outlineViewMode = ref<'console' | 'storyline' | 'structure' | 'rhythm'>('console')
-const outlineStorylineForm = reactive({
-  name: '',
-  type: 'main' as OutlineStorylineType,
-  color: '#8b5cf6',
-  description: '',
-})
+const activeOutlineMapId = ref('')
 
 // 删除情节点：使用自定义弹窗替代原生 confirm()
 const outlineDeleteOpen = ref(false)
@@ -2214,6 +2414,7 @@ const outlineDeleteId = ref<string>('')
 const characters = ref<Character[]>([])
 const characterRelations = ref<CharacterRelation[]>([])
 const factions = ref<Faction[]>([])
+const items = ref<Item[]>([])
 const categories = ref<Category[]>([])
 const categoryCreateName = ref('')
 const categoryCreateNotes = ref('')
@@ -2226,6 +2427,13 @@ const categoryEditInitial = ref({ name: '', notes: '' })
 const categoryEditCancelConfirmOpen = ref(false)
 const selectedCategoryFilterId = ref('')
 const characterKeywordFilter = ref('')
+const itemKeywordFilter = ref('')
+const itemOwnerPickerQuery = ref('')
+const itemEditOwnerPickerQuery = ref('')
+const itemOwnerPickerOpen = ref(false)
+const itemEditOwnerPickerOpen = ref(false)
+const focusedItemId = ref('')
+let focusedItemTimer: number | null = null
 const factionKeywordFilter = ref('')
 const categoryBindCharacterQuery = ref('')
 const categoryBindFactionQuery = ref('')
@@ -2299,18 +2507,9 @@ const timelineDeleteOpen = ref(false)
 const timelineDeleteId = ref<string>('')
 const outlineForm = reactive({
   title: '',
-  summary: '',
-  level: 'scene' as OutlineNodeLevel,
-  storylineIds: [] as string[],
-  timeLabel: '',
-  location: '',
-  povCharacterId: '',
-  tension: 3 as OutlineTension,
+  status: 'todo' as OutlineStatus,
   goal: '',
-  conflict: '',
-  twist: '',
-  result: '',
-  suspense: '',
+  summary: '',
 })
 
 function normalizeOutlineTensionForUi(value: unknown): OutlineTension {
@@ -2406,6 +2605,135 @@ const outlineConsoleStats = computed(() => {
     todo: outlineItems.value.filter((i) => i.status === 'todo').length,
   }
 })
+
+const {
+  linkedChapterCountByOutlineId,
+  getLinkedChaptersForOutline,
+} = useOutlineChapterMapping({
+  chapters,
+})
+
+const {
+  nodes: outlineMapNodes,
+  edges: outlineMapEdges,
+  sceneWidth: outlineMapSceneWidth,
+  sceneHeight: outlineMapSceneHeight,
+} = useOutlineMindMapLayout({
+  outlineItems,
+  linkedChapterCountByOutlineId,
+})
+
+const activeOutlineMapItem = computed(() =>
+  outlineItems.value.find((item) => item.id === activeOutlineMapId.value) ?? null,
+)
+
+const activeOutlineMapLinkedChapters = computed(() => {
+  if (!activeOutlineMapId.value) return []
+  return getLinkedChaptersForOutline(activeOutlineMapId.value)
+})
+
+const activeOutlineAssocStart = computed(() => {
+  const id = activeOutlineMapId.value
+  if (!id) return ''
+  ensureOutlineAssocRangeState(id)
+  return outlineAssocStartByItemId[id] ?? ''
+})
+
+const activeOutlineAssocEnd = computed(() => {
+  const id = activeOutlineMapId.value
+  if (!id) return ''
+  ensureOutlineAssocRangeState(id)
+  return outlineAssocEndByItemId[id] ?? ''
+})
+
+const activeOutlineAssocDirty = computed(() => {
+  const id = activeOutlineMapId.value
+  if (!id) return false
+  return isOutlineAssocDirty(id)
+})
+
+watch(outlineItems, (items) => {
+  if (items.length === 0) {
+    activeOutlineMapId.value = ''
+    return
+  }
+  if (!items.some((item) => item.id === activeOutlineMapId.value)) {
+    activeOutlineMapId.value = items[0].id
+  }
+}, { immediate: true })
+
+watch(activeOutlineMapId, (id) => {
+  if (id) syncOutlineAssocRangeState(id)
+}, { immediate: true })
+
+function selectOutlineMindMapNode(outlineId: string): void {
+  if (!outlineItems.value.some((item) => item.id === outlineId)) return
+  activeOutlineMapId.value = outlineId
+}
+
+function patchOutlineFromMindMap(outlineId: string, patch: Partial<OutlineItem>): void {
+  updateOutlineItem({ id: outlineId, ...patch })
+  outlineItems.value = getOutlineByNovelId(novelId.value)
+}
+
+function createOutlineNodeFromMindMap(
+  action: 'child' | 'sibling' | 'root',
+  anchorId?: string,
+): void {
+  const currentNovel = novel.value
+  if (!currentNovel) return
+
+  const anchor = anchorId
+    ? outlineItems.value.find((item) => item.id === anchorId) ?? null
+    : null
+
+  let parentId: string | null = null
+  if (action === 'child') {
+    parentId = anchor?.id ?? (activeOutlineMapId.value || null)
+  } else if (action === 'sibling') {
+    const siblingAnchor = anchor ?? outlineItems.value.find((item) => item.id === activeOutlineMapId.value) ?? null
+    parentId = siblingAnchor?.parentId ?? null
+  }
+
+  const level: OutlineNodeLevel = action === 'root'
+    ? 'scene'
+    : (anchor?.level ?? 'scene')
+
+  const created = createOutlineItem({
+    novelId: currentNovel.id,
+    title: '新节点',
+    summary: '',
+    level,
+    parentId,
+    storylineIds: anchor?.storylineIds ?? [],
+    timeLabel: '',
+    location: '',
+    povCharacterId: null,
+    tension: 3,
+    goal: '',
+    conflict: '',
+    twist: '',
+    result: '',
+    suspense: '',
+  })
+
+  outlineItems.value = getOutlineByNovelId(currentNovel.id)
+  activeOutlineMapId.value = created.id
+}
+
+function jumpToWritingChapterFromOutline(chapterId: string): void {
+  if (!novelId.value) return
+  void router.push({
+    path: `/novels/${novelId.value}/chapter-writing`,
+    query: { chapterId },
+  })
+}
+const genderOptions = [
+  { value: '', label: '未设', mark: '—' },
+  { value: '男', label: '男', mark: '♂' },
+  { value: '女', label: '女', mark: '♀' },
+]
+
 const characterForm = reactive({
   name: '',
   age: '',
@@ -2417,8 +2745,35 @@ const characterForm = reactive({
   membershipRows: [] as { factionId: string; description: string }[],
 })
 const characterCreateError = ref('')
+const itemFormError = ref('')
 const factionFormError = ref('')
 const characterCreateOpen = ref(false)
+const itemForm = reactive({
+  name: '',
+  summary: '',
+  ownerKey: '',
+  attributes: [] as CharacterAttribute[],
+})
+const itemCreateCancelConfirmOpen = ref(false)
+const itemEditDraft = reactive({
+  id: '',
+  name: '',
+  summary: '',
+  ownerKey: '',
+  firstAppearanceChapterNo: null as number | null,
+  attributes: [] as CharacterAttribute[],
+})
+const itemEditInitial = ref({
+  name: '',
+  summary: '',
+  ownerKey: '',
+  attrs: [] as Array<{ key: string; value: string }>,
+})
+const itemEditCancelConfirmOpen = ref(false)
+const itemCreateOpen = ref(false)
+const itemEditOpen = ref(false)
+const itemDeleteOpen = ref(false)
+const pendingDeleteItemId = ref<string | null>(null)
 const factionForm = reactive({
   name: '',
   categoryIds: [] as string[],
@@ -2429,7 +2784,9 @@ const factionEditId = ref('')
 const factionEditDraft = reactive({
   name: '',
   memberQuery: '',
+  itemQuery: '',
   memberCharIds: [] as string[],
+  itemIds: [] as string[],
   memberDescByCharId: {} as Record<string, string>,
   categoryIds: [] as string[],
 })
@@ -2437,6 +2794,7 @@ const factionEditMemberDescComposing = reactive<Record<string, boolean>>({})
 const factionEditInitial = ref({
   name: '',
   memberCharIds: [] as string[],
+  itemIds: [] as string[],
   memberDescByCharId: {} as Record<string, string>,
   categoryIds: [] as string[],
 })
@@ -2465,6 +2823,7 @@ const characterEditInitial = ref({
   categoryIds: [] as string[],
   attrs: [] as Array<{ key: string; value: string }>,
   memberships: [] as Array<{ factionId: string; description: string }>,
+  itemIds: [] as string[],
 })
 const characterDraft = reactive({
   name: '',
@@ -2474,6 +2833,10 @@ const characterDraft = reactive({
   aliasRows: [] as { id: string; value: string }[],
   categoryIds: [] as string[],
   membershipRows: [] as { factionId: string; description: string }[],
+  itemIds: [] as string[],
+  itemQuery: '',
+  categoryQuery: '',
+  membershipQuery: '',
 })
 const timelineChapterDropdownOpen = ref(false)
 const timelineChapterEndDropdownOpen = ref(false)
@@ -2487,6 +2850,9 @@ const timelineEventChapterEndDropdownOpenId = ref('')
 const timelineEventOutlineDropdownOpenId = ref('')
 const characterMembershipFactionDropdownOpenId = ref('')
 const characterCreateMembershipFactionDropdownOpenId = ref('')
+const characterCategoryPickerOpen = ref(false)
+const characterItemPickerOpen = ref(false)
+const characterMembershipPickerOpen = ref(false)
 const dropdownDirectionByKey = reactive<Record<string, 'up' | 'down'>>({})
 const outlineAssocStartDropdownOpenId = ref('')
 const outlineAssocEndDropdownOpenId = ref('')
@@ -2779,12 +3145,22 @@ function outlineAssocEndLabel(outlineId: string): string {
 }
 
 function setOutlineAssocStart(outlineId: string, value: string): void {
+  const nextStart = Number(value || 0)
+  const currentEnd = Number(outlineAssocEndByItemId[outlineId] || 0)
   outlineAssocStartByItemId[outlineId] = value
+  if (nextStart > 0 && currentEnd > 0 && currentEnd <= nextStart) {
+    outlineAssocEndByItemId[outlineId] = ''
+  }
   outlineAssocStartDropdownOpenId.value = ''
 }
 
 function setOutlineAssocEnd(outlineId: string, value: string): void {
+  const currentStart = Number(outlineAssocStartByItemId[outlineId] || 0)
+  const nextEnd = Number(value || 0)
   outlineAssocEndByItemId[outlineId] = value
+  if (currentStart > 0 && nextEnd > 0 && currentStart >= nextEnd) {
+    outlineAssocStartByItemId[outlineId] = ''
+  }
   outlineAssocEndDropdownOpenId.value = ''
 }
 
@@ -2922,6 +3298,7 @@ watch(
     characterRelations.value = getCharacterRelationsByNovelId(id)
     graphFocusCharacterId.value = characters.value[0]?.id ?? ''
     factions.value = getFactionsByNovelId(id)
+    items.value = getItemsByNovelId(id)
     categories.value = getCategoriesByNovelId(id)
     characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(id)
     timelineEvents.value = getTimelineByNovelId(id)
@@ -2994,7 +3371,13 @@ if (typeof document !== 'undefined') {
 }
 
 watch(
-  () => characterCreateOpen.value || factionCreateOpen.value || categoryCreateOpen.value || timelineCreateOpen.value,
+  () =>
+    characterCreateOpen.value ||
+    factionCreateOpen.value ||
+    categoryCreateOpen.value ||
+    timelineCreateOpen.value ||
+    outlineCreateOpen.value ||
+    !!outlineDetailOpenId.value,
   (open) => {
     if (typeof document === 'undefined') return
     document.body.style.overflow = open ? 'hidden' : ''
@@ -3041,29 +3424,56 @@ function closeCharacterCreate(): void {
   characterCreateError.value = ''
 }
 
+function openOutlineCreate(): void {
+  closeWorkspaceDropdowns()
+  outlineCreateOpen.value = true
+}
+
+function closeOutlineCreate(): void {
+  outlineCreateOpen.value = false
+}
+
+function submitOutlineCreate(): void {
+  handleCreateOutline()
+  outlineCreateOpen.value = false
+}
+
+function openOutlineDetail(outlineId: string): void {
+  if (!outlineItems.value.some((item) => item.id === outlineId)) return
+  closeWorkspaceDropdowns()
+  syncOutlineAssocRangeState(outlineId)
+  outlineDetailOpenId.value = outlineId
+}
+
+function closeOutlineDetail(): void {
+  closeWorkspaceDropdowns()
+  outlineDetailOpenId.value = ''
+}
+
 function handleCreateOutline() {
   if (!novel.value) return
-  if (!outlineForm.summary.trim() && canFillOutlineSummaryFromTemplate.value) {
-    fillOutlineSummaryFromTemplate()
-  }
-  createOutlineItem({
+  const created = createOutlineItem({
     novelId: novel.value.id,
     title: outlineForm.title,
     summary: outlineForm.summary,
-    level: outlineForm.level,
-    storylineIds: outlineForm.storylineIds,
-    timeLabel: outlineForm.timeLabel,
-    location: outlineForm.location,
-    povCharacterId: outlineForm.povCharacterId || null,
-    tension: outlineForm.tension,
+    level: 'scene',
+    storylineIds: [],
+    timeLabel: '',
+    location: '',
+    povCharacterId: null,
+    tension: 3,
     goal: outlineForm.goal,
-    conflict: outlineForm.conflict,
-    twist: outlineForm.twist,
-    result: outlineForm.result,
-    suspense: outlineForm.suspense,
+    conflict: '',
+    twist: '',
+    result: '',
+    suspense: '',
   })
+  if (outlineForm.status !== 'todo') {
+    updateOutlineItem({ id: created.id, status: outlineForm.status })
+  }
   resetOutlineCreateForm()
   outlineItems.value = getOutlineByNovelId(novel.value.id)
+  activeOutlineMapId.value = created.id
 }
 
 function fillOutlineSummaryFromTemplate(): void {
@@ -3087,48 +3497,13 @@ function fillOutlineSummaryFromTemplate(): void {
 
 function resetOutlineCreateForm(): void {
   outlineForm.title = ''
+  outlineForm.status = 'todo'
+  outlineForm.goal = ''
   outlineForm.summary = ''
-  outlineForm.level = 'scene'
-  outlineForm.storylineIds = []
-  outlineForm.timeLabel = ''
-  outlineForm.location = ''
-  outlineForm.povCharacterId = ''
-  outlineForm.tension = 3
-  outlineForm.conflict = ''
-  outlineForm.twist = ''
-  outlineForm.result = ''
-  outlineForm.suspense = ''
   outlineTemplate.event = ''
   outlineTemplate.conflict = ''
   outlineTemplate.result = ''
   outlineTemplate.hook = ''
-}
-
-function handleCreateOutlineStoryline(): void {
-  if (!novel.value) return
-  if (!outlineStorylineForm.name.trim()) return
-  createOutlineStoryline({
-    novelId: novel.value.id,
-    name: outlineStorylineForm.name,
-    type: outlineStorylineForm.type,
-    color: outlineStorylineForm.color,
-    description: outlineStorylineForm.description,
-  })
-  outlineStorylineForm.name = ''
-  outlineStorylineForm.type = 'main'
-  outlineStorylineForm.color = '#8b5cf6'
-  outlineStorylineForm.description = ''
-  outlineStorylines.value = getOutlineStorylinesByNovelId(novel.value.id)
-}
-
-function outlineStorylineTypeText(type?: OutlineStorylineType): string {
-  if (type === 'main') return '主线'
-  if (type === 'subplot') return '支线'
-  if (type === 'character') return '人物线'
-  if (type === 'romance') return '感情线'
-  if (type === 'antagonist') return '反派线'
-  if (type === 'world') return '世界线'
-  return '自定义'
 }
 
 function outlineStorylineById(id: string): OutlineStoryline | null {
@@ -3154,13 +3529,6 @@ function outlineTensionText(value?: OutlineTension): string {
   if (tension === 3) return '推进'
   if (tension === 4) return '紧张'
   return '爆点'
-}
-
-function toggleOutlineFormStoryline(storylineId: string): void {
-  const set = new Set(outlineForm.storylineIds)
-  if (set.has(storylineId)) set.delete(storylineId)
-  else set.add(storylineId)
-  outlineForm.storylineIds = Array.from(set)
 }
 
 function toggleOutlineStorylineBind(outlineId: string, storylineId: string): void {
@@ -3195,17 +3563,6 @@ function onOutlineTensionChange(id: string, event: Event): void {
   outlineItems.value = getOutlineByNovelId(novelId.value)
 }
 
-function moveStoryline(id: string, direction: 'up' | 'down'): void {
-  moveOutlineStoryline(id, direction)
-  outlineStorylines.value = getOutlineStorylinesByNovelId(novelId.value)
-}
-
-function deleteStoryline(id: string): void {
-  deleteOutlineStoryline(id)
-  outlineStorylines.value = getOutlineStorylinesByNovelId(novelId.value)
-  outlineItems.value = getOutlineByNovelId(novelId.value)
-  if (outlineFilter.storylineId === id) outlineFilter.storylineId = ''
-}
 function outlineLevelText(level?: OutlineNodeLevel): string {
   if (level === 'volume') return '卷'
   if (level === 'act') return '幕'
@@ -3373,24 +3730,13 @@ function onOutlineTitleChange(id: string, event: Event) {
   outlineItems.value = getOutlineByNovelId(novelId.value)
 }
 
-function moveOutline(id: string, direction: 'up' | 'down') {
-  moveOutlineItem(id, direction)
-  outlineItems.value = getOutlineByNovelId(novelId.value)
-}
 
 function getLinkedChaptersCount(outlineId: string): number {
   return chapters.value.filter((c) => (c.outlineItemIds ?? []).includes(outlineId)).length
 }
 
 function toggleOutlineAssocPanel(outlineId: string): void {
-  const open = expandedOutlineId.value === outlineId
-  expandedOutlineId.value = open ? '' : outlineId
-  if (open) {
-    outlineAssocStartDropdownOpenId.value = ''
-    outlineAssocEndDropdownOpenId.value = ''
-    return
-  }
-  syncOutlineAssocRangeState(outlineId)
+  openOutlineDetail(outlineId)
 }
 
 function handleDeleteOutline(id: string) {
@@ -3526,6 +3872,302 @@ function onCharacterDeleteDialogCancel(): void {
   pendingDeleteCharacterId.value = null
 }
 
+function resetItemForm(): void {
+  itemForm.name = ''
+  itemForm.summary = ''
+  itemForm.ownerKey = ''
+  itemOwnerPickerQuery.value = ''
+  itemOwnerPickerOpen.value = false
+  itemForm.attributes = []
+}
+
+function parseItemOwnerKey(key: string): { ownerType: ItemOwnerType | null; ownerId: string | null } {
+  const [type, ...rest] = String(key ?? '').split(':')
+  const id = rest.join(':').trim()
+  if ((type === 'character' || type === 'faction') && id) return { ownerType: type, ownerId: id }
+  return { ownerType: null, ownerId: null }
+}
+
+function itemOwnerKey(item: Pick<Item, 'ownerType' | 'ownerId'>): string {
+  return item.ownerType && item.ownerId ? `${item.ownerType}:${item.ownerId}` : ''
+}
+
+function itemOwnerLabel(item: Pick<Item, 'ownerType' | 'ownerId'>): string {
+  if (item.ownerType === 'character' && item.ownerId) {
+    const character = characters.value.find((c) => c.id === item.ownerId)
+    return character ? `角色：${character.name}` : '未绑定'
+  }
+  if (item.ownerType === 'faction' && item.ownerId) {
+    const faction = factions.value.find((f) => f.id === item.ownerId)
+    return faction ? `势力：${faction.name}` : '未绑定'
+  }
+  return '未绑定'
+}
+
+type CharacterEditPickerRow = {
+  id: string
+  label: string
+  meta: string
+  bound: boolean
+  disabled: boolean
+  type: 'category' | 'item' | 'faction'
+}
+
+type ItemOwnerPickerRow = {
+  key: string
+  type: 'character' | 'faction'
+  label: string
+  meta: string
+}
+
+const itemOwnerPickerRows = computed<ItemOwnerPickerRow[]>(() => {
+  const characterRows = characters.value.map((character) => ({
+    key: `character:${character.id}`,
+    type: 'character' as const,
+    label: character.name,
+    meta: '角色',
+  }))
+  const factionRows = factions.value.map((faction) => ({
+    key: `faction:${faction.id}`,
+    type: 'faction' as const,
+    label: faction.name,
+    meta: '势力',
+  }))
+  return [...characterRows, ...factionRows]
+})
+
+function filteredItemOwnerPickerRows(query: string): ItemOwnerPickerRow[] {
+  const q = query.trim().toLowerCase()
+  const rows = itemOwnerPickerRows.value
+  if (!q) return rows.slice(0, 12)
+  return rows
+    .filter((row) => [row.label, row.meta].some((value) => value.toLowerCase().includes(q)))
+    .slice(0, 12)
+}
+
+const filteredItemCreateOwnerRows = computed(() => filteredItemOwnerPickerRows(itemOwnerPickerQuery.value))
+const filteredItemEditOwnerRows = computed(() => filteredItemOwnerPickerRows(itemEditOwnerPickerQuery.value))
+
+function toggleItemOwnerPicker(): void {
+  itemOwnerPickerOpen.value = !itemOwnerPickerOpen.value
+  if (itemOwnerPickerOpen.value) itemEditOwnerPickerOpen.value = false
+}
+
+function toggleItemEditOwnerPicker(): void {
+  itemEditOwnerPickerOpen.value = !itemEditOwnerPickerOpen.value
+  if (itemEditOwnerPickerOpen.value) itemOwnerPickerOpen.value = false
+}
+
+function setItemFormOwner(key: string): void {
+  itemForm.ownerKey = key
+  itemOwnerPickerOpen.value = false
+}
+
+function setItemEditOwner(key: string): void {
+  itemEditDraft.ownerKey = key
+  itemEditOwnerPickerOpen.value = false
+}
+
+function itemFirstAppearanceLabel(item: Pick<Item, 'firstAppearanceChapterNo'>): string {
+  const no = item.firstAppearanceChapterNo
+  return typeof no === 'number' && no > 0 ? `首次出现：第 ${no} 章` : '首次出现：未出场'
+}
+
+function refreshItems(): void {
+  items.value = getItemsByNovelId(novelId.value)
+}
+
+function openItemCreate(): void {
+  itemFormError.value = ''
+  resetItemForm()
+  itemEditOwnerPickerOpen.value = false
+  itemCreateOpen.value = true
+}
+
+function itemCreateDirty(): boolean {
+  if (itemForm.name.trim()) return true
+  if (itemForm.summary.trim()) return true
+  if (itemForm.ownerKey) return true
+  return itemForm.attributes.some((attr) => attr.key.trim() || attr.value.trim())
+}
+
+function requestCloseItemCreate(): void {
+  if (itemCreateDirty()) {
+    itemCreateCancelConfirmOpen.value = true
+    return
+  }
+  forceCloseItemCreate()
+}
+
+function closeItemCreate(): void {
+  requestCloseItemCreate()
+}
+
+function forceCloseItemCreate(): void {
+  itemCreateOpen.value = false
+  itemCreateCancelConfirmOpen.value = false
+  itemOwnerPickerOpen.value = false
+  itemFormError.value = ''
+}
+
+function handleCreateItem(): void {
+  itemFormError.value = ''
+  if (!novel.value) {
+    itemFormError.value = '作品不存在，无法新增物品。'
+    return
+  }
+  if (!itemForm.name.trim()) {
+    itemFormError.value = '请填写「名称」。'
+    return
+  }
+  const parsedAttrs = parseAttributesInput(itemForm.attributes)
+  if (!parsedAttrs.ok) {
+    itemFormError.value = parsedAttrs.message
+    return
+  }
+  const owner = parseItemOwnerKey(itemForm.ownerKey)
+  createItem({
+    novelId: novel.value.id,
+    name: itemForm.name,
+    summary: itemForm.summary,
+    ownerType: owner.ownerType,
+    ownerId: owner.ownerId,
+    attributes: parsedAttrs.value,
+  } satisfies NewItemInput)
+  refreshItems()
+  forceCloseItemCreate()
+  resetItemForm()
+}
+
+function openItemEdit(itemId: string): void {
+  itemFormError.value = ''
+  const item = items.value.find((x) => x.id === itemId)
+  if (!item) return
+  itemEditDraft.id = item.id
+  itemEditDraft.name = item.name ?? ''
+  itemEditDraft.summary = item.summary ?? ''
+  itemEditDraft.ownerKey = itemOwnerKey(item)
+  itemEditOwnerPickerQuery.value = ''
+  itemEditOwnerPickerOpen.value = false
+  itemEditDraft.firstAppearanceChapterNo = item.firstAppearanceChapterNo ?? null
+  itemEditDraft.attributes = (item.attributes ?? []).map((attr) => ({ ...attr }))
+  itemEditInitial.value = {
+    name: itemEditDraft.name.trim(),
+    summary: itemEditDraft.summary.trim(),
+    ownerKey: itemEditDraft.ownerKey,
+    attrs: itemEditDraft.attributes.map((attr) => ({ key: attr.key.trim(), value: attr.value.trim() })),
+  }
+  itemEditCancelConfirmOpen.value = false
+  itemEditOpen.value = true
+}
+
+function itemEditDirty(): boolean {
+  if (itemEditDraft.name.trim() !== itemEditInitial.value.name) return true
+  if (itemEditDraft.summary.trim() !== itemEditInitial.value.summary) return true
+  if (itemEditDraft.ownerKey !== itemEditInitial.value.ownerKey) return true
+  const attrs = itemEditDraft.attributes.map((attr) => ({ key: attr.key.trim(), value: attr.value.trim() }))
+  if (attrs.length !== itemEditInitial.value.attrs.length) return true
+  return attrs.some((attr, i) => attr.key !== itemEditInitial.value.attrs[i]?.key || attr.value !== itemEditInitial.value.attrs[i]?.value)
+}
+
+function requestCloseItemEdit(): void {
+  if (itemEditDirty()) {
+    itemEditCancelConfirmOpen.value = true
+    return
+  }
+  forceCloseItemEdit()
+}
+
+function closeItemEdit(): void {
+  requestCloseItemEdit()
+}
+
+function forceCloseItemEdit(): void {
+  itemEditOpen.value = false
+  itemEditCancelConfirmOpen.value = false
+  itemEditOwnerPickerOpen.value = false
+  itemFormError.value = ''
+  itemEditDraft.id = ''
+  itemEditDraft.name = ''
+  itemEditDraft.summary = ''
+  itemEditDraft.ownerKey = ''
+  itemEditOwnerPickerQuery.value = ''
+  itemEditOwnerPickerOpen.value = false
+  itemEditDraft.firstAppearanceChapterNo = null
+  itemEditDraft.attributes = []
+  itemEditInitial.value = { name: '', summary: '', ownerKey: '', attrs: [] }
+}
+
+function saveItemEdit(): void {
+  itemFormError.value = ''
+  if (!itemEditDraft.id) return
+  if (!itemEditDraft.name.trim()) {
+    itemFormError.value = '请填写「名称」。'
+    return
+  }
+  const parsedAttrs = parseAttributesInput(itemEditDraft.attributes)
+  if (!parsedAttrs.ok) {
+    itemFormError.value = parsedAttrs.message
+    return
+  }
+  const owner = parseItemOwnerKey(itemEditDraft.ownerKey)
+  updateItem({
+    id: itemEditDraft.id,
+    name: itemEditDraft.name,
+    summary: itemEditDraft.summary,
+    ownerType: owner.ownerType,
+    ownerId: owner.ownerId,
+    attributes: parsedAttrs.value,
+  })
+  refreshItems()
+  forceCloseItemEdit()
+}
+
+const itemDeleteMessage = computed(() => {
+  const id = pendingDeleteItemId.value
+  if (!id) return ''
+  const item = items.value.find((x) => x.id === id)
+  if (!item) return '确定删除该物品？此操作无法撤销。'
+  return `确定删除「${item.name}」？此操作无法撤销。`
+})
+
+function openItemDelete(itemId: string): void {
+  pendingDeleteItemId.value = itemId
+  itemDeleteOpen.value = true
+}
+
+function confirmItemDelete(): void {
+  const id = pendingDeleteItemId.value
+  pendingDeleteItemId.value = null
+  if (!id) return
+  deleteItem(id)
+  refreshItems()
+  itemDeleteOpen.value = false
+}
+
+function onItemDeleteDialogCancel(): void {
+  itemDeleteOpen.value = false
+  pendingDeleteItemId.value = null
+}
+
+function addItemFormRow(): void {
+  itemForm.attributes.push({ id: uid(), key: '', value: '' })
+}
+
+function removeItemFormRow(id: string): void {
+  const i = itemForm.attributes.findIndex((x) => x.id === id)
+  if (i >= 0) itemForm.attributes.splice(i, 1)
+}
+
+function addItemEditRow(): void {
+  itemEditDraft.attributes.push({ id: uid(), key: '', value: '' })
+}
+
+function removeItemEditRow(id: string): void {
+  const i = itemEditDraft.attributes.findIndex((x) => x.id === id)
+  if (i >= 0) itemEditDraft.attributes.splice(i, 1)
+}
+
 function startCharacterEdit(): void {
   const c = selectedGraphCharacter.value
   if (!c) return
@@ -3540,11 +4182,19 @@ function startCharacterEdit(): void {
   characterDraft.gender = c.gender ?? ''
   characterDraft.aliasRows = normalizeCharacterAliases(c.aliases).map((a) => ({ id: uid(), value: a }))
   characterDraft.categoryIds = [...normalizeCategoryIds(c.categoryIds)]
+  characterDraft.categoryQuery = ''
+  characterDraft.membershipQuery = ''
   characterDraft.attributes = (c.attributes ?? []).map((a) => ({
     id: a.id,
     key: a.key,
     value: a.value,
   }))
+  characterDraft.itemIds = normalizeItemIds(
+    items.value
+      .filter((item) => item.ownerType === 'character' && item.ownerId === c.id)
+      .map((item) => item.id),
+  )
+  characterDraft.itemQuery = ''
   characterEditInitial.value = {
     name: characterDraft.name.trim(),
     age: characterDraft.age.trim(),
@@ -3554,9 +4204,13 @@ function startCharacterEdit(): void {
     memberships: characterDraft.membershipRows
       .map((m) => ({ factionId: m.factionId.trim(), description: (m.description ?? '').trim() }))
       .sort((a, b) => a.factionId.localeCompare(b.factionId, 'zh-Hans')),
+    itemIds: normalizeItemIds(characterDraft.itemIds),
     categoryIds: [...normalizeCategoryIds(characterDraft.categoryIds)].sort(),
   }
   characterMembershipFactionDropdownOpenId.value = ''
+  characterCategoryPickerOpen.value = false
+  characterItemPickerOpen.value = false
+  characterMembershipPickerOpen.value = false
   characterEditMode.value = true
 }
 
@@ -3592,6 +4246,9 @@ function characterEditDirty(): boolean {
   const curCat = [...normalizeCategoryIds(characterDraft.categoryIds)].sort().join('|')
   const initCat = [...characterEditInitial.value.categoryIds].sort().join('|')
   if (curCat !== initCat) return true
+  const curItemIds = normalizeItemIds(characterDraft.itemIds).join('|')
+  const initItemIds = normalizeItemIds(characterEditInitial.value.itemIds).join('|')
+  if (curItemIds !== initItemIds) return true
   return false
 }
 
@@ -3609,6 +4266,9 @@ function forceCancelCharacterEdit(): void {
   characterEditSavedNotice.value = false
   characterEditCancelConfirmOpen.value = false
   characterMembershipFactionDropdownOpenId.value = ''
+  characterCategoryPickerOpen.value = false
+  characterItemPickerOpen.value = false
+  characterMembershipPickerOpen.value = false
 }
 
 function onCharacterEditCancelDialogCancel(): void {
@@ -3650,6 +4310,11 @@ function saveCharacterEdit(): void {
   const nextCatKey = normalizeCategoryIds(characterDraft.categoryIds).slice().sort().join('|')
   const prevCatKey = normalizeCategoryIds(c.categoryIds).slice().sort().join('|')
   if (nextCatKey !== prevCatKey) changedFields.push('categoryIds')
+  const nextItemIds = normalizeItemIds(characterDraft.itemIds)
+  const prevItemIds = normalizeItemIds(
+    items.value.filter((item) => item.ownerType === 'character' && item.ownerId === c.id).map((item) => item.id),
+  )
+  if (nextItemIds.join('|') !== prevItemIds.join('|')) changedFields.push('items')
 
   if (renameChanged) {
     const oldLabels = characterMatchLabels(c)
@@ -3684,6 +4349,7 @@ function saveCharacterEdit(): void {
     return true
   })
   replaceMembershipsForCharacter(novelId.value, c.id, uniq)
+  replaceItemOwnersForEntity(novelId.value, 'character', c.id, nextItemIds)
   // 记录工作台修改（chapterId=null，不关联章节，fieldValues 保存修改后的值）
   if (changedFields.length > 0) {
     recordCharacterChangeWithContext(c.id, changedFields, null, {
@@ -3694,6 +4360,7 @@ function saveCharacterEdit(): void {
   }
   characters.value = getCharactersByNovelId(novelId.value)
   characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(novelId.value)
+  refreshItems()
   characterEditInitial.value = {
     name: characterDraft.name.trim(),
     age: characterDraft.age.trim(),
@@ -3703,6 +4370,7 @@ function saveCharacterEdit(): void {
     memberships: uniq
       .map((m) => ({ factionId: m.factionId.trim(), description: (m.description ?? '').trim() }))
       .sort((a, b) => a.factionId.localeCompare(b.factionId, 'zh-Hans')),
+    itemIds: nextItemIds,
     categoryIds: [...normalizeCategoryIds(characterDraft.categoryIds)].sort(),
   }
   forceCancelCharacterEdit()
@@ -3776,8 +4444,128 @@ function removeCharacterFormMembershipRow(index: number): void {
 }
 
 function addCharacterDraftMembershipRow(): void {
-  const firstFactionId = factions.value[0]?.id ?? ''
-  characterDraft.membershipRows.push({ factionId: firstFactionId, description: '' })
+  const firstFactionId = factions.value.find((f) => !characterDraft.membershipRows.some((row) => row.factionId === f.id))?.id ?? ''
+  if (firstFactionId) characterDraft.membershipRows.push({ factionId: firstFactionId, description: '' })
+}
+
+function makeCharacterPickerRows<T extends { id: string; name?: string | null }>(
+  list: T[],
+  boundIds: string[],
+  query: string,
+  type: CharacterEditPickerRow['type'],
+  metaFor: (row: T, bound: boolean) => string,
+): CharacterEditPickerRow[] {
+  const q = query.trim().toLowerCase()
+  const rows = list
+    .filter((row) => !q || `${row.name ?? ''}`.toLowerCase().includes(q))
+    .map((row) => {
+      const bound = boundIds.includes(row.id)
+      return {
+        id: row.id,
+        label: row.name ?? '未命名',
+        meta: metaFor(row, bound),
+        bound,
+        disabled: bound,
+        type,
+      }
+    })
+  return rows.sort((a, b) => {
+    if (a.bound !== b.bound) return a.bound ? 1 : -1
+    return a.label.localeCompare(b.label, 'zh-Hans')
+  })
+}
+
+const characterCategoryPickerRows = computed(() =>
+  makeCharacterPickerRows(
+    sortedCategories.value,
+    characterDraft.categoryIds,
+    characterDraft.categoryQuery,
+    'category',
+    (_cat, bound) => (bound ? '已绑定' : '可添加'),
+  ),
+)
+
+const characterItemPickerRows = computed(() => {
+  const q = characterDraft.itemQuery.trim().toLowerCase()
+  const rows = items.value
+    .filter((item) => !q || `${item.name ?? ''} ${item.summary ?? ''}`.toLowerCase().includes(q))
+    .map((item) => {
+      const bound = characterDraft.itemIds.includes(item.id)
+      return {
+        id: item.id,
+        label: item.name ?? '未命名物品',
+        meta: bound ? '已持有' : itemOwnerLabelForDraft(item, 'character', selectedGraphCharacter.value?.id ?? ''),
+        bound,
+        disabled: bound,
+        type: 'item' as const,
+      }
+    })
+  return rows.sort((a, b) => {
+    if (a.bound !== b.bound) return a.bound ? 1 : -1
+    return a.label.localeCompare(b.label, 'zh-Hans')
+  })
+})
+
+const characterMembershipPickerRows = computed(() =>
+  makeCharacterPickerRows(
+    factions.value,
+    characterDraft.membershipRows.map((row) => row.factionId),
+    characterDraft.membershipQuery,
+    'faction',
+    (_faction, bound) => (bound ? '已加入' : '可添加'),
+  ),
+)
+
+function toggleCharacterCategoryPicker(): void {
+  characterCategoryPickerOpen.value = !characterCategoryPickerOpen.value
+  if (characterCategoryPickerOpen.value) {
+    characterItemPickerOpen.value = false
+    characterMembershipPickerOpen.value = false
+  }
+}
+
+function toggleCharacterItemPicker(): void {
+  characterItemPickerOpen.value = !characterItemPickerOpen.value
+  if (characterItemPickerOpen.value) {
+    characterCategoryPickerOpen.value = false
+    characterMembershipPickerOpen.value = false
+  }
+}
+
+function toggleCharacterMembershipPicker(): void {
+  characterMembershipPickerOpen.value = !characterMembershipPickerOpen.value
+  if (characterMembershipPickerOpen.value) {
+    characterCategoryPickerOpen.value = false
+    characterItemPickerOpen.value = false
+  }
+}
+
+function selectCharacterDraftCategory(categoryId: string): void {
+  if (characterDraft.categoryIds.includes(categoryId)) return
+  characterDraft.categoryIds.push(categoryId)
+  characterDraft.categoryQuery = ''
+}
+
+function removeCharacterDraftCategory(categoryId: string): void {
+  const idx = characterDraft.categoryIds.indexOf(categoryId)
+  if (idx >= 0) characterDraft.categoryIds.splice(idx, 1)
+}
+
+function selectCharacterDraftItem(itemId: string): void {
+  if (characterDraft.itemIds.includes(itemId)) return
+  characterDraft.itemIds.push(itemId)
+  characterDraft.itemQuery = ''
+}
+
+function removeCharacterDraftItem(itemId: string): void {
+  const idx = characterDraft.itemIds.indexOf(itemId)
+  if (idx >= 0) characterDraft.itemIds.splice(idx, 1)
+}
+
+function selectCharacterDraftMembership(factionId: string): void {
+  if (characterDraft.membershipRows.some((row) => row.factionId === factionId)) return
+  characterDraft.membershipRows.push({ factionId, description: '' })
+  characterDraft.membershipQuery = ''
 }
 
 function toggleCharacterDraftCategory(categoryId: string): void {
@@ -3818,6 +4606,20 @@ function removeCharacterDraftMembershipRow(index: number): void {
 
 function uid(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
+}
+
+function normalizeItemIds(ids: string[]): string[] {
+  return Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-Hans'))
+}
+
+function itemNameById(itemId: string): string {
+  return items.value.find((item) => item.id === itemId)?.name ?? itemId
+}
+
+function itemOwnerLabelForDraft(item: Item, ownerType: ItemOwnerType, ownerId: string): string {
+  if (!item.ownerType || !item.ownerId) return `保存后绑定到当前${ownerType === 'character' ? '角色' : '势力'}`
+  if (item.ownerType === ownerType && item.ownerId === ownerId) return `当前${ownerType === 'character' ? '角色' : '势力'}已绑定`
+  return `保存后将转移自：${itemOwnerLabel(item)}`
 }
 
 const zhPinyinCollator = new Intl.Collator('zh-Hans-u-co-pinyin', {
@@ -3883,6 +4685,16 @@ const graphFocusCharacterDropdownLabel = computed(() => {
   const selected = filteredCharacters.value.find((c) => c.id === graphFocusCharacterId.value)
   if (selected) return selected.name
   return filteredCharacters.value[0]?.name ?? '暂无角色'
+})
+
+const filteredItems = computed(() => {
+  const q = itemKeywordFilter.value.trim().toLowerCase()
+  if (!q) return items.value
+  return items.value.filter((item) => {
+    return [item.name, item.summary, itemOwnerLabel(item)]
+      .map((v) => String(v ?? '').toLowerCase())
+      .some((v) => v.includes(q))
+  })
 })
 
 const filteredFactions = computed(() => {
@@ -4288,6 +5100,7 @@ function workspaceCharacterFieldLabel(field: string): string {
   if (key === 'notes') return '备注'
   if (key === 'aliases') return '别名'
   if (key === 'memberships') return '所属势力'
+  if (key === 'items') return '绑定物品'
   if (key === 'categoryIds') return '分类'
   if (key === 'attributes') return '扩展条目'
   return key || '未知字段'
@@ -4498,6 +5311,14 @@ const graphCharacterMemberships = computed(() => {
   return characterFactionMemberships.value.filter((m) => m.characterId === c.id)
 })
 
+const graphCharacterHeldItems = computed(() => {
+  const c = selectedGraphCharacter.value
+  if (!c) return [] as Item[]
+  return items.value
+    .filter((item) => item.ownerType === 'character' && item.ownerId === c.id)
+    .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'zh-Hans'))
+})
+
 const filteredCharacterIdSet = computed(() => new Set(filteredCharacters.value.map((c) => c.id)))
 
 const filteredCharacterRelations = computed(() =>
@@ -4563,6 +5384,12 @@ function factionMemberDisplayList(factionId: string): { key: string; name: strin
       description: (m.description ?? '').trim(),
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans'))
+}
+
+function factionHeldItems(factionId: string): Item[] {
+  return items.value
+    .filter((item) => item.ownerType === 'faction' && item.ownerId === factionId)
+    .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'zh-Hans'))
 }
 
 const hoverRelationId = ref<string>('')
@@ -4692,10 +5519,17 @@ function openFactionEdit(factionId: string): void {
   factionEditDraft.memberDescByCharId = Object.fromEntries(
     mems.map((m) => [m.characterId, (m.description ?? '').trim()]),
   )
+  factionEditDraft.itemIds = normalizeItemIds(
+    items.value
+      .filter((item) => item.ownerType === 'faction' && item.ownerId === factionId)
+      .map((item) => item.id),
+  )
   factionEditDraft.memberQuery = ''
+  factionEditDraft.itemQuery = ''
   factionEditInitial.value = {
     name: factionEditDraft.name.trim(),
     memberCharIds: [...factionEditDraft.memberCharIds].sort(),
+    itemIds: normalizeItemIds(factionEditDraft.itemIds),
     memberDescByCharId: { ...factionEditDraft.memberDescByCharId },
     categoryIds: [...normalizeCategoryIds(f.categoryIds)].sort(),
   }
@@ -4712,6 +5546,9 @@ function factionEditDirty(): boolean {
   const curIds = [...factionEditDraft.memberCharIds].sort().join('|')
   const oldIds = [...factionEditInitial.value.memberCharIds].sort().join('|')
   if (curIds !== oldIds) return true
+  const curItemIds = normalizeItemIds(factionEditDraft.itemIds).join('|')
+  const oldItemIds = normalizeItemIds(factionEditInitial.value.itemIds).join('|')
+  if (curItemIds !== oldItemIds) return true
   for (const cid of factionEditDraft.memberCharIds) {
     const next = (factionEditDraft.memberDescByCharId[cid] ?? '').trim()
     const prev = (factionEditInitial.value.memberDescByCharId[cid] ?? '').trim()
@@ -4763,6 +5600,27 @@ const factionEditBoundMembers = computed(() => {
     .map((id) => ({ id, name: characterNameById(id) || '未知角色' }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
 })
+
+const factionEditItemOptions = computed(() => {
+  const q = factionEditDraft.itemQuery.trim().toLowerCase()
+  const rows = items.value.filter((item) => !q || `${item.name ?? ''} ${item.summary ?? ''}`.toLowerCase().includes(q))
+  return rows.sort((a, b) => {
+    const aBound = factionEditDraft.itemIds.includes(a.id)
+    const bBound = factionEditDraft.itemIds.includes(b.id)
+    const groupA = aBound ? 0 : !a.ownerType ? 1 : 2
+    const groupB = bBound ? 0 : !b.ownerType ? 1 : 2
+    if (groupA !== groupB) return groupA - groupB
+    return (a.name ?? '').localeCompare(b.name ?? '', 'zh-Hans')
+  })
+})
+
+function toggleFactionEditItem(itemId: string): void {
+  const id = String(itemId ?? '').trim()
+  if (!id) return
+  const idx = factionEditDraft.itemIds.indexOf(id)
+  if (idx >= 0) factionEditDraft.itemIds.splice(idx, 1)
+  else factionEditDraft.itemIds.push(id)
+}
 
 function onFactionEditMemberDescInput(characterId: string, event: Event): void {
   const target = event.target as HTMLInputElement | null
@@ -4843,6 +5701,14 @@ function computeFactionWorkspaceSaveChangePayload(): {
       rows.map((m) => `${characterNameById(m.characterId)}:${m.description}`).join('；')
     pushDetail('memberships', '势力档案/绑定角色', fmt(memB), fmt(memA))
   }
+  const itemA = normalizeItemIds(factionEditDraft.itemIds)
+  const itemB = normalizeItemIds(init.itemIds)
+  const itemsChanged = itemA.length !== itemB.length || itemA.some((itemId, i) => itemId !== itemB[i])
+  if (itemsChanged) {
+    changed.add('items')
+    const label = (ids: string[]) => ids.map((itemId) => itemNameById(itemId)).join('、')
+    pushDetail('items', '势力档案/持有物品', label(itemB), label(itemA))
+  }
   const fields = Array.from(changed)
   const fieldValues: Record<string, string> = {}
   if (fields.includes('name')) fieldValues.name = name
@@ -4854,6 +5720,9 @@ function computeFactionWorkspaceSaveChangePayload(): {
   }
   if (fields.includes('memberships')) {
     fieldValues.memberships = memA.map((m) => `${characterNameById(m.characterId)}:${m.description}`).join('；')
+  }
+  if (fields.includes('items')) {
+    fieldValues.items = itemA.map((itemId) => itemNameById(itemId)).join('、')
   }
   return { fields, details, fieldValues }
 }
@@ -4880,6 +5749,8 @@ function saveFactionEdit(): void {
       description: limitFactionMemberDescription((factionEditDraft.memberDescByCharId[cid] ?? '').trim()),
     }))
   replaceMembershipsForFaction(novelId.value, id, memRows)
+  const nextItemIds = normalizeItemIds(factionEditDraft.itemIds)
+  replaceItemOwnersForEntity(novelId.value, 'faction', id, nextItemIds)
   if (changePayload.fields.length > 0) {
     recordFactionChangeFields(id, changePayload.fields, {
       details: changePayload.details,
@@ -4889,6 +5760,7 @@ function saveFactionEdit(): void {
   characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(novelId.value)
   factions.value = getFactionsByNovelId(novelId.value)
   categories.value = getCategoriesByNovelId(novelId.value)
+  refreshItems()
   const syncedDesc: Record<string, string> = {}
   for (const cid of factionEditDraft.memberCharIds) {
     syncedDesc[cid] = limitFactionMemberDescription((factionEditDraft.memberDescByCharId[cid] ?? '').trim())
@@ -4896,6 +5768,7 @@ function saveFactionEdit(): void {
   factionEditInitial.value = {
     name: factionEditDraft.name.trim(),
     memberCharIds: [...factionEditDraft.memberCharIds].sort(),
+    itemIds: nextItemIds,
     memberDescByCharId: syncedDesc,
     categoryIds: [...normalizeCategoryIds(factionEditDraft.categoryIds)].sort(),
   }
@@ -5149,6 +6022,7 @@ function applyRoutePrefill(): void {
     tab === 'write' ||
     tab === 'outline' ||
     tab === 'characters' ||
+    tab === 'items' ||
     tab === 'factions' ||
     tab === 'categories' ||
     tab === 'issues'
@@ -5190,12 +6064,32 @@ function applyRoutePrefill(): void {
     })
   }
 
+  const focusItemId = String(route.query.focusItemId ?? '')
+  const shouldScrollItem =
+    String(route.query.scrollTo ?? '') === 'items-item' && activeTab.value === 'items' && !!focusItemId
+  if (shouldScrollItem && typeof window !== 'undefined') {
+    void nextTick(() => {
+      const el = document.getElementById(`workspace-item-${focusItemId}`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      if (el) {
+        focusedItemId.value = focusItemId
+        if (focusedItemTimer != null) window.clearTimeout(focusedItemTimer)
+        focusedItemTimer = window.setTimeout(() => {
+          focusedItemId.value = ''
+          focusedItemTimer = null
+        }, 1600)
+      }
+      const nextQuery = { ...route.query }
+      delete nextQuery.scrollTo
+      delete nextQuery.focusItemId
+      void router.replace({ query: nextQuery })
+    })
+  }
+
   const focusOutlineId = String(route.query.focusOutlineId ?? '')
   if (focusOutlineId && activeTab.value === 'outline' && outlineItems.value.some((o) => o.id === focusOutlineId)) {
-    expandedOutlineId.value = focusOutlineId
     void nextTick(() => {
-      const el = document.getElementById(`outline-card-${focusOutlineId}`)
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      activeOutlineMapId.value = focusOutlineId
       const nextQuery = { ...route.query }
       delete nextQuery.focusOutlineId
       void router.replace({ query: nextQuery })
