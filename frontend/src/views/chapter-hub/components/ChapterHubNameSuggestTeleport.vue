@@ -16,7 +16,9 @@
         @mousedown.prevent="emit('apply', item.name)"
       >
         <span class="chapter-hub__name-suggest-name">{{ item.name }}</span>
-        <span v-if="item.kind === 'faction'" class="chapter-hub__name-suggest-kind">势力</span>
+        <span v-if="item.kind !== 'character'" class="chapter-hub__name-suggest-kind" :class="`chapter-hub__name-suggest-kind--${item.kind}`">
+          {{ item.kind === 'faction' ? '势力' : '物品' }}
+        </span>
       </button>
     </div>
   </Teleport>
@@ -25,7 +27,7 @@
 <script setup lang="ts">
 defineProps<{
   open: boolean
-  list: Array<{ id: string; name: string; kind: 'character' | 'faction' }>
+  list: Array<{ id: string; name: string; kind: 'character' | 'faction' | 'item' }>
   activeIndex: number
   direction: 'down' | 'up'
   panelStyle: Record<string, string>

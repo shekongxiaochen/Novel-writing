@@ -1,11 +1,11 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import NovelListView from './views/novel-list/NovelListView.vue'
 import NovelWorkspaceView from './views/workspace/NovelWorkspaceView.vue'
 import NovelChapterHubView from './views/chapter-hub/NovelChapterHubView.vue'
 import AuthView from './views/auth/AuthView.vue'
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/',

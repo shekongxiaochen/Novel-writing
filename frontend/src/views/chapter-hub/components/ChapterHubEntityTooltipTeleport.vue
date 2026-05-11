@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div
-      v-if="open && (character || tooltipFaction) && !textareaFocused && !textareaHasSelection"
+      v-if="open && (character || tooltipFaction || item) && !textareaFocused && !textareaHasSelection"
       ref="tooltipRef"
       class="chapter-hub__entity-tooltip"
       :style="tooltipStyle"
@@ -34,6 +34,9 @@
         </p>
         <p class="chapter-hub__entity-tooltip-row" :class="changedRowClass('age')">年龄：{{ character.age || '未设置' }}</p>
         <p class="chapter-hub__entity-tooltip-row" :class="changedRowClass('gender')">性别：{{ character.gender || '未设置' }}</p>
+        <p class="chapter-hub__entity-tooltip-row" :class="changedRowClass('items')">
+          持有物品：{{ characterHeldItemLine || '未设置' }}
+        </p>
         <template v-if="(character.attributes?.length ?? 0) > 0">
           <p
             v-for="attr in character.attributes"
@@ -77,6 +80,9 @@
         </p>
         <p class="chapter-hub__entity-tooltip-row" :class="factionChangedRowClass('leader')">
           领袖：{{ tooltipFaction.leader?.trim() || '未设置' }}
+        </p>
+        <p class="chapter-hub__entity-tooltip-row" :class="factionChangedRowClass('items')">
+          持有物品：{{ factionHeldItemLine || '未设置' }}
         </p>
         <template v-if="(tooltipFaction.attributes?.length ?? 0) > 0">
           <p
@@ -129,6 +135,21 @@
         </div>
         <p v-else class="chapter-hub__entity-tooltip-row muted">暂无绑定角色</p>
       </template>
+      <template v-else-if="item">
+        <p class="chapter-hub__entity-tooltip-title">物品：{{ item.name }}</p>
+        <p class="chapter-hub__entity-tooltip-row">持有者：{{ itemOwnerLabel }}</p>
+        <p class="chapter-hub__entity-tooltip-row">{{ itemFirstAppearanceLabel }}</p>
+        <p class="chapter-hub__entity-tooltip-row">简介：{{ item.summary?.trim() || '未设置' }}</p>
+        <template v-if="(item.attributes?.length ?? 0) > 0">
+          <p
+            v-for="attr in item.attributes"
+            :key="attr.id"
+            class="chapter-hub__entity-tooltip-row"
+          >
+            {{ attr.key }}：{{ attr.value }}
+          </p>
+        </template>
+      </template>
     </div>
   </Teleport>
 </template>
@@ -148,21 +169,28 @@ import {
   FACTION_TOOLTIP_MEMBER_LIMIT,
   type FactionTooltipMemberRow,
 } from '../../../features/chapter-hub/composables/useChapterHubEntityTooltip'
-import type { Character, Faction } from '../../../types'
+import type { Character, Faction, Item } from '../../../types'
 
 const props = defineProps<{
   open: boolean
   character: Character | null
   /** 悬停势力时展示（与 character 互斥） */
   tooltipFaction: Faction | null
+  /** 悬停物品时展示（与 character/faction 互斥） */
+  item: Item | null
+  itemOwnerLabel: string
   /** 悬停的“名字”元素边界（用于角点对齐定位） */
   anchorRect: DOMRect | null
   /** 角色悬停：多行「势力名」或「势力名：描述」 */
   characterFactionLines: string[]
   /** 角色分类（按名称展示） */
   characterCategoryLines: string[]
+  /** 角色持有物品（按名称展示） */
+  characterHeldItemLines: string[]
   /** 势力分类（按名称展示） */
   factionCategoryLines: string[]
+  /** 势力持有物品（按名称展示） */
+  factionHeldItemLines: string[]
   /** 势力悬停：绑定角色及在该势力中的身份描述（至多前 10 人） */
   factionMemberRows: FactionTooltipMemberRow[]
   /** 势力下绑定角色总人数（用于标题人数与「仅显示前 10」提示） */
@@ -175,6 +203,14 @@ const props = defineProps<{
   textareaHasSelection: boolean
 }>()
 
+const itemFirstAppearanceLabel = computed(() => {
+  const no = props.item?.firstAppearanceChapterNo
+  return typeof no === 'number' && no > 0 ? `首次出现：第 ${no} 章` : '首次出现：未出场'
+})
+
+const characterHeldItemLine = computed(() => props.characterHeldItemLines.join('、'))
+const factionHeldItemLine = computed(() => props.factionHeldItemLines.join('、'))
+
 const tooltipRef = ref<HTMLElement | null>(null)
 const measuredTooltipWidth = ref(320)
 const measuredTooltipHeight = ref(220)
@@ -186,6 +222,7 @@ const FACTION_MEMBER_SCROLL_CAP = 240
 
 const estimatedTooltipHeight = computed(() => {
   if (props.character) return 220
+  if (props.item) return 168
   if (props.tooltipFaction) {
     const f = props.tooltipFaction
     const catN = props.factionCategoryLines?.length ?? 0
@@ -268,6 +305,7 @@ watch(
     props.open,
     props.character?.id ?? '',
     props.tooltipFaction?.id ?? '',
+    props.item?.id ?? '',
     props.anchorRect?.left ?? 0,
     props.anchorRect?.top ?? 0,
     props.anchorRect?.right ?? 0,

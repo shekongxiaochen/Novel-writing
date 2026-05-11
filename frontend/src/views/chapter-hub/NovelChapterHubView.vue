@@ -23,23 +23,16 @@
           @blur="onChapterTextareaBlur"
           @entity-enter="onPaperEntityEnter"
           @faction-enter="onPaperFactionEnter"
+          @item-enter="onPaperItemEnter"
           @entity-leave="onEntityNameLeave"
           @foreshadow-enter="onPaperForeshadowEnter"
           @foreshadow-leave="onForeshadowMarkLeave"
           @foreshadow-click="onPaperForeshadowClick"
           @go-character="openHubCharacterGraph"
           @go-faction="openHubFactionModal"
+          @go-item="openWorkspaceItem"
         />
-        <ChapterHubOutlinePanel
-          :chapter="selectedChapter"
-          :outline-items="outlineItems"
-          :outline-storylines="outlineStorylines"
-          :collapsed="isChapterHubRegionCollapsed('outline')"
-          :visible="true"
-          :workspace-link="workspaceLink"
-          @toggle-collapse="toggleChapterHubRegion('outline')"
-          @toggle-outline-item="toggleChapterOutline"
-        />
+        <ChapterHubLegendBar v-if="!focusMode" />
         </section>
     </template>
 
@@ -62,6 +55,7 @@
       :notice="ctxMenuNotice"
       :selected-character="ctxMenuSelectedCharacter"
       :selected-faction="ctxMenuSelectedFaction"
+      :selected-item="ctxMenuSelectedItem"
       :show-add-as="ctxMenuShowAddAs"
       :bound-faction-summary="ctxMenuBoundFactionSummary"
       :character-faction-unbound="false"
@@ -72,6 +66,7 @@
       @close="closeCtxMenu"
       @add-character="addSelectionAsCharacter"
       @add-faction="addSelectionAsFaction"
+      @add-item="addSelectionAsItem"
       @toggle-faction="toggleFactionMembershipForSelectedCharacter"
       @set-foreshadow="openForeshadowPlantModal"
       @resolve-foreshadow="openForeshadowFulfillModal"
@@ -81,9 +76,13 @@
       :open="entityTooltipOpen && !foreshadowModalOpen"
       :character="entityTooltipCharacter"
       :tooltip-faction="entityTooltipFaction"
+      :item="entityTooltipItem"
+      :item-owner-label="entityTooltipItemOwnerLabel"
       :character-faction-lines="entityTooltipCharacterFactionLines"
       :character-category-lines="entityTooltipCharacterCategoryLines"
+      :character-held-item-lines="entityTooltipCharacterHeldItemLines"
       :faction-category-lines="entityTooltipFactionCategoryLines"
+      :faction-held-item-lines="entityTooltipFactionHeldItemLines"
       :faction-member-rows="entityTooltipFactionMembers.rows"
       :faction-member-total="entityTooltipFactionMembers.total"
       :anchor-rect="entityTooltipAnchorRect"
@@ -116,6 +115,7 @@
       :open="hubCharacterGraphOpen"
       :novel-id="novelId"
       :characters="characters"
+      :items="items"
       :categories="categories"
       :focus-character-id="hubGraphFocusCharacterId"
       :chapter-id="selectedChapterId"
@@ -128,6 +128,7 @@
       :open="hubFactionModalOpen"
       :novel-id="novelId"
       :characters="characters"
+      :items="items"
       :categories="categories"
       :faction="hubFactionModalTarget"
       :chapter-id="selectedChapterId"
@@ -168,10 +169,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { focusMode } from '../../composables/useFocusMode'
 import type {
   Character,
   Faction,
   ForeshadowFulfillment,
+  Item,
   ForeshadowPlant,
   NewForeshadowFulfillmentInput,
   NewForeshadowPlantInput,
@@ -212,70 +215,13 @@ import ChapterHubForeshadowTooltip from './components/ChapterHubForeshadowToolti
 import ChapterHubEmptyChaptersCard from './components/ChapterHubEmptyChaptersCard.vue'
 import ChapterHubEntityTooltipTeleport from './components/ChapterHubEntityTooltipTeleport.vue'
 import ChapterHubNameSuggestTeleport from './components/ChapterHubNameSuggestTeleport.vue'
-import ChapterHubOutlinePanel from './components/ChapterHubOutlinePanel.vue'
+import ChapterHubLegendBar from './components/ChapterHubLegendBar.vue'
 import ChapterHubPaperBlock from './components/ChapterHubPaperBlock.vue'
 import SaveToast from '../../components/SaveToast.vue'
 
-type ChapterHubCollapseRegion = 'outline'
-type ChapterHubCollapseState = Record<ChapterHubCollapseRegion, boolean>
-
-const defaultChapterHubCollapseState = (): ChapterHubCollapseState => ({ outline: false })
-const chapterHubCollapseState = ref<ChapterHubCollapseState>(defaultChapterHubCollapseState())
-
-function chapterHubCollapseKey(): string {
-  return `novel-writing.chapter-hub-collapse:${novelId.value || 'global'}`
-}
-
-function normalizeChapterHubCollapseState(raw: unknown): ChapterHubCollapseState {
-  if (!raw || typeof raw !== 'object') return defaultChapterHubCollapseState()
-  const row = raw as Partial<Record<ChapterHubCollapseRegion, unknown>>
-  return { outline: row.outline === true }
-}
-
-function restoreChapterHubCollapseState(): void {
-  if (!novelId.value) {
-    chapterHubCollapseState.value = defaultChapterHubCollapseState()
-    return
-  }
-  try {
-    const raw = localStorage.getItem(chapterHubCollapseKey())
-    chapterHubCollapseState.value = raw ? normalizeChapterHubCollapseState(JSON.parse(raw)) : defaultChapterHubCollapseState()
-  } catch {
-    chapterHubCollapseState.value = defaultChapterHubCollapseState()
-  }
-}
-
-function persistChapterHubCollapseState(): void {
-  if (!novelId.value) return
-  try {
-    localStorage.setItem(chapterHubCollapseKey(), JSON.stringify(chapterHubCollapseState.value))
-  } catch {
-    /* ignore */
-  }
-}
-
-function isChapterHubRegionCollapsed(region: ChapterHubCollapseRegion): boolean {
-  return chapterHubCollapseState.value[region]
-}
-
-function toggleChapterHubRegion(region: ChapterHubCollapseRegion): void {
-  chapterHubCollapseState.value = {
-    ...chapterHubCollapseState.value,
-    [region]: !chapterHubCollapseState.value[region],
-  }
-  persistChapterHubCollapseState()
-}
-
-function onChapterHubCollapseShortcut(e: KeyboardEvent): void {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return
-  if (e.key !== '5') return
-  e.preventDefault()
-  toggleChapterHubRegion('outline')
-}
-
-
 const route = useRoute()
 const router = useRouter()
+
 const hubCharacterGraphOpen = ref(false)
 const hubGraphFocusCharacterId = ref('')
 const hubGraphSourceRange = ref<{ start: number; end: number } | null>(null)
@@ -333,15 +279,13 @@ const {
   chapters,
   characters,
   factions,
+  items,
   categories,
   characterFactionMemberships,
-  outlineItems,
-  outlineStorylines,
   selectedChapterId,
   selectedChapter,
   selectedChapterCtx,
   chapterForm,
-  workspaceLink,
   reload,
 } = useChapterHubData()
 
@@ -370,6 +314,7 @@ const {
 } = useChapterHubNameSuggest({
   characters,
   factions,
+  items,
   selectedChapter,
   chapters,
   chapterTextareaRef,
@@ -389,6 +334,7 @@ const {
   ctxMenuRange,
   ctxMenuSelectedCharacter,
   ctxMenuSelectedFaction,
+  ctxMenuSelectedItem,
   ctxMenuShowAddAs,
   ctxMenuBoundFactionSummary,
   ctxMenuCanAddAsFaction,
@@ -398,6 +344,7 @@ const {
   closeCtxMenu,
   addSelectionAsCharacter,
   addSelectionAsFaction,
+  addSelectionAsItem,
   ctxMenuFactionIsCurrent,
   toggleFactionMembershipForSelectedCharacter,
 } = useChapterHubCtxMenu({
@@ -406,6 +353,7 @@ const {
   selectedChapter: selectedChapterCtx,
   characters,
   factions,
+  items,
   characterFactionMemberships,
   chapterTextareaRef,
   foreshadowModalOpen,
@@ -696,21 +644,27 @@ const {
   entityTooltipOpen,
   entityTooltipCharacter,
   entityTooltipFaction,
+  entityTooltipItem,
+  entityTooltipItemOwnerLabel,
   entityTooltipAnchorRect,
   entityTooltipTextRange,
   entityTooltipX,
   entityTooltipY,
   entityTooltipCharacterFactionLines,
   entityTooltipCharacterCategoryLines,
+  entityTooltipCharacterHeldItemLines,
   entityTooltipFactionCategoryLines,
+  entityTooltipFactionHeldItemLines,
   entityTooltipFactionMembers,
   onEntityNameEnter,
   onFactionNameEnter,
+  onItemNameEnter,
   onEntityNameLeave,
 } = useChapterHubEntityTooltip({
   factions,
   categories,
   characters,
+  items,
   chapters,
   currentChapterId: selectedChapterId,
 })
@@ -733,6 +687,25 @@ function onPaperFactionEnter(
 ): void {
   closeForeshadowTooltipImmediate()
   onFactionNameEnter(e, f, anchorRect, textRange)
+}
+
+function onPaperItemEnter(
+  e: MouseEvent,
+  item: Item,
+  anchorRect: DOMRect | null,
+  textRange: { start: number; end: number } | null,
+): void {
+  closeForeshadowTooltipImmediate()
+  onItemNameEnter(e, item, anchorRect, textRange)
+}
+
+function openWorkspaceItem(item: Item): void {
+  onEntityNameLeave()
+  closeForeshadowTooltipImmediate()
+  void router.push({
+    path: `/novels/${novelId.value}`,
+    query: { tab: 'items', focusItemId: item.id, scrollTo: 'items-item' },
+  })
 }
 
 function onPaperForeshadowEnter(e: MouseEvent, meta: ForeshadowHoverMeta): void {
@@ -852,7 +825,6 @@ function onEditFulfillFromTooltip(plant: ForeshadowPlant, ff: ForeshadowFulfillm
 
 const {
   onChapterContentInput,
-  toggleChapterOutline,
 } = useChapterHubChapterMutations({
   novel,
   chapters,
@@ -904,6 +876,7 @@ const {
   chapters,
   characters,
   factions,
+  items,
   foreshadows: allForeshadowsForHub,
   characterHistories,
   factionHistories,
@@ -925,9 +898,9 @@ const {
 /** 伏笔弹窗打开/关闭时：清选区浮层（菜单、联想、实体/伏笔提示），折叠选区避免关窗后仍冒出小窗 */
 watch(foreshadowModalOpen, () => {
   resetNameSuggest()
-      closeCtxMenu()
+  closeCtxMenu()
   closeForeshadowTooltipImmediate()
-    onEntityNameLeave()
+  onEntityNameLeave()
   releaseChapterTextareaAfterForeshadowModal()
 })
 
@@ -943,12 +916,7 @@ function setNameSuggestActiveIndex(i: number) {
   nameSuggestIndex.value = i
 }
 
-watch(novelId, () => restoreChapterHubCollapseState(), { immediate: true })
-
-onMounted(() => window.addEventListener('keydown', onChapterHubCollapseShortcut))
-
 onUnmounted(() => {
-  window.removeEventListener('keydown', onChapterHubCollapseShortcut)
   clearForeshadowFlash()
   if (chapterHubSaveToastTimer != null) {
     window.clearTimeout(chapterHubSaveToastTimer)

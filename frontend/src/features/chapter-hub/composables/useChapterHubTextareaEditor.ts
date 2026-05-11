@@ -12,7 +12,7 @@ import { updateChapter } from '../../../lib/storage'
 import type { CharacterChangeEvent, FactionChangeEvent } from '../../../lib/storage'
 import { buildEntityPreviewLines } from '../entityPreview'
 import { scrollCaretIntoView } from '../caretGeometry'
-import type { Chapter, Character, Faction, ForeshadowPlant } from '../../../types'
+import type { Chapter, Character, Faction, ForeshadowPlant, Item } from '../../../types'
 
 export const CHAPTER_HUB_FIRST_LINE_INDENT = '　　'
 
@@ -22,6 +22,7 @@ export function useChapterHubTextareaEditor(deps: {
   chapters: Ref<Chapter[]>
   characters: Ref<Character[]>
   factions: Ref<Faction[]>
+  items: Ref<Item[]>
   foreshadows: Ref<ForeshadowPlant[]> | ComputedRef<ForeshadowPlant[]>
   /** 角色变更历史 Map（characterId -> events[]），用于正文底色区间计算 */
   characterHistories?: ComputedRef<Map<string, CharacterChangeEvent[]>>
@@ -29,7 +30,7 @@ export function useChapterHubTextareaEditor(deps: {
   factionHistories?: ComputedRef<Map<string, FactionChangeEvent[]>>
   chapterTextareaRef: Ref<HTMLTextAreaElement | null>
   nameSuggestOpen: Ref<boolean>
-  nameSuggestList: Ref<Array<{ id: string; name: string; kind: 'character' | 'faction' }>>
+  nameSuggestList: Ref<Array<{ id: string; name: string; kind: 'character' | 'faction' | 'item' }>>
   nameSuggestIndex: Ref<number>
   forceSuggest: Ref<boolean>
   updateNameSuggestion: (ta: HTMLTextAreaElement) => void
@@ -47,6 +48,7 @@ export function useChapterHubTextareaEditor(deps: {
     chapters,
     characters,
     factions,
+    items,
     foreshadows,
     characterHistories,
     factionHistories,
@@ -75,6 +77,7 @@ export function useChapterHubTextareaEditor(deps: {
       selectedChapter.value?.content ?? '',
       characters.value,
       factions.value,
+      items.value,
       foreshadows.value,
       selectedChapter.value?.id ?? null,
       characterHistories?.value,

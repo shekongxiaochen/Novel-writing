@@ -1,4 +1,4 @@
-import type { Chapter, Character, Faction, ForeshadowFulfillment, ForeshadowPlant } from '../../types'
+import type { Chapter, Character, Faction, ForeshadowFulfillment, ForeshadowPlant, Item } from '../../types'
 import { characterMatchLabels } from '../../lib/characterLabels'
 import {
   getCharacterChangeHistory,
@@ -31,6 +31,7 @@ const FIELD_LABEL_MAP: Record<string, string> = {
   aliases: '别名',
   attributes: '属性',
   memberships: '所属势力',
+  items: '绑定物品',
   categoryIds: '分类',
 }
 
@@ -41,6 +42,7 @@ const FACTION_FIELD_LABEL_MAP: Record<string, string> = {
   attributes: '扩展条目',
   categoryIds: '分类',
   memberships: '绑定角色',
+  items: '绑定物品',
 }
 
 /**
@@ -290,6 +292,7 @@ export function buildEntityPreviewLines(
   content: string,
   characters: Character[],
   factions: Faction[],
+  items: Item[],
   foreshadows?: ForeshadowPlant[] | null,
   chapterId?: string | null,
   characterHistories?: Map<string, CharacterChangeEvent[]>,
@@ -384,7 +387,12 @@ export function buildEntityPreviewLines(
     })
     .sort((a, b) => b.name.length - a.name.length)
 
-  const entities = [...charEntities, ...facEntities].sort((a, b) => b.name.length - a.name.length)
+  const itemEntities = [...items]
+    .map((item) => ({ kind: 'item' as const, name: (item.name ?? '').trim(), obj: item }))
+    .filter((item) => item.name)
+    .sort((a, b) => b.name.length - a.name.length)
+
+  const entities = [...charEntities, ...facEntities, ...itemEntities].sort((a, b) => b.name.length - a.name.length)
 
   // 预计算每个角色在当前章节的 characterStateZone（避免 tokenize 时重复计算）
   const characterZoneCache = new Map<string, EntityToken['characterStateZone']>()
@@ -452,6 +460,7 @@ export function buildEntityPreviewLines(
     len: number
     character: Character | null
     faction: Faction | null
+    item: Item | null
   } {
     for (const e of entities) {
       if (line.startsWith(e.name, i)) {
@@ -460,10 +469,11 @@ export function buildEntityPreviewLines(
           len,
           character: e.kind === 'character' ? (e.obj as Character) : null,
           faction: e.kind === 'faction' ? (e.obj as Faction) : null,
+          item: e.kind === 'item' ? (e.obj as Item) : null,
         }
       }
     }
-    return { len: 0, character: null, faction: null }
+    return { len: 0, character: null, faction: null, item: null }
   }
 
   function resolveCharacterForToken(c: Character | null, pos: number): Character | null {
@@ -491,7 +501,7 @@ export function buildEntityPreviewLines(
   }
 
   const tokenize = (line: string, lineStartPos: number): EntityToken[] => {
-    if (!line) return [{ text: '', character: null, faction: null, foreshadow: null }]
+    if (!line) return [{ text: '', character: null, faction: null, item: null, foreshadow: null }]
     const tokens: EntityToken[] = []
     let i = 0
     while (i < line.length) {
@@ -510,6 +520,7 @@ export function buildEntityPreviewLines(
           range: { start: globalPos, end: endPos },
           character: resolvedCharacter,
           faction: resolvedFaction,
+          item: ent.item,
           foreshadow: foreshadowAttached,
         }
         // 为角色 token 附加 characterStateZone
@@ -542,6 +553,7 @@ export function buildEntityPreviewLines(
         range: { start: globalPos, end: globalPos + 1 },
         character: null,
         faction: null,
+        item: null,
         foreshadow: fsMeta,
       })
       i += 1

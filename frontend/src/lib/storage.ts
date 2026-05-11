@@ -8,6 +8,7 @@ import type {
   CharacterRelation,
   NewCharacterRelationInput,
   NewFactionInput,
+  NewItemInput,
   NewNovelInput,
   NewOutlineInput,
   NewOutlineStorylineInput,
@@ -16,6 +17,8 @@ import type {
   Faction,
   ForeshadowPlant,
   ForeshadowFulfillment,
+  Item,
+  ItemOwnerType,
   NewForeshadowPlantInput,
   NewForeshadowFulfillmentInput,
   Novel,
@@ -34,6 +37,7 @@ const OUTLINE_STORYLINES_KEY = 'novel-writing.outline-storylines'
 const CHARACTERS_KEY = 'novel-writing.characters'
 const CHARACTER_RELATIONS_KEY = 'novel-writing.character-relations'
 const FACTIONS_KEY = 'novel-writing.factions'
+const ITEMS_KEY = 'novel-writing.items'
 const CHARACTER_FACTION_MEMBERSHIPS_KEY = 'novel-writing.character-faction-memberships'
 const CHARACTER_LAST_CHANGED_FIELDS_KEY = 'novel-writing.character-last-changed-fields'
 const FACTION_LAST_CHANGED_FIELDS_KEY = 'novel-writing.faction-last-changed-fields'
@@ -454,7 +458,6 @@ function syncCharacterFirstAppearanceByNovel(novelId: string): void {
   const chapters = getAllChapters()
     .filter((c) => c.novelId === id)
     .sort((a, b) => a.chapterNo - b.chapterNo)
-  if (chapters.length === 0) return
 
   const allCharacters = getAllCharacters()
   let changed = false
@@ -470,7 +473,6 @@ function syncCharacterFirstAppearanceByNovel(novelId: string): void {
         break
       }
     }
-    if (firstNo == null) continue
     const prevNo =
       typeof c.firstAppearanceChapterNo === 'number' && c.firstAppearanceChapterNo > 0
         ? Math.floor(c.firstAppearanceChapterNo)
@@ -526,6 +528,7 @@ export function updateChapter(partial: Pick<Chapter, 'id'> & Partial<Chapter>): 
     syncForeshadowsAfterChapterContentEdit(updated.id, prev.content ?? '', updated.content ?? '')
     syncEntityChangeAnchorsAfterChapterContentEdit(updated.id, prev.content ?? '', updated.content ?? '')
     syncCharacterFirstAppearanceByNovel(updated.novelId)
+    syncItemFirstAppearanceByNovel(updated.novelId)
   }
   return updated
 }
@@ -687,6 +690,8 @@ export function deleteChapter(chapterId: string): boolean {
     return { ...item, chapterNoStart: nextStart, chapterNoEnd: nextEnd, updatedAt: now }
   })
   saveAllTimelineEvents(nextTimeline)
+  syncCharacterFirstAppearanceByNovel(novelId)
+  syncItemFirstAppearanceByNovel(novelId)
 
   return true
 }
@@ -2220,7 +2225,8 @@ export function createCharacter(input: NewCharacterInput): Character {
   }
   all.push(item)
   saveAllCharacters(all)
-  return item
+  syncCharacterFirstAppearanceByNovel(item.novelId)
+  return getAllCharacters().find((x) => x.id === item.id) ?? item
 }
 
 export function updateCharacter(
@@ -2241,7 +2247,8 @@ export function updateCharacter(
   }
   all[idx] = updated
   saveAllCharacters(all)
-  return updated
+  syncCharacterFirstAppearanceByNovel(updated.novelId)
+  return getAllCharacters().find((x) => x.id === updated.id) ?? updated
 }
 
 /** 删除角色；同时删除与该角色相关的所有关系（CharacterRelation） */
@@ -2263,6 +2270,7 @@ export function deleteCharacter(characterId: string): boolean {
   const mems = getAllCharacterFactionMemberships()
   const nextMems = mems.filter((m) => m.characterId !== characterId)
   if (nextMems.length !== mems.length) saveAllCharacterFactionMemberships(nextMems)
+  clearItemOwnerReferences('character', characterId)
   removeCharacterLastChangedFields(characterId)
 
   return true
@@ -2379,6 +2387,252 @@ export function deleteFaction(factionId: string): boolean {
   const mems = getAllCharacterFactionMemberships()
   const nextMems = mems.filter((m) => m.factionId !== factionId)
   if (nextMems.length !== mems.length) saveAllCharacterFactionMemberships(nextMems)
+  clearItemOwnerReferences('faction', factionId)
+  return true
+}
+
+function normalizeItemAttributes(raw: unknown): CharacterAttribute[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((a) => a as { id?: string; key?: string; value?: string })
+    .map((a) => ({
+      id: String(a.id ?? '').trim() || uid(),
+      key: String(a.key ?? '').trim(),
+      value: String(a.value ?? '').trim(),
+    }))
+    .filter((a) => a.key && a.value)
+}
+
+function normalizeItemFirstAppearance(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+}
+
+function normalizeItemOwnerType(value: unknown): ItemOwnerType | null {
+  const type = String(value ?? '').trim()
+  return type === 'character' || type === 'faction' ? type : null
+}
+
+function findLegacyItemOwner(novelId: string, owner: string): { ownerType: ItemOwnerType | null; ownerId: string | null } {
+  const name = owner.trim()
+  if (!name) return { ownerType: null, ownerId: null }
+  const character = getAllCharacters().find((c) => c.novelId === novelId && c.name.trim() === name)
+  if (character) return { ownerType: 'character', ownerId: character.id }
+  const faction = getAllFactions().find((f) => f.novelId === novelId && f.name.trim() === name)
+  if (faction) return { ownerType: 'faction', ownerId: faction.id }
+  return { ownerType: null, ownerId: null }
+}
+
+function normalizeItemOwner(
+  raw: Record<string, unknown>,
+  novelId: string,
+): { ownerType: ItemOwnerType | null; ownerId: string | null } {
+  const ownerType = normalizeItemOwnerType(raw.ownerType)
+  const ownerId = String(raw.ownerId ?? '').trim()
+  if (ownerType === 'character' && ownerId) {
+    const exists = getAllCharacters().some((c) => c.novelId === novelId && c.id === ownerId)
+    if (exists) return { ownerType, ownerId }
+  }
+  if (ownerType === 'faction' && ownerId) {
+    const exists = getAllFactions().some((f) => f.novelId === novelId && f.id === ownerId)
+    if (exists) return { ownerType, ownerId }
+  }
+  return findLegacyItemOwner(novelId, String(raw.owner ?? '').trim())
+}
+
+function normalizeItemRow(raw: Record<string, unknown>): Item {
+  const attributes = normalizeItemAttributes(raw.attributes)
+  const novelId = String(raw.novelId ?? '').trim()
+  const owner = normalizeItemOwner(raw, novelId)
+  return {
+    id: String(raw.id ?? '').trim(),
+    novelId,
+    name: String(raw.name ?? '').trim() || '未命名物品',
+    summary: String(raw.summary ?? '').trim(),
+    ownerType: owner.ownerType,
+    ownerId: owner.ownerId,
+    firstAppearanceChapterNo: normalizeItemFirstAppearance(raw.firstAppearanceChapterNo),
+    attributes: attributes.length > 0 ? attributes : undefined,
+    createdAt: String(raw.createdAt ?? '') || nowIso(),
+    updatedAt: String(raw.updatedAt ?? '') || nowIso(),
+  }
+}
+
+function getAllItems(): Item[] {
+  const raw = localStorage.getItem(ITEMS_KEY)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown[]
+    if (!Array.isArray(parsed)) return []
+    const rows = parsed.filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+    const next = rows.map((row) => normalizeItemRow(row))
+      .filter((item) => item.id && item.novelId)
+    const changed = rows.length !== next.length || rows.some((row, i) => {
+      const item = next[i]
+      if (!item) return true
+      return (
+        'owner' in row ||
+        normalizeItemOwnerType(row.ownerType) !== item.ownerType ||
+        String(row.ownerId ?? '').trim() !== (item.ownerId ?? '') ||
+        normalizeItemFirstAppearance(row.firstAppearanceChapterNo) !== item.firstAppearanceChapterNo
+      )
+    })
+    if (changed) saveAllItems(next)
+    return next
+  } catch {
+    return []
+  }
+}
+
+function saveAllItems(items: Item[]): void {
+  localStorage.setItem(ITEMS_KEY, JSON.stringify(items))
+  emitStorageChange()
+}
+
+function syncItemFirstAppearanceByNovel(novelId: string): void {
+  const id = String(novelId ?? '').trim()
+  if (!id) return
+  const chapters = getAllChapters()
+    .filter((c) => c.novelId === id)
+    .sort((a, b) => a.chapterNo - b.chapterNo)
+  const allItems = getAllItems()
+  let changed = false
+  for (let i = 0; i < allItems.length; i++) {
+    const item = allItems[i]
+    if (item.novelId !== id) continue
+    const name = (item.name ?? '').trim()
+    let firstNo: number | null = null
+    if (name) {
+      for (const ch of chapters) {
+        if ((ch.content ?? '').includes(name)) {
+          firstNo = ch.chapterNo
+          break
+        }
+      }
+    }
+    const prevNo = normalizeItemFirstAppearance(item.firstAppearanceChapterNo)
+    if (prevNo === firstNo) continue
+    allItems[i] = {
+      ...item,
+      firstAppearanceChapterNo: firstNo,
+      updatedAt: nowIso(),
+    }
+    changed = true
+  }
+  if (changed) saveAllItems(allItems)
+}
+
+function clearItemOwnerReferences(ownerType: ItemOwnerType, ownerId: string): void {
+  const id = String(ownerId ?? '').trim()
+  if (!id) return
+  const all = getAllItems()
+  let changed = false
+  const next = all.map((item) => {
+    if (item.ownerType !== ownerType || item.ownerId !== id) return item
+    changed = true
+    return { ...item, ownerType: null, ownerId: null, updatedAt: nowIso() }
+  })
+  if (changed) saveAllItems(next)
+}
+
+export function getItemsByNovelId(novelId: string): Item[] {
+  return getAllItems()
+    .filter((item) => item.novelId === novelId)
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+}
+
+export function getItemsByOwner(novelId: string, ownerType: ItemOwnerType, ownerId: string): Item[] {
+  const id = String(ownerId ?? '').trim()
+  if (!id) return []
+  return getItemsByNovelId(novelId).filter((item) => item.ownerType === ownerType && item.ownerId === id)
+}
+
+export function replaceItemOwnersForEntity(
+  novelId: string,
+  ownerType: ItemOwnerType,
+  ownerId: string,
+  itemIds: string[],
+): void {
+  const nId = String(novelId ?? '').trim()
+  const oId = String(ownerId ?? '').trim()
+  if (!nId || !oId) return
+  const selected = new Set(normalizeIdList(itemIds))
+  const all = getAllItems()
+  let changed = false
+  const now = nowIso()
+  const next = all.map((item) => {
+    if (item.novelId !== nId) return item
+    if (selected.has(item.id)) {
+      if (item.ownerType === ownerType && item.ownerId === oId) return item
+      changed = true
+      return { ...item, ownerType, ownerId: oId, updatedAt: now }
+    }
+    if (item.ownerType === ownerType && item.ownerId === oId) {
+      changed = true
+      return { ...item, ownerType: null, ownerId: null, updatedAt: now }
+    }
+    return item
+  })
+  if (changed) saveAllItems(next)
+}
+
+export function createItem(input: NewItemInput): Item {
+  const all = getAllItems()
+  const now = nowIso()
+  const attributes = normalizeItemAttributes(input.attributes)
+  const owner = normalizeItemOwner(
+    { ownerType: input.ownerType ?? null, ownerId: input.ownerId ?? null },
+    input.novelId,
+  )
+  const item: Item = {
+    id: uid(),
+    novelId: input.novelId,
+    name: input.name.trim() || '未命名物品',
+    summary: input.summary.trim(),
+    ownerType: owner.ownerType,
+    ownerId: owner.ownerId,
+    firstAppearanceChapterNo: null,
+    attributes: attributes.length > 0 ? attributes : undefined,
+    createdAt: now,
+    updatedAt: now,
+  }
+  all.push(item)
+  saveAllItems(all)
+  syncItemFirstAppearanceByNovel(item.novelId)
+  return getAllItems().find((x) => x.id === item.id) ?? item
+}
+
+export function updateItem(partial: Pick<Item, 'id'> & Partial<Item>): Item | null {
+  const all = getAllItems()
+  const idx = all.findIndex((item) => item.id === partial.id)
+  if (idx < 0) return null
+  const merged = { ...all[idx], ...partial }
+  const attributes = partial.attributes !== undefined ? normalizeItemAttributes(partial.attributes) : normalizeItemAttributes(all[idx].attributes)
+  const owner = normalizeItemOwner(
+    { ownerType: merged.ownerType ?? null, ownerId: merged.ownerId ?? null },
+    merged.novelId,
+  )
+  const updated: Item = {
+    ...merged,
+    name: String(merged.name ?? '').trim() || all[idx].name || '未命名物品',
+    summary: String(merged.summary ?? '').trim(),
+    ownerType: owner.ownerType,
+    ownerId: owner.ownerId,
+    firstAppearanceChapterNo: normalizeItemFirstAppearance(all[idx].firstAppearanceChapterNo),
+    attributes: attributes.length > 0 ? attributes : undefined,
+    updatedAt: nowIso(),
+  }
+  all[idx] = updated
+  saveAllItems(all)
+  syncItemFirstAppearanceByNovel(updated.novelId)
+  return getAllItems().find((x) => x.id === updated.id) ?? updated
+}
+
+export function deleteItem(itemId: string): boolean {
+  const all = getAllItems()
+  const next = all.filter((item) => item.id !== itemId)
+  if (next.length === all.length) return false
+  saveAllItems(next)
   return true
 }
 

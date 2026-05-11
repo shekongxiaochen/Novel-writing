@@ -1,4 +1,4 @@
-import type { Character, Faction } from '../../types'
+import type { Character, Faction, Item } from '../../types'
 import { characterMatchLabels } from '../../lib/characterLabels'
 
 /** 文本中 needle 每一次出现的起始下标（允许重叠，如连续相同字） */
@@ -84,6 +84,37 @@ export function resolveFactionCoveringSelection(
         const expected = name.slice(selStart - i, selEnd - i)
         if (slice === expected && name.length > bestLen) {
           best = f
+          bestLen = name.length
+        }
+      }
+    }
+  }
+  return best
+}
+
+/** 同上，针对物品名 */
+export function resolveItemCoveringSelection(
+  fullText: string,
+  selStart: number,
+  selEnd: number,
+  items: Item[]
+): Item | null {
+  if (selEnd <= selStart) return null
+  const slice = fullText.slice(selStart, selEnd)
+  if (!slice) return null
+
+  let best: Item | null = null
+  let bestLen = -1
+
+  for (const item of items) {
+    const name = (item.name ?? '').trim()
+    if (!name) continue
+    for (const i of findNameOccurrences(fullText, name)) {
+      const occEnd = i + name.length
+      if (selStart >= i && selEnd <= occEnd) {
+        const expected = name.slice(selStart - i, selEnd - i)
+        if (slice === expected && name.length > bestLen) {
+          best = item
           bestLen = name.length
         }
       }

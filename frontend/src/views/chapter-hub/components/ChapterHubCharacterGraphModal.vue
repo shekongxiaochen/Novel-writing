@@ -135,6 +135,17 @@
                             <template v-else>—</template>
                           </dd>
                         </div>
+                        <div class="character-panel__spec-item character-panel__spec-item--block">
+                          <dt>持有物品</dt>
+                          <dd>
+                            <ul v-if="graphCharacterHeldItems.length > 0" class="character-panel__faction-list">
+                              <li v-for="item in graphCharacterHeldItems" :key="`chi-${item.id}`">
+                                <strong>{{ item.name }}</strong>
+                              </li>
+                            </ul>
+                            <template v-else>—</template>
+                          </dd>
+                        </div>
                       </dl>
                       <section class="character-panel__block">
                         <h4 class="character-panel__block-title">扩展条目</h4>
@@ -288,15 +299,24 @@
                   <span class="character-panel__field-label">年龄</span>
                   <input v-model="draft.age" class="character-panel__input" maxlength="20" />
                 </label>
-                <label class="character-panel__field">
+                <div class="character-panel__field">
                   <span class="character-panel__field-label">性别</span>
-                  <select v-model="draft.gender" class="character-panel__input">
-                    <option value="">未设置</option>
-                    <option value="男">男</option>
-                    <option value="女">女</option>
-                    <option value="其他">其他</option>
-                  </select>
-                </label>
+                  <div class="character-gender-toggle" role="radiogroup" aria-label="性别">
+                    <button
+                      v-for="option in genderOptions"
+                      :key="`hub-gender-${option.value || 'unset'}`"
+                      type="button"
+                      class="character-gender-toggle__option"
+                      :class="{ 'character-gender-toggle__option--active': draft.gender === option.value }"
+                      role="radio"
+                      :aria-checked="draft.gender === option.value"
+                      @click="draft.gender = option.value"
+                    >
+                      <span class="character-gender-toggle__dot" aria-hidden="true">{{ option.mark }}</span>
+                      <span>{{ option.label }}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
@@ -390,6 +410,33 @@
                   <button type="button" class="character-panel__icon-btn" @click="removeMembershipRow(idx)">移除</button>
                 </div>
                 <button type="button" class="character-panel__btn character-panel__btn--dashed" @click="addMembershipRow">＋ 添加势力关联</button>
+              </section>
+
+              <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
+                <div class="character-panel__block-head">
+                  <h4 class="character-panel__block-title">绑定物品</h4>
+                  <span class="character-panel__block-hint">可绑定多个物品；选择已被占用的物品会在保存后转移持有者</span>
+                </div>
+                <p v-if="items.length === 0" class="muted" style="margin: 0 0 8px">暂无物品，请先到工作台「物品」页创建物品。</p>
+                <label v-else class="character-panel__field character-panel__field--tight">
+                  <span class="character-panel__field-label">搜索物品</span>
+                  <input v-model="itemQuery" class="character-panel__input" maxlength="40" />
+                </label>
+                <div v-if="items.length > 0" class="character-panel__category-checks" role="group" aria-label="绑定物品">
+                  <button
+                    v-for="item in itemPickerRows"
+                    :key="`hub-character-item-${item.id}`"
+                    type="button"
+                    class="category-bind-chip character-panel__category-chip"
+                    :class="item.bound ? 'category-bind-chip--bound' : 'category-bind-chip--unbound'"
+                    @click="toggleItemBinding(item.id)"
+                  >
+                    <span class="category-bind-chip__state" aria-hidden="true">{{ item.bound ? '已绑定' : '未绑定' }}</span>
+                    <span class="character-panel__category-chip-text">{{ item.name }}</span>
+                    <span class="muted">· {{ item.transferHint }}</span>
+                  </button>
+                </div>
+                <p v-if="items.length > 0 && itemPickerRows.length === 0" class="muted" style="margin: 8px 0 0">没有匹配的物品。</p>
               </section>
 
               <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
@@ -525,59 +572,52 @@
             <div class="chapter-hub__relation-add-form scrollbar-paper">
               <label class="chapter-hub__relation-edit-field">
                 <span>对方角色</span>
-                <div class="workspace-dd">
+                <div class="relation-target-dd">
                   <button
                     type="button"
-                    class="workspace-dd__btn workspace-dd__btn--compact character-panel__input"
+                    class="workspace-dd__btn workspace-dd__btn--compact character-panel__input relation-target-dd__btn"
                     :class="{ 'workspace-dd__btn--open': relationAddTargetDropdownOpen }"
-                    data-dd-key="hub-relation-add-target"
-                    :disabled="relationAddNewCandidates.length === 0"
                     @click="toggleRelationAddTargetDropdown"
                   >
                     <span class="workspace-dd__btn-text">{{ relationAddTargetDropdownLabel }}</span>
                     <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
                   </button>
-                  <div
-                    v-if="relationAddTargetDropdownOpen"
-                    class="workspace-dd__panel scrollbar-paper chapter-hub__relation-add-dd-panel"
-                    :class="[
-                      dropdownPanelDirectionClass('hub-relation-add-target'),
-                      { 'workspace-dd__panel--max4': relationAddFilteredCandidates.length > 4 },
-                    ]"
-                    data-dd-panel-key="hub-relation-add-target"
-                    :style="relationAddTargetPanelStyle"
-                    role="listbox"
-                  >
-                    <div class="workspace-dd__search">
+                  <div v-if="relationAddTargetDropdownOpen" class="relation-target-dd__panel" role="listbox">
+                    <div class="relation-target-dd__search">
                       <input
                         v-model="relationAddTargetQuery"
                         type="search"
-                        class="workspace-dd__search-input"
+                        class="workspace-dd__search-input relation-target-dd__search-input"
                         placeholder="搜索角色名…"
                         autocomplete="off"
                       />
                     </div>
-                    <button
-                      type="button"
-                      class="workspace-dd__item"
-                      :class="{ 'workspace-dd__item--active': !newRelationTargetId }"
-                      @click="selectRelationAddTarget('')"
-                    >
-                      请选择尚未与球心建立关系的角色…
-                    </button>
-                    <button
-                      v-for="c in relationAddFilteredCandidates"
-                      :key="`rel-new-${c.id}`"
-                      type="button"
-                      class="workspace-dd__item"
-                      :class="{ 'workspace-dd__item--active': newRelationTargetId === c.id }"
-                      @click="selectRelationAddTarget(c.id)"
-                    >
-                      {{ c.name || '未命名角色' }}
-                    </button>
-                    <p v-if="relationAddFilteredCandidates.length === 0" class="muted" style="margin: 2px 6px 6px">
-                      无匹配角色
-                    </p>
+                    <div class="relation-target-dd__list scrollbar-paper">
+                      <button
+                        type="button"
+                        class="workspace-dd__item"
+                        :class="{ 'workspace-dd__item--active': !newRelationTargetId }"
+                        @click="selectRelationAddTarget('')"
+                      >
+                        请选择尚未与球心建立关系的角色…
+                      </button>
+                      <button
+                        v-for="c in relationAddFilteredTargets"
+                        :key="`rel-new-${c.id}`"
+                        type="button"
+                        class="workspace-dd__item"
+                        :class="{ 'workspace-dd__item--active': newRelationTargetId === c.id }"
+                        @click="selectRelationAddTarget(c.id)"
+                      >
+                        {{ c.name || '未命名角色' }}
+                      </button>
+                      <p v-if="relationAddNewCandidates.length === 0" class="muted relation-target-dd__empty">
+                        本作中已没有可与球心新建关系的角色。
+                      </p>
+                      <p v-else-if="relationAddFilteredTargets.length === 0" class="muted relation-target-dd__empty">
+                        没有匹配的角色。
+                      </p>
+                    </div>
                   </div>
                 </div>
               </label>
@@ -700,12 +740,13 @@ import {
   normalizeCategoryIds,
   type CharacterChangeEvent,
 } from '../../../lib/storage'
-import type { Category, Character, CharacterFactionMembership, CharacterRelation, Faction } from '../../../types'
+import type { Category, Character, CharacterFactionMembership, CharacterRelation, Faction, Item } from '../../../types'
 
 const props = defineProps<{
   open: boolean
   novelId: string
   characters: Character[]
+  items: Item[]
   /** 作品下全部分类（用于多选） */
   categories?: Category[]
   focusCharacterId: string
@@ -732,6 +773,13 @@ const characterAllChangesFieldDropdownOpen = ref(false)
 const unsavedConfirmOpen = ref(false)
 let pendingDiscardAction: null | (() => void) = null
 let saveToastTimer: ReturnType<typeof setTimeout> | null = null
+
+const genderOptions = [
+  { value: '', label: '未设', mark: '—' },
+  { value: '男', label: '男', mark: '♂' },
+  { value: '女', label: '女', mark: '♀' },
+  { value: '其他', label: '其他', mark: '◇' },
+]
 
 type HungGraphWindow = {
   id: string
@@ -768,6 +816,14 @@ const graphCharacterMemberships = computed(() => {
   const c = editingCharacter.value
   if (!c) return []
   return membershipSource.value.filter((m) => m.characterId === c.id)
+})
+
+const graphCharacterHeldItems = computed(() => {
+  const c = editingCharacter.value
+  if (!c) return [] as Item[]
+  return props.items
+    .filter((item) => item.novelId === props.novelId && item.ownerType === 'character' && item.ownerId === c.id)
+    .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'zh-Hans'))
 })
 
 const sortedCategories = computed(() =>
@@ -839,19 +895,14 @@ const {
   onSaved: handleSaved,
 })
 
-const relationAddTargetDropdownOpen = ref(false)
-const relationAddTargetPanelStyle = ref<Record<string, string>>({})
-const relationAddTargetQuery = ref('')
 
-const relationAddFilteredCandidates = computed(() => {
+const relationAddTargetDropdownOpen = ref(false)
+const relationAddTargetQuery = ref('')
+const relationAddTargetDropdownLabel = computed(() => newRelationTargetName.value || '请选择尚未与球心建立关系的角色…')
+const relationAddFilteredTargets = computed(() => {
   const q = relationAddTargetQuery.value.trim().toLowerCase()
   if (!q) return relationAddNewCandidates.value
   return relationAddNewCandidates.value.filter((c) => String(c.name ?? '').toLowerCase().includes(q))
-})
-
-const relationAddTargetDropdownLabel = computed(() => {
-  if (!newRelationTargetId.value) return '请选择尚未与球心建立关系的角色…'
-  return newRelationTargetName.value || '请选择尚未与球心建立关系的角色…'
 })
 
 function selectRelationAddTarget(id: string): void {
@@ -865,71 +916,9 @@ function selectRelationAddTarget(id: string): void {
 }
 
 function toggleRelationAddTargetDropdown(): void {
-  if (relationAddNewCandidates.value.length === 0) return
   relationAddTargetDropdownOpen.value = !relationAddTargetDropdownOpen.value
-  if (relationAddTargetDropdownOpen.value) {
-    resolveDropdownDirection('hub-relation-add-target')
-    void nextTick(() => positionRelationAddTargetPanel())
-  } else {
-    relationAddTargetQuery.value = ''
-  }
+  if (!relationAddTargetDropdownOpen.value) relationAddTargetQuery.value = ''
 }
-
-function positionRelationAddTargetPanel(): void {
-  if (typeof window === 'undefined') return
-  const btn = document.querySelector<HTMLElement>('[data-dd-key="hub-relation-add-target"]')
-  const panel = document.querySelector<HTMLElement>('[data-dd-panel-key="hub-relation-add-target"]')
-  if (!btn || !panel) return
-  const rect = btn.getBoundingClientRect()
-  const pad = 8
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const panelH = panel.offsetHeight || 240
-  const below = vh - rect.bottom - pad
-  const above = rect.top - pad
-  const openUp = below < Math.min(Math.max(panelH, 180), 360) && above > below
-  dropdownDirectionByKey['hub-relation-add-target'] = openUp ? 'up' : 'down'
-
-  const w = rect.width
-  const left = Math.max(8, Math.min(rect.left, vw - w - 8))
-  const top = openUp ? Math.max(8, rect.top - pad - panelH) : Math.min(vh - 8, rect.bottom + pad)
-  relationAddTargetPanelStyle.value = {
-    left: `${Math.round(left)}px`,
-    width: `${Math.round(w)}px`,
-    top: `${Math.round(top)}px`,
-  }
-}
-
-function onDocPointerDownForRelationAddTarget(e: MouseEvent): void {
-  if (!relationAddTargetDropdownOpen.value) return
-  const t = e.target
-  if (!(t instanceof Node)) return
-  const btn = document.querySelector<HTMLElement>('[data-dd-key="hub-relation-add-target"]')
-  const panel = document.querySelector<HTMLElement>('[data-dd-panel-key="hub-relation-add-target"]')
-  if (btn?.contains(t)) return
-  if (panel?.contains(t)) return
-  relationAddTargetDropdownOpen.value = false
-  relationAddTargetQuery.value = ''
-}
-
-watch(relationAddTargetDropdownOpen, (open) => {
-  if (typeof document === 'undefined') return
-  document.removeEventListener('pointerdown', onDocPointerDownForRelationAddTarget, true)
-  if (open) document.addEventListener('pointerdown', onDocPointerDownForRelationAddTarget, true)
-})
-
-watch(
-  () => [relationAddModalOpen.value, relationAddTargetDropdownOpen.value] as const,
-  ([modalOpen, ddOpen]) => {
-    if (!modalOpen) {
-      relationAddTargetDropdownOpen.value = false
-      relationAddTargetQuery.value = ''
-      return
-    }
-    if (!ddOpen) return
-    void nextTick(() => positionRelationAddTargetPanel())
-  },
-)
 
 /** 变更历史里在本章节（chapterId）记过一笔的角色，用于 3D 球体琥珀色高亮 */
 const modifiedInChapterCharacterIds = computed(() => {
@@ -1052,6 +1041,7 @@ function characterFieldLabel(field: string): string {
   if (key === 'notes') return '备注'
   if (key === 'aliases') return '别名'
   if (key === 'memberships') return '所属势力'
+  if (key === 'items') return '绑定物品'
   if (key === 'categoryIds') return '分类'
   if (key === 'attributes') return '扩展条目'
   return key || '未知字段'
@@ -1165,6 +1155,8 @@ const {
   characterEditMembershipFactionDropdownOpenId,
   renameConfirmOpen,
   draft,
+  itemQuery,
+  itemPickerRows,
   canSaveDraft,
   hasUnsavedCharacterChanges,
   resetCharacterEditTransientState,
@@ -1182,11 +1174,14 @@ const {
   toggleCharacterEditMembershipFactionDropdown: toggleCharacterEditMembershipFactionDropdownCore,
   addAttributeRow,
   removeAttributeRow,
+  toggleItemBinding,
 } = useCharacterGraphCharacterEditor({
   novelId: toRef(props, 'novelId'),
   chapterId: toRef(props, 'chapterId'),
   sourceTextRange: toRef(props, 'sourceTextRange'),
   categories: toRef(props, 'categories'),
+  characters: toRef(props, 'characters'),
+  items: toRef(props, 'items'),
   editingCharacter,
   membershipSource,
   factionOptions,
@@ -1248,6 +1243,8 @@ function closeRelationEditModal(): void {
 }
 
 function closeRelationAddModal(): void {
+  relationAddTargetDropdownOpen.value = false
+  relationAddTargetQuery.value = ''
   if (closeRelationAddModalCore()) return
   requestDiscard(() => {
     closeRelationAddModalCore(true)

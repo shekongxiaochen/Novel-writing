@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
+  base: './',
   // 强制启用 SPA HTML fallback，确保访问 `/` 能返回入口 `index.html`
   appType: 'spa',
   server: {
