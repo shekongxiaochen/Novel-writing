@@ -833,7 +833,6 @@
                           <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                             <div class="character-panel__block-head">
                               <h4 class="character-panel__block-title">别名</h4>
-                              <span class="character-panel__block-hint">可选；正文中与姓名效果相同，可多条</span>
                             </div>
                             <div
                               v-for="row in characterDraft.aliasRows"
@@ -860,7 +859,6 @@
                           <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                             <div class="character-panel__block-head">
                               <h4 class="character-panel__block-title">持有物品</h4>
-                              <span class="character-panel__block-hint">可搜索添加；已持有物品在下拉底部标识且不可重复选择</span>
                             </div>
                             <p v-if="items.length === 0" class="muted" style="margin: 0 0 8px">暂无物品，请先到「物品」页创建。</p>
                             <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterItemPickerOpen }">
@@ -900,7 +898,6 @@
                           <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                             <div class="character-panel__block-head">
                               <h4 class="character-panel__block-title">分类</h4>
-                              <span class="character-panel__block-hint">可搜索添加；已绑定分类在下拉底部标识且不可重复选择</span>
                             </div>
                             <p v-if="sortedCategories.length === 0" class="muted" style="margin: 0 0 8px">暂无分类，请在本页下方「分类」中新建。</p>
                             <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterCategoryPickerOpen }">
@@ -939,7 +936,6 @@
                           <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                             <div class="character-panel__block-head">
                               <h4 class="character-panel__block-title">所属势力</h4>
-                              <span class="character-panel__block-hint">可搜索添加；已加入势力在下拉底部标识且不可重复选择</span>
                             </div>
                             <p v-if="factions.length === 0" class="muted" style="margin: 0 0 8px">暂无势力，请先到「势力」页创建。</p>
                             <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterMembershipPickerOpen }">
@@ -991,7 +987,6 @@
                         <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                           <div class="character-panel__block-head">
                             <h4 class="character-panel__block-title">扩展条目</h4>
-                            <span class="character-panel__block-hint">名与说明需成对填写</span>
                           </div>
                           <div v-for="a in characterDraft.attributes" :key="a.id" class="character-panel__custom-card">
                             <label class="character-panel__field character-panel__field--tight">

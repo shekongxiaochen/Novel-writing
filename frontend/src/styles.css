@@ -75,7 +75,7 @@
 .cursor-shell--novel {
   grid-template-columns:
     var(--novel-sidebar-width, 272px)
-    6px
+    0px
     minmax(0, 1fr)
     minmax(0, var(--chapter-shell-summary-column, 0px));
   grid-template-rows: auto minmax(0, 1fr);
@@ -84,6 +84,12 @@
   min-height: 100dvh;
   overflow: hidden;
   transition: grid-template-columns 0.2s ease;
+}
+
+body.is-resizing-novel-sidebar .cursor-shell--novel,
+body.is-resizing-ai-studio .cursor-shell--novel,
+body.is-resizing-summary-studio .cursor-shell--novel {
+  transition: none;
 }
 
 .cursor-shell--novel .cursor-shell__menu-bar {
@@ -113,30 +119,42 @@ body.is-resizing-novel-sidebar * {
   grid-column: 2;
   grid-row: 2;
   width: 10px;
+  justify-self: center;
   cursor: ew-resize;
-  background: color-mix(in srgb, var(--color-surface-muted) 35%, transparent);
-  border-left: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
-  border-right: 1px solid transparent;
+  background: transparent;
+  border: 0;
+  z-index: 4;
   transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
-.cursor-shell__resize-handle:hover {
-  background: color-mix(in srgb, var(--color-primary-soft) 40%, transparent);
-  border-left-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--color-primary) 48%, transparent);
+.cursor-shell__resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--color-border) 85%, transparent);
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.cursor-shell__resize-handle:hover::before {
+  background: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
 .cursor-shell__resize-handle:active {
   cursor: var(--cursor-shell-split-resize);
-  background: color-mix(in srgb, var(--color-primary-soft) 60%, transparent);
 }
 
 .cursor-shell--novel.is-resizing-sidebar .cursor-shell__resize-handle {
-  background: color-mix(in srgb, var(--color-primary-soft) 62%, transparent);
-  border-left-color: color-mix(in srgb, var(--color-primary) 60%, var(--color-border));
-  box-shadow:
-    inset 1px 0 0 color-mix(in srgb, var(--color-primary) 70%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--color-primary) 26%, transparent);
+  box-shadow: none;
+}
+
+.cursor-shell--novel.is-resizing-sidebar .cursor-shell__resize-handle::before {
+  background: color-mix(in srgb, var(--color-primary) 60%, var(--color-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 26%, transparent);
 }
 
 .cursor-shell__chapter-list {
@@ -820,7 +838,7 @@ body.is-resizing-novel-sidebar * {
 
 /* Cursor-like content flattening */
 .cursor-shell.is-sidebar-collapsed {
-  grid-template-columns: 0 8px minmax(0, 1fr) minmax(0, var(--chapter-shell-summary-column, 0px));
+  grid-template-columns: 0 0px minmax(0, 1fr) minmax(0, var(--chapter-shell-summary-column, 0px));
 }
 
 .cursor-shell.is-sidebar-collapsed .cursor-shell__sidebar--chapters {
@@ -14256,6 +14274,10 @@ button[type='submit'],
   overflow: visible;
 }
 
+body.is-resizing-ai-studio .chapter-hub__workspace {
+  transition: none;
+}
+
 .chapter-hub__editor-shell {
   min-width: 0;
   height: 100%;
@@ -14387,6 +14409,43 @@ button[type='submit'],
   padding: 0 12px 10px;
   border-top: 1px solid color-mix(in srgb, var(--color-border-strong) 34%, transparent);
   background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  overflow: hidden;
+  transform-origin: top center;
+}
+
+.chapter-hub-legend-toggle-enter-active,
+.chapter-hub-legend-toggle-leave-active {
+  transition:
+    max-height 0.22s ease,
+    opacity 0.18s ease,
+    padding-top 0.22s ease,
+    padding-bottom 0.22s ease,
+    border-top-width 0.18s ease,
+    margin 0.22s ease,
+    transform 0.22s ease;
+  overflow: hidden;
+}
+
+.chapter-hub-legend-toggle-enter-from,
+.chapter-hub-legend-toggle-leave-to {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  margin: 0;
+  transform: translateY(-6px);
+}
+
+.chapter-hub-legend-toggle-enter-to,
+.chapter-hub-legend-toggle-leave-from {
+  max-height: 96px;
+  opacity: 1;
+  padding-top: 0;
+  padding-bottom: 10px;
+  border-top-width: 1px;
+  margin: 0;
+  transform: translateY(0);
 }
 
 .chapter-hub__ai-studio {
@@ -14411,6 +14470,11 @@ button[type='submit'],
     opacity 0.18s ease;
   border: 1px solid color-mix(in srgb, var(--color-border-strong) 52%, transparent);
   background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+}
+
+body.is-resizing-ai-studio .chapter-hub__ai-studio,
+body.is-resizing-summary-studio .cursor-shell__summary-studio {
+  transition: none;
 }
 
 .chapter-hub__ai-studio-resizer {
