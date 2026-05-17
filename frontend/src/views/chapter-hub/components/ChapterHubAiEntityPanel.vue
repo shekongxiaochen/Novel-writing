@@ -1,5 +1,5 @@
 <template>
-  <aside v-if="open" class="chapter-hub-ai-panel" role="region" aria-label="AI 阅读台">
+  <aside v-show="open" class="chapter-hub-ai-panel" role="region" aria-label="AI 阅读台" :aria-hidden="open ? 'false' : 'true'">
     <div class="chapter-hub-ai-panel__surface">
       <header class="chapter-hub-ai-panel__header">
         <div class="chapter-hub-ai-panel__topbar">
@@ -33,9 +33,9 @@
       </header>
 
       <div v-if="historyOpen" class="chapter-hub-ai-panel__history scrollbar-paper">
-        <div class="chapter-hub-ai-panel__history-head">
-          <span>聊天历史</span>
-          <span>{{ chatHistorySessions.length }}</span>
+        <div v-if="chatHistorySessions.length === 0" class="chapter-hub-ai-panel__history-empty">
+          <p>还没有历史对话</p>
+          <span>新建聊天后，这里会保留最近会话。</span>
         </div>
         <div
           v-for="session in chatHistorySessions"
@@ -48,9 +48,11 @@
             class="chapter-hub-ai-panel__history-switch"
             @click="historyOpen = false; $emit('switch-chat', session.id)"
           >
-            <span class="chapter-hub-ai-panel__history-copy">
+            <span class="chapter-hub-ai-panel__history-main">
               <span class="chapter-hub-ai-panel__history-title">{{ session.title }}</span>
-              <span class="chapter-hub-ai-panel__history-time">上次询问 {{ formatLastQuestionAt(session.lastQuestionAt) }}</span>
+            </span>
+            <span class="chapter-hub-ai-panel__history-side">
+              <span class="chapter-hub-ai-panel__history-time">{{ formatHistoryAge(session.lastQuestionAt) }}</span>
             </span>
           </button>
           <button
@@ -591,9 +593,9 @@
               ref="composerInputRef"
               v-model="draft"
               class="chapter-hub-ai-panel__input"
-              rows="2"
+              rows="1"
               maxlength="500"
-              placeholder="询问当前章的人物关系、伏笔回收、信息冲突……"
+              placeholder="询问当前章的人物、伏笔、冲突……"
               @keydown="onComposerKeydown"
               @input="syncComposerHeight"
             />
@@ -696,19 +698,34 @@ function formatLastQuestionAt(value: string): string {
   return `${month}-${day} ${hours}:${minutes}`
 }
 
+function formatHistoryAge(value: string): string {
+  const date = new Date(value)
+  if (!value || Number.isNaN(date.getTime())) return '--'
+  const diffMs = Date.now() - date.getTime()
+  const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
+  if (diffDays >= 1) return `${diffDays}d`
+  const diffHours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)))
+  if (diffHours >= 1) return `${diffHours}h`
+  const diffMinutes = Math.max(1, Math.floor(diffMs / (1000 * 60)))
+  return `${diffMinutes}m`
+}
+
 function syncComposerHeight(): void {
   const el = composerInputRef.value
   if (!el) return
-  el.style.height = '0px'
+  el.style.height = 'auto'
   const computed = window.getComputedStyle(el)
   const lineHeight = Number.parseFloat(computed.lineHeight || '0') || 18
   const paddingTop = Number.parseFloat(computed.paddingTop || '0') || 0
   const paddingBottom = Number.parseFloat(computed.paddingBottom || '0') || 0
   const borderTop = Number.parseFloat(computed.borderTopWidth || '0') || 0
   const borderBottom = Number.parseFloat(computed.borderBottomWidth || '0') || 0
+  const cssMinHeight = Number.parseFloat(computed.minHeight || '0') || 0
+  const contentMinHeight = lineHeight * 2 + paddingTop + paddingBottom + borderTop + borderBottom
+  const minHeight = Math.max(cssMinHeight, contentMinHeight)
   const maxHeight = lineHeight * 5 + paddingTop + paddingBottom + borderTop + borderBottom
   const nextHeight = Math.min(el.scrollHeight, maxHeight)
-  el.style.height = `${Math.max(nextHeight, lineHeight * 2 + paddingTop + paddingBottom + borderTop + borderBottom)}px`
+  el.style.height = `${Math.max(nextHeight, minHeight)}px`
   el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
 }
 
@@ -1022,6 +1039,7 @@ function relationSummary(item: ExtractedRelation): string {
 }
 
 .chapter-hub-ai-panel__surface {
+  position: relative;
   background: color-mix(in srgb, var(--color-surface) 97%, var(--color-bg) 3%);
 }
 
@@ -1134,68 +1152,130 @@ function relationSummary(item: ExtractedRelation): string {
 
 
 .chapter-hub-ai-panel__history {
-  margin: 0 12px;
-  padding: 8px;
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  right: 12px;
   display: grid;
-  gap: 8px;
+  gap: 0;
+  max-height: min(360px, 48vh);
+  overflow: auto;
+  margin: 0;
+  padding: 6px 0;
   border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 84%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 98%, var(--color-surface-muted) 2%);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.26);
+  z-index: 8;
 }
 
-.chapter-hub-ai-panel__history-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.64rem;
+.chapter-hub-ai-panel__history-empty {
+  display: grid;
+  gap: 4px;
+  padding: 16px 12px 18px;
+  background: transparent;
+}
+
+.chapter-hub-ai-panel__history-empty p {
+  margin: 0;
+  font-size: 0.68rem;
   font-weight: 700;
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-panel__history-empty span {
+  font-size: 0.6rem;
+  line-height: 1.5;
   color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .chapter-hub-ai-panel__history-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
+  gap: 0;
   align-items: center;
-  padding: 4px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  min-height: 42px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 48%, transparent);
+  background: transparent;
+  transition: background 0.14s ease;
+}
+
+.chapter-hub-ai-panel__history-item:last-child {
+  border-bottom: 0;
 }
 
 .chapter-hub-ai-panel__history-item[data-active='true'] {
-  background: color-mix(in srgb, var(--color-primary-soft) 24%, var(--color-surface));
+  background: color-mix(in srgb, var(--color-primary-soft) 28%, var(--color-surface-muted));
+}
+
+.chapter-hub-ai-panel__history-item:hover {
+  background: color-mix(in srgb, var(--color-surface-muted) 88%, var(--color-surface));
 }
 
 .chapter-hub-ai-panel__history-switch {
   min-height: 0;
-  padding: 8px 9px;
-  border-radius: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   text-align: left;
+  background: transparent;
+  border: 0;
 }
 
 .chapter-hub-ai-panel__history-close {
   width: 28px;
   height: 28px;
+  margin-right: 8px;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  color: color-mix(in srgb, var(--color-text-muted) 84%, transparent);
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  opacity: 0.7;
 }
 
-.chapter-hub-ai-panel__history-copy {
-  display: grid;
-  gap: 2px;
+.chapter-hub-ai-panel__history-item:hover .chapter-hub-ai-panel__history-close,
+.chapter-hub-ai-panel__history-item[data-active='true'] .chapter-hub-ai-panel__history-close {
+  opacity: 1;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-panel__history-main,
+.chapter-hub-ai-panel__history-side {
+  min-width: 0;
+}
+
+.chapter-hub-ai-panel__history-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .chapter-hub-ai-panel__history-title {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--color-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-text) 92%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chapter-hub-ai-panel__history-side {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 .chapter-hub-ai-panel__history-time {
-  font-size: 0.62rem;
+  font-size: 0.64rem;
   color: var(--color-text-muted);
 }
 
@@ -1584,7 +1664,9 @@ function relationSummary(item: ExtractedRelation): string {
 }
 
 .chapter-hub-ai-panel__input {
+  box-sizing: border-box;
   width: 100%;
+  height: 56px;
   min-height: 56px;
   resize: none;
   border: 0;
@@ -1593,10 +1675,29 @@ function relationSummary(item: ExtractedRelation): string {
   font-size: 0.67rem;
   line-height: 1.55;
   color: var(--color-text);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-border-strong) 66%, transparent) transparent;
 }
 
 .chapter-hub-ai-panel__input:focus {
   outline: none;
+}
+
+.chapter-hub-ai-panel__input::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chapter-hub-ai-panel__input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chapter-hub-ai-panel__input::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border-strong) 66%, transparent);
+}
+
+.chapter-hub-ai-panel__input::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-primary) 24%, var(--color-border-strong));
 }
 
 .chapter-hub-ai-panel__composer-bar {

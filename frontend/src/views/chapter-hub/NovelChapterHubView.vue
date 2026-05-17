@@ -69,11 +69,15 @@
             </section>
           </section>
 
-          <footer class="chapter-hub__legend-region" aria-label="标记说明">
-            <Transition name="chapter-hub-legend-toggle">
-              <ChapterHubLegendBar v-show="!focusMode && !isChapterTextareaFocused" />
-            </Transition>
-          </footer>
+          <Transition name="chapter-hub-legend-toggle">
+            <footer
+              v-if="!focusMode && !isChapterTextareaFocused"
+              class="chapter-hub__legend-region"
+              aria-label="标记说明"
+            >
+              <ChapterHubLegendBar />
+            </footer>
+          </Transition>
         </section>
 
         <aside
@@ -965,6 +969,8 @@ function onAiStudioResizerPointerDown(event: PointerEvent): void {
   aiStudioResizerPointerId = event.pointerId
   aiStudioResizeStartX = event.clientX
   aiStudioResizeOriginWidth = aiStudioWidth.value
+  document.body.classList.add('is-resizing-ai-studio')
+  document.body.style.userSelect = 'none'
   const target = event.currentTarget as HTMLElement | null
   target?.setPointerCapture(event.pointerId)
 }
@@ -972,6 +978,8 @@ function onAiStudioResizerPointerDown(event: PointerEvent): void {
 function clearAiStudioResize(): void {
   if (aiStudioResizerPointerId == null) return
   aiStudioResizerPointerId = null
+  document.body.classList.remove('is-resizing-ai-studio')
+  document.body.style.userSelect = ''
   persistAiStudioWidth(aiStudioWidth.value)
 }
 
@@ -2764,5 +2772,7 @@ onUnmounted(() => {
     window.removeEventListener('pointercancel', onWindowPointerCancel)
     window.removeEventListener('resize', onWindowResize)
   }
+  document.body.classList.remove('is-resizing-ai-studio')
+  document.body.style.userSelect = ''
 })
 </script>
