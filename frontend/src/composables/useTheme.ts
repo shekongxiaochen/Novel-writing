@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 
-export type Theme = 'light' | 'mint' | 'dark' | 'blueprint'
+export type Theme = 'light' | 'mint' | 'dark' | 'codex'
 
 export type ThemeOption = {
   id: Theme
@@ -19,46 +19,46 @@ const STORAGE_KEY = 'novel-writing.theme'
 export const themeOptions: ThemeOption[] = [
   {
     id: 'light',
-    label: '浅色主题',
-    description: '高级杂志感的清透浅色界面',
+    label: '云灰纸白',
+    description: '冷静浅底，像精修过的桌面编辑器而不是普通网页',
     preview: {
-      bg: '#f8fafc',
-      surface: '#ffffff',
-      text: '#0f172a',
-      accent: '#1d4ed8',
+      bg: '#edf1f5',
+      surface: '#fbfcfd',
+      text: '#16181d',
+      accent: '#2c6df2',
     },
   },
   {
     id: 'mint',
-    label: '薄荷晨光',
-    description: '中性浅底，薄荷绿用于标记和图谱',
+    label: '雾松石',
+    description: '偏中性的浅冷绿主题，干净但不发甜',
     preview: {
-      bg: '#f7faf8',
-      surface: '#ffffff',
-      text: '#10251f',
-      accent: '#00a884',
+      bg: '#edf3ef',
+      surface: '#fbfdfb',
+      text: '#15201c',
+      accent: '#198b74',
     },
   },
   {
     id: 'dark',
-    label: '深色主题',
-    description: '低眩光夜读暖墨界面',
+    label: '夜墨铜绿',
+    description: '近黑底色配铜绿与暖金，高级但不脏不闷',
     preview: {
-      bg: '#0d0b0a',
-      surface: '#221c18',
-      text: '#efe7da',
-      accent: '#93a88b',
+      bg: '#181818',
+      surface: '#202020',
+      text: '#ece7dd',
+      accent: '#82b09a',
     },
   },
   {
-    id: 'blueprint',
-    label: '深海蓝图',
-    description: '深色中性底，蓝图色用于标记和图谱',
+    id: 'codex',
+    label: '冷夜蓝墨',
+    description: '冷黑编辑器底色，蓝灰层级和低眩光高亮，适合长时间沉浸写作',
     preview: {
-      bg: '#0f172a',
-      surface: '#111827',
-      text: '#dbeafe',
-      accent: '#38bdf8',
+      bg: '#0d1117',
+      surface: '#11161d',
+      text: '#c9d1d9',
+      accent: '#58a6ff',
     },
   },
 ]

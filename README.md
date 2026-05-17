@@ -1,41 +1,29 @@
-# Novel Writing Assistant（本地开发）
+# Novel Writing Assistant
 
-当前已搭建：
-- 前端：Vue（Vite）
-- 后端：FastAPI（含 `GET /health` 与 `GET /health/db`）
-- 数据库：MySQL（本机 MySQL；后续可改为 Docker 部署）
+当前版本是纯本地工作流：
+- 前端：Vue + Vite
+- 数据：浏览器本地存储
+- AI：用户手动填写 `API Key / Base URL / Model`，前端直接调用模型
 
-## 1. 启动后端
-
-```powershell
-cd "D:\Novel writing\backend"
-& .venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
-```
-
-验证：
-- `http://127.0.0.1:8000/health`
-- `http://127.0.0.1:8000/health/db`（需要 MySQL 配置正确）
-
-## 2. 启动前端
+## 启动
 
 ```powershell
 cd "D:\Novel writing\frontend"
 npm run dev
 ```
 
-默认访问：
-- `http://localhost:5173`
+默认地址：
+- `http://localhost:5174`
 
-## 3. 配置 MySQL
+## AI 使用方式
 
-配置文件：`backend/.env`
+1. 打开应用右上角 `AI 设置`
+2. 填写 `API Key`
+3. 按需要补充 `Base URL` 和 `Model`
+4. 在章节页点击 `AI 整理档案`
 
-当前 `/health/db` 可能返回 `Access denied ... (using password: NO)`，说明 `backend/.env` 里的：
-- `db_user` / `db_password` / `db_name`
+AI 会结合当前本地的角色、势力、物品、分类、伏笔和章节正文，给出新增、更新、关系和所属势力等建议，再由用户确认写回档案。
 
-没有和你本机 MySQL 一致。按你的 MySQL 实际信息修改后重启后端即可。
+## 设计文档
 
-## 4. 下一步做什么
-
-当 `/health/db` 返回 `db_connected` 后，就可以开始按你第一期功能清单做业务模块（作品/章节/大纲/角色/势力/伏笔/坑点）。
-
+- [docs/AI实体抽取设计方案.md](docs/AI实体抽取设计方案.md)

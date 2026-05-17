@@ -3,12 +3,25 @@ from __future__ import annotations
 import json
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.schemas import OutlineAiExpandIn, OutlineAiExpandOut
+from app.db import get_db
+from app.deps import get_current_user
+from app.models import Novel, NovelSnapshot, User
+from app.schemas import NovelEntityExtractIn, NovelEntityExtractOut, OutlineAiExpandIn, OutlineAiExpandOut
+from app.services.ai_entity_extract import extract_entities
+from app.services.novel_sync import default_snapshot_payload
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+def _owned_novel_or_404(db: Session, user: User, novel_id: str) -> Novel:
+    novel = db.query(Novel).filter(Novel.id == novel_id, Novel.user_id == user.id).first()
+    if novel is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品不存在")
+    return novel
 
 
 @router.post("/outline-expand", response_model=OutlineAiExpandOut)
@@ -65,6 +78,27 @@ async def outline_expand(payload: OutlineAiExpandIn) -> OutlineAiExpandOut:
             twist=str(parsed.get("twist", "")).strip(),
             suspense=str(parsed.get("suspense", "")).strip(),
         )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI 调用失败：{exc}") from exc
+
+
+@router.post("/novels/{novel_id}/extract-entities", response_model=NovelEntityExtractOut)
+async def extract_novel_entities(
+    novel_id: str,
+    payload: NovelEntityExtractIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> NovelEntityExtractOut:
+    if not settings.dashscope_api_key.strip():
+        raise HTTPException(status_code=400, detail="未配置 DASHSCOPE_API_KEY")
+
+    novel = _owned_novel_or_404(db, user, novel_id)
+    snapshot = db.query(NovelSnapshot).filter(NovelSnapshot.novel_id == novel.id).first()
+    snapshot_payload = snapshot.payload if snapshot is not None and isinstance(snapshot.payload, dict) else default_snapshot_payload()
+    try:
+        return await extract_entities(snapshot_payload, payload)
     except HTTPException:
         raise
     except Exception as exc:

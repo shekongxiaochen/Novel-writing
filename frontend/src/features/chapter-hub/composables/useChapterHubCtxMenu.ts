@@ -93,8 +93,8 @@ export function useChapterHubCtxMenu(deps: {
     const caretYViewport = taRect.top + (coords.top - ta.scrollTop)
     const caretXViewport = taRect.left + coords.left
 
-    const menuWidth = 180
-    const menuHeight = 96
+    const menuWidth = 200
+    const menuHeight = 176
     const pad = 8
 
     let x = caretXViewport + 6
@@ -125,8 +125,8 @@ export function useChapterHubCtxMenu(deps: {
     ctxMenuSelection.value = ta.value.slice(tr.start, tr.end)
     ctxMenuNotice.value = ''
 
-    const menuWidth = 180
-    const menuHeight = 96
+    const menuWidth = 200
+    const menuHeight = 176
     const pad = 8
 
     let x = x0

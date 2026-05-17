@@ -6,18 +6,6 @@
         <button type="button" class="cursor-shell-home__theme-btn" @click="handleThemePickerClick">
           颜色主题 · {{ currentThemeOption.label }}
         </button>
-        <div class="cursor-shell-home__auth-actions">
-          <template v-if="isLoggedIn">
-            <span class="cursor-shell-home__auth-name" :title="displayName">{{ displayName }}</span>
-            <button type="button" class="cursor-shell__auth-btn" @click="logoutAndGo">退出</button>
-          </template>
-          <template v-else>
-            <button type="button" class="cursor-shell__auth-btn" @click="goTo('/login')">登录</button>
-            <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="goTo('/register')">
-              注册
-            </button>
-          </template>
-        </div>
       </div>
     </header>
     <RouterView />
@@ -27,7 +15,7 @@
     v-else
     class="cursor-shell cursor-shell--novel"
     :class="{ 'is-sidebar-collapsed': sidebarCollapsed, 'is-resizing-sidebar': isResizingSidebar }"
-    :style="{ '--novel-sidebar-width': `${sidebarWidth}px` }"
+    :style="novelShellStyle"
   >
     <header class="cursor-shell__menu-bar">
       <button
@@ -61,16 +49,28 @@
         <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="handleThemePickerClick">
           颜色主题 · {{ currentThemeOption.label }}
         </button>
-        <template v-if="isLoggedIn">
-          <span class="cursor-shell__auth-name" :title="displayName">{{ displayName }}</span>
-          <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="logoutAndGo">退出</button>
-        </template>
-        <template v-else>
-          <button type="button" class="cursor-shell__auth-btn" @click="goTo('/login')">登录</button>
-          <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="goTo('/register')">
-            注册
-          </button>
-        </template>
+        <button
+          v-if="isWritingRoute"
+          type="button"
+          class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary"
+          :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'summary' }"
+          :title="rightPanelOpen && rightPanelActive === 'summary' ? '收起章总结' : '展开章总结'"
+          :aria-label="rightPanelOpen && rightPanelActive === 'summary' ? '收起章总结' : '展开章总结'"
+          @click="toggleChapterSummarySidebar"
+        >
+          章总结
+        </button>
+        <button
+          v-if="isWritingRoute"
+          type="button"
+          class="cursor-shell__auth-btn cursor-shell__auth-btn--icon"
+          :class="{ 'is-active': aiStudioShellOpen }"
+          :title="aiStudioShellOpen ? '收起 AI 阅读台' : '展开 AI 阅读台'"
+          :aria-label="aiStudioShellOpen ? '收起 AI 阅读台' : '展开 AI 阅读台'"
+          @click="toggleHeaderAiStudio"
+        >
+          <span class="cursor-shell__auth-icon cursor-shell__auth-icon--ai" aria-hidden="true">AI</span>
+        </button>
       </div>
     </header>
     <aside class="cursor-shell__sidebar cursor-shell__sidebar--chapters">
@@ -111,87 +111,114 @@
       </div>
     </aside>
     <div class="cursor-shell__resize-handle" @mousedown.prevent="startResizeSidebar"></div>
-    <section class="cursor-shell__main">
-      <div v-if="route.name === 'novel-chapter-writing'" class="cursor-shell__chapter-top">
-        <div class="cursor-shell__chapter-tabs" role="tablist" aria-label="打开的章节">
-          <button
-            v-for="ch in openChapters"
-            :key="ch.id"
-            type="button"
-            class="cursor-shell__chapter-tab"
-            :class="{ 'is-active': activeChapterId === ch.id }"
-            :title="`第${ch.chapterNo}章 ${ch.title || '未命名章节'}`"
-            @click="openChapter(ch.id)"
-          >
-            <span class="cursor-shell__chapter-tab-title">第{{ ch.chapterNo }}章 {{ ch.title || '未命名章节' }}</span>
-            <span
-              class="cursor-shell__chapter-tab-close"
-              role="button"
-              tabindex="0"
-              @click.stop="closeChapterTab(ch.id)"
-              @keydown.enter.stop.prevent="closeChapterTab(ch.id)"
-            >
-              ×
-            </span>
-          </button>
-        </div>
-        <div class="cursor-shell__chapter-top-actions">
-          <button
-            type="button"
-            class="cursor-shell__chapter-top-btn"
-            :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'summary' }"
-            :disabled="!activeChapterId"
-            @click="toggleChapterSummary"
-            title="展开/收起：章节总结"
-          >
-            章总结
-          </button>
-          <button
-            type="button"
-            class="cursor-shell__chapter-top-btn cursor-shell__chapter-top-btn--secondary"
-            :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'entities' }"
-            :disabled="!activeChapterId"
-            @click="toggleChapterEntities"
-            title="展开/收起：本章角色/势力"
-          >
-            角色/势力
-          </button>
-        </div>
-      </div>
-      <div class="cursor-shell__content" :class="{ 'cursor-shell__content--writing': route.name === 'novel-chapter-writing' }">
-        <RouterView />
-      </div>
+    <div class="cursor-shell__content" :class="{ 'cursor-shell__content--writing': route.name === 'novel-chapter-writing' }">
+      <RouterView v-slot="{ Component }">
+        <component :is="Component" v-bind="chapterWritingViewProps" />
+      </RouterView>
+    </div>
 
-      <div
-        v-if="route.name === 'novel-chapter-writing' && rightPanelOpen"
-        class="cursor-shell__right-panel-overlay"
-        @pointerdown.self="closeRightPanel"
-      >
+    <aside
+      v-if="isWritingRoute"
+      class="cursor-shell__summary-studio"
+      :class="{ 'cursor-shell__summary-studio--open': isDockedSummaryPanel }"
+      :aria-hidden="isDockedSummaryPanel ? 'false' : 'true'"
+      @pointerdown.stop
+    >
+      <div class="cursor-shell__summary-studio-resizer" @pointerdown="startResizeSummaryStudio" @dblclick="resetSummaryStudioWidth" />
+      <div class="cursor-shell__summary-studio-surface">
+        <header class="cursor-shell__right-panel-head cursor-shell__summary-studio-head">
+          <div class="cursor-shell__right-panel-head-titles">
+            <div class="cursor-shell__right-panel-kicker">{{ rightPanelKicker }}</div>
+            <div class="cursor-shell__right-panel-title">{{ rightPanelTitle }}</div>
+            <div v-if="activeChapterForPanels" class="cursor-shell__right-panel-subtitle muted">
+              第{{ activeChapterForPanels.chapterNo }}章 · {{ activeChapterForPanels.title || '未命名章节' }}
+            </div>
+          </div>
+          <button type="button" class="cursor-shell__right-panel-close" @click="requestCloseRightPanel" aria-label="关闭侧边栏">×</button>
+        </header>
+
+        <div class="cursor-shell__right-panel-body cursor-shell__summary-studio-body">
+          <section class="cursor-shell__assistant-section cursor-shell__assistant-section--summary">
+            <label class="cursor-shell__chapter-summary-field">
+              <span class="cursor-shell__chapter-summary-label">输入章总结</span>
+              <div class="cursor-shell__chapter-summary-textarea-shell">
+                <textarea
+                  v-model="chapterSummaryDraft"
+                  class="cursor-shell__right-panel-textarea"
+                  rows="10"
+                  maxlength="800"
+                />
+                <span v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-textarea-caret" aria-hidden="true"></span>
+              </div>
+            </label>
+            <div v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-streaming" aria-live="polite">
+              <span class="cursor-shell__chapter-summary-streaming-dot" aria-hidden="true"></span>
+              <span>正在总结</span>
+              <span class="cursor-shell__chapter-summary-streaming-caret" aria-hidden="true"></span>
+            </div>
+            <p v-if="chapterSummaryAiError" class="character-panel__alert">{{ chapterSummaryAiError }}</p>
+            <div class="cursor-shell__right-panel-actions">
+              <button
+                type="button"
+                class="confirm-dialog__btn confirm-dialog__btn--ghost"
+                @click="chapterSummaryAiLoading ? stopChapterSummaryAi() : generateChapterSummaryWithAi()"
+                :disabled="!activeChapterId"
+              >
+                {{ chapterSummaryAiLoading ? '停止' : 'AI总结' }}
+              </button>
+              <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="saveChapterSummary" :disabled="!activeChapterId">
+                保存
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </aside>
+
+    <div v-if="rightPanelOpen && !isDockedSummaryPanel" class="cursor-shell__right-panel-overlay" @pointerdown.self="requestCloseRightPanel">
         <aside class="cursor-shell__right-panel" @pointerdown.stop>
           <header class="cursor-shell__right-panel-head">
             <div class="cursor-shell__right-panel-head-titles">
-              <div class="cursor-shell__right-panel-title">
-                {{ rightPanelActive === 'summary' ? '章节总结' : '本章角色 / 势力' }}
+              <div class="cursor-shell__right-panel-kicker">{{ rightPanelKicker }}</div>
+              <div class="cursor-shell__right-panel-title">{{ rightPanelTitle }}</div>
+              <div v-if="isWritingRoute && activeChapterForPanels" class="cursor-shell__right-panel-subtitle muted">
+                第{{ activeChapterForPanels.chapterNo }}章 · {{ activeChapterForPanels.title || '未命名章节' }}
               </div>
-              <div v-if="activeChapterForPanels" class="cursor-shell__right-panel-subtitle muted">
-                第{{ activeChapterForPanels.chapterNo }}章 {{ activeChapterForPanels.title || '未命名章节' }}
+              <div v-else class="cursor-shell__right-panel-subtitle muted">
+                当前界面：{{ currentWorkspaceTabLabel }}
               </div>
             </div>
-            <button type="button" class="cursor-shell__right-panel-close" @click="closeRightPanel" aria-label="关闭侧边栏">×</button>
+            <button type="button" class="cursor-shell__right-panel-close" @click="requestCloseRightPanel" aria-label="关闭侧边栏">×</button>
           </header>
 
           <div class="cursor-shell__right-panel-body">
-            <section v-if="rightPanelActive === 'summary'">
-              <textarea
-                v-model="chapterSummaryDraft"
-                class="cursor-shell__right-panel-textarea"
-                rows="10"
-                maxlength="800"
-                placeholder="写下这一章发生了什么、推进了什么、留下了什么钩子（建议 2-6 句）。"
-              />
+            <section v-if="isWritingRoute && rightPanelActive === 'summary'" class="cursor-shell__assistant-section">
+              <label class="cursor-shell__chapter-summary-field">
+                <span class="cursor-shell__chapter-summary-label">输入章总结</span>
+                <div class="cursor-shell__chapter-summary-textarea-shell">
+                  <textarea
+                    v-model="chapterSummaryDraft"
+                    class="cursor-shell__right-panel-textarea"
+                    rows="10"
+                    maxlength="800"
+                  />
+                  <span v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-textarea-caret" aria-hidden="true"></span>
+                </div>
+              </label>
+              <div v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-streaming" aria-live="polite">
+                <span class="cursor-shell__chapter-summary-streaming-dot" aria-hidden="true"></span>
+                <span>正在总结</span>
+                <span class="cursor-shell__chapter-summary-streaming-caret" aria-hidden="true"></span>
+              </div>
+              <p v-if="chapterSummaryAiError" class="character-panel__alert">{{ chapterSummaryAiError }}</p>
               <div class="cursor-shell__right-panel-actions">
-                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="cancelChapterSummary" :disabled="!activeChapterId">
-                  取消
+                <button
+                  type="button"
+                  class="confirm-dialog__btn confirm-dialog__btn--ghost"
+                  @click="chapterSummaryAiLoading ? stopChapterSummaryAi() : generateChapterSummaryWithAi()"
+                  :disabled="!activeChapterId"
+                >
+                  {{ chapterSummaryAiLoading ? '停止' : 'AI总结' }}
                 </button>
                 <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="saveChapterSummary" :disabled="!activeChapterId">
                   保存
@@ -199,13 +226,18 @@
               </div>
             </section>
 
-            <section v-else>
+            <section v-else-if="isWritingRoute" class="cursor-shell__assistant-section">
+              <div class="cursor-shell__assistant-card cursor-shell__assistant-card--ink">
+                <p class="cursor-shell__assistant-eyebrow">Scene Ledger</p>
+                <h3>本章出现与变更</h3>
+                <p class="muted">从当前正文与档案记录里整理角色、势力和本章改动；这里只展示线索，不会自动覆盖档案。</p>
+              </div>
               <div class="cursor-shell__right-panel-note muted">自动从正文提取 + 记录本章新建/变更（仅展示）。</div>
 
-              <div class="cursor-shell__chapter-entities-title" style="margin-bottom: 10px">
+              <div class="cursor-shell__chapter-entities-title cursor-shell__chapter-entities-title--section">
                 本章修改记录（角色 {{ chapterChangedCharacters.length }} / 势力 {{ chapterChangedFactions.length }}）
               </div>
-              <div class="cursor-shell__chapter-entities-grid" style="margin-bottom: 12px">
+              <div class="cursor-shell__chapter-entities-grid cursor-shell__chapter-entities-grid--section">
                 <div class="cursor-shell__chapter-entities-col">
                   <div class="cursor-shell__chapter-entities-title">角色修改</div>
                   <div v-if="chapterChangedCharacters.length === 0" class="muted">本章未修改角色档案。</div>
@@ -284,10 +316,65 @@
                 </div>
               </div>
             </section>
+
+            <section v-else class="cursor-shell__assistant-section">
+              <div class="cursor-shell__assistant-card">
+                <p class="cursor-shell__assistant-eyebrow">Workspace AI</p>
+                <h3>把 AI 侧栏带到整个工作台</h3>
+                <p class="muted">这里不再只服务写作页。你可以从任意工作台界面直接跳去 AI 设置、继续写作，或先查看当前作品的结构规模。</p>
+              </div>
+
+              <div class="cursor-shell__chapter-entities-grid cursor-shell__chapter-entities-grid--section">
+                <div class="cursor-shell__chapter-entities-col">
+                  <div class="cursor-shell__chapter-entities-title">快捷入口</div>
+                  <div class="cursor-shell__right-panel-actions">
+                    <button type="button" class="cursor-shell__right-panel-btn cursor-shell__right-panel-btn--primary" @click="goWriting">
+                      去写作区
+                    </button>
+                    <button type="button" class="cursor-shell__right-panel-btn" @click="goWorkspaceTab('ai')">
+                      打开 AI 设置
+                    </button>
+                  </div>
+                </div>
+                <div class="cursor-shell__chapter-entities-col">
+                  <div class="cursor-shell__chapter-entities-title">当前工作台</div>
+                  <div class="cursor-shell__chapter-entity-row">
+                    <div class="cursor-shell__chapter-entity-head">
+                      <span class="cursor-shell__chapter-entity-name">{{ currentWorkspaceTabLabel }}</span>
+                      <span class="cursor-shell__chapter-entity-badge">已接入 AI 侧栏</span>
+                    </div>
+                    <div class="cursor-shell__chapter-entity-fields muted">
+                      章节 {{ chapterList.length }} · 最近可继续回到写作页或模型控制室。
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="cursor-shell__chapter-entities-grid">
+                <div class="cursor-shell__chapter-entities-col">
+                  <div class="cursor-shell__chapter-entities-title">作品概览</div>
+                  <div class="cursor-shell__chapter-entity-row">
+                    <div class="cursor-shell__chapter-entity-head">
+                      <span class="cursor-shell__chapter-entity-name">{{ currentNovel?.title || '当前作品' }}</span>
+                    </div>
+                    <div class="cursor-shell__chapter-entity-fields muted">
+                      {{ currentNovel?.summary?.trim() || '暂无作品简介，可在工作台中继续补全设定。' }}
+                    </div>
+                  </div>
+                </div>
+                <div class="cursor-shell__chapter-entities-col">
+                  <div class="cursor-shell__chapter-entities-title">使用建议</div>
+                  <div class="cursor-shell__chapter-entity-row">
+                    <div class="cursor-shell__chapter-entity-fields muted">
+                      大纲页先理顺情节点，角色/势力/物品页补档案，最后回写作页结合 AI 阅读台继续推进正文。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </aside>
       </div>
-    </section>
     <Teleport to="body">
       <div
         v-if="chapterMenuOpen"
@@ -366,12 +453,22 @@
     :return-focus-el="themePickerReturnFocusEl"
     @close="closeThemePicker"
   />
+
+  <ConfirmDialog
+    v-model="chapterSummaryCloseConfirmOpen"
+    title="关闭章总结"
+    message="当前章总结有未保存的修改，确定要关闭吗？"
+    confirm-label="仍然关闭"
+    cancel-label="继续编辑"
+    @confirm="confirmCloseRightPanel"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
+  buildNovelWorkspacePayload,
   createChapter,
   deleteChapter,
   getChapterDeletePreview,
@@ -387,10 +484,11 @@ import {
 } from './lib/storage'
 import type { Chapter, Novel } from './types'
 import type { CharacterChangeDetail } from './lib/storage'
+import { summarizeNovelChapterFromWorkspaceStream } from './lib/localAi'
 import { currentThemeOption } from './composables/useTheme'
-import { useAuth } from './composables/useAuth'
 import { Teleport } from 'vue'
 import { menuPoems } from './data/menuPoems'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import ThemePickerPopover from './components/ThemePickerPopover.vue'
 import SaveToast from './components/SaveToast.vue'
 
@@ -433,15 +531,123 @@ const sidebarWidth = ref(272)
 const isResizingSidebar = ref(false)
 const openChapterIds = ref<string[]>([])
 
-const { isLoggedIn, displayName, logout } = useAuth()
-
 const SIDEBAR_WIDTH_KEY = 'novel-writing.sidebar-width'
 const SIDEBAR_COLLAPSED_KEY = 'novel-writing.sidebar-collapsed'
 const OPEN_CHAPTERS_KEY_PREFIX = 'novel-writing.open-chapters.'
+const AI_STUDIO_OPEN_STORAGE_KEY = 'novel-writing.ai-studio-open'
+const AI_STUDIO_WIDTH_STORAGE_KEY = 'novel-writing.ai-studio-width'
 const SIDEBAR_MIN = 248
 const SIDEBAR_MAX = 520
+const AI_STUDIO_WIDTH_MIN = 360
+const AI_STUDIO_WIDTH_MAX = 720
 const poemIndex = ref(0)
 let poemRotateTimer: number | null = null
+const aiStudioShellOpen = ref(readInitialAiStudioShellOpen())
+const aiStudioShellWidth = ref(readInitialAiStudioShellWidth())
+let summaryStudioResizeCleanup: (() => void) | null = null
+
+function readInitialAiStudioShellOpen(): boolean {
+  if (typeof window === 'undefined') return true
+  try {
+    return localStorage.getItem(AI_STUDIO_OPEN_STORAGE_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+function clampAiStudioShellWidth(raw: number): number {
+  if (typeof window === 'undefined') return Math.max(AI_STUDIO_WIDTH_MIN, raw)
+  const max = Math.min(AI_STUDIO_WIDTH_MAX, Math.max(AI_STUDIO_WIDTH_MIN + 40, Math.floor(window.innerWidth * 0.56)))
+  return Math.min(max, Math.max(AI_STUDIO_WIDTH_MIN, raw))
+}
+
+function readInitialAiStudioShellWidth(): number {
+  if (typeof window === 'undefined') return 420
+  try {
+    const raw = Number(localStorage.getItem(AI_STUDIO_WIDTH_STORAGE_KEY) ?? '')
+    if (Number.isFinite(raw)) return clampAiStudioShellWidth(raw)
+  } catch {
+    /* ignore */
+  }
+  return clampAiStudioShellWidth(Math.round(window.innerWidth * 0.28))
+}
+
+function syncAiStudioShellWidth(next: number): void {
+  aiStudioShellWidth.value = clampAiStudioShellWidth(next)
+}
+
+function persistAiStudioShellWidth(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(AI_STUDIO_WIDTH_STORAGE_KEY, String(Math.round(aiStudioShellWidth.value)))
+  } catch {
+    /* ignore */
+  }
+}
+
+function dispatchAiStudioShellWidth(): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('novel-writing:ai-width', { detail: { width: aiStudioShellWidth.value } }))
+}
+
+function onAiStudioWidthEvent(event: Event): void {
+  const width = Number((event as CustomEvent<{ width?: number }>).detail?.width)
+  if (Number.isFinite(width)) syncAiStudioShellWidth(width)
+}
+
+function onAiStudioOpenEvent(event: Event): void {
+  const open = Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open)
+  aiStudioShellOpen.value = open
+  if (open) rightPanelOpen.value = false
+}
+
+function toggleHeaderAiStudio(): void {
+  if (typeof window === 'undefined' || !isWritingRoute.value) return
+  const open = !aiStudioShellOpen.value
+  if (open) rightPanelOpen.value = false
+  window.dispatchEvent(new CustomEvent('novel-writing:set-ai-open', { detail: { open } }))
+  aiStudioShellOpen.value = open
+}
+
+function startResizeSummaryStudio(event: PointerEvent): void {
+  if (typeof window === 'undefined') return
+  const startX = event.clientX
+  const startWidth = aiStudioShellWidth.value
+  document.body.style.userSelect = 'none'
+
+  const onMove = (ev: PointerEvent) => {
+    syncAiStudioShellWidth(startWidth - (ev.clientX - startX))
+    dispatchAiStudioShellWidth()
+  }
+
+  const finish = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    document.body.style.userSelect = ''
+    summaryStudioResizeCleanup = null
+    persistAiStudioShellWidth()
+  }
+
+  summaryStudioResizeCleanup?.()
+  summaryStudioResizeCleanup = finish
+  ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', finish)
+  window.addEventListener('pointercancel', finish)
+}
+
+function resetSummaryStudioWidth(): void {
+  if (typeof window === 'undefined') return
+  syncAiStudioShellWidth(Math.round(window.innerWidth * 0.28))
+  dispatchAiStudioShellWidth()
+  persistAiStudioShellWidth()
+}
+
+function onWindowResizeForSummaryStudio(): void {
+  syncAiStudioShellWidth(aiStudioShellWidth.value)
+  dispatchAiStudioShellWidth()
+}
 
 function chapterWordCount(content?: string | null): number {
   return String(content ?? '').replace(/\s/g, '').length
@@ -458,6 +664,12 @@ const currentNovelId = computed(() => {
   const t = String(id ?? '').trim()
   return t || ''
 })
+const isWritingRoute = computed(() => route.name === 'novel-chapter-writing')
+const currentWorkspaceTabKey = computed<WorkspaceTabKey>(() => {
+  if (isWritingRoute.value) return 'write'
+  const raw = String(route.query.tab ?? 'write')
+  return (workspaceTabs.find((tab) => tab.key === raw)?.key ?? 'write') as WorkspaceTabKey
+})
 const activeChapterId = computed(() => {
   const q = String(route.query.chapterId ?? '').trim()
   if (q) return q
@@ -468,8 +680,29 @@ const openChapters = computed(() =>
     .map((id) => chapterList.value.find((c) => c.id === id))
     .filter((c): c is Chapter => !!c)
 )
-
+const chapterWritingViewProps = computed(() =>
+  route.name === 'novel-chapter-writing'
+    ? {
+        openChapterIds: openChapters.value.map((chapter) => chapter.id),
+        activeChapterId: activeChapterId.value,
+        onOpenChapter: openChapter,
+        onCloseChapterTab: closeChapterTab,
+        onChapterTabsWheel,
+      }
+    : {},
+)
 const isNovelContext = computed(() => route.name === 'novel-workspace' || route.name === 'novel-chapter-writing')
+const novelShellStyle = computed(() => ({
+  '--novel-sidebar-width': `${sidebarWidth.value}px`,
+  '--chapter-shell-ai-width': `${Math.round(aiStudioShellWidth.value)}px`,
+  '--chapter-shell-summary-width': `${Math.round(aiStudioShellWidth.value)}px`,
+  '--chapter-shell-summary-column':
+    route.name === 'novel-chapter-writing' && rightPanelOpen.value && rightPanelActive.value === 'summary'
+      ? `${Math.round(aiStudioShellWidth.value)}px`
+      : '0px',
+  '--chapter-shell-ai-gap': '0px',
+}))
+type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues' | 'ai'
 const workspaceTabs = [
   { key: 'write' as const, label: '写作' },
   { key: 'outline' as const, label: '大纲' },
@@ -478,16 +711,15 @@ const workspaceTabs = [
   { key: 'factions' as const, label: '势力' },
   { key: 'categories' as const, label: '分类' },
   { key: 'issues' as const, label: '伏笔' },
+  { key: 'ai' as const, label: 'AI' },
 ]
+const currentWorkspaceTabLabel = computed(
+  () => workspaceTabs.find((tab) => tab.key === currentWorkspaceTabKey.value)?.label ?? '写作',
+)
 
 function goTo(to: string): void {
   if (!to) return
   void router.push(to)
-}
-
-function logoutAndGo(): void {
-  logout()
-  goTo('/')
 }
 
 function backToNovelListCreate(): void {
@@ -538,11 +770,27 @@ function scrollChapterNavToActive(chapterId: string): void {
   }
 }
 
+function onChapterTabsWheel(e: WheelEvent): void {
+  const el = e.currentTarget instanceof HTMLElement ? e.currentTarget : null
+  if (!el) return
+  if (el.scrollWidth <= el.clientWidth) return
+  const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+  if (!delta) return
+  e.preventDefault()
+  el.scrollLeft += delta
+}
+
 const rightPanelOpen = ref(false)
 const rightPanelActive = ref<'summary' | 'entities'>('summary')
 const chapterSummaryDraft = ref('')
+const chapterSummaryAiLoading = ref(false)
+const chapterSummaryAiError = ref('')
 const chapterSummarySaveToastOpen = ref(false)
+const chapterSummaryCloseConfirmOpen = ref(false)
 let chapterSummarySaveToastTimer: number | null = null
+let chapterSummaryAiAbortController: AbortController | null = null
+const rightPanelKicker = computed(() => (isWritingRoute.value ? '当前章节' : '工作台 AI 侧栏'))
+const rightPanelTitle = computed(() => (isWritingRoute.value ? '章总结' : 'AI 助手'))
 
 const activeChapterForPanels = computed(() => {
   const id = activeChapterId.value
@@ -550,29 +798,50 @@ const activeChapterForPanels = computed(() => {
   return chapterList.value.find((c) => c.id === id) ?? null
 })
 
-function toggleChapterSummary(): void {
-  if (rightPanelOpen.value && rightPanelActive.value === 'summary') {
-    rightPanelOpen.value = false
-    return
-  }
-  rightPanelActive.value = 'summary'
-  rightPanelOpen.value = true
-}
+const normalizedActiveChapterSummary = computed(() => formatChapterSummaryText(activeChapterForPanels.value?.annotation ?? ''))
+const normalizedChapterSummaryDraft = computed(() => formatChapterSummaryText(chapterSummaryDraft.value))
+const chapterSummaryLoadedChapterId = ref('')
+const chapterSummaryLoadedText = ref('')
 
-function toggleChapterEntities(): void {
-  if (rightPanelOpen.value && rightPanelActive.value === 'entities') {
-    rightPanelOpen.value = false
+const chapterSummaryHasUnsavedChanges = computed(() => {
+  if (!(rightPanelOpen.value && rightPanelActive.value === 'summary' && isWritingRoute.value)) return false
+  return normalizedChapterSummaryDraft.value !== normalizedActiveChapterSummary.value
+})
+
+const isDockedSummaryPanel = computed(() => isWritingRoute.value && rightPanelOpen.value && rightPanelActive.value === 'summary')
+
+function toggleChapterSummarySidebar(): void {
+  if (!isWritingRoute.value || typeof window === 'undefined') return
+  const shouldOpen = !(rightPanelOpen.value && rightPanelActive.value === 'summary')
+  rightPanelActive.value = 'summary'
+  if (shouldOpen) {
+    if (aiStudioShellOpen.value) {
+      window.dispatchEvent(new CustomEvent('novel-writing:set-ai-open', { detail: { open: false } }))
+      aiStudioShellOpen.value = false
+    }
+    rightPanelOpen.value = true
     return
   }
-  // 写作时章节正文会频繁变动（同 tab 不触发 storage 事件），这里在打开面板前主动刷新一次，
-  // 确保“本章出现的角色/势力”基于最新正文计算。
-  reloadNovelContext()
-  rightPanelActive.value = 'entities'
-  rightPanelOpen.value = true
+  requestCloseRightPanel()
 }
 
 function closeRightPanel(): void {
+  chapterSummaryAiAbortController?.abort()
   rightPanelOpen.value = false
+}
+
+function requestCloseRightPanel(): void {
+  if (chapterSummaryHasUnsavedChanges.value) {
+    chapterSummaryCloseConfirmOpen.value = true
+    return
+  }
+  closeRightPanel()
+}
+
+function confirmCloseRightPanel(): void {
+  chapterSummaryCloseConfirmOpen.value = false
+  syncChapterSummaryDraftFromActive(true)
+  closeRightPanel()
 }
 
 function showChapterSummarySavedToast(): void {
@@ -584,26 +853,120 @@ function showChapterSummarySavedToast(): void {
   }, 1800)
 }
 
-function cancelChapterSummary(): void {
-  chapterSummaryDraft.value = activeChapterForPanels.value?.annotation ?? ''
-  closeRightPanel()
-}
-
 function saveChapterSummary(): void {
   const ch = activeChapterForPanels.value
   if (!ch) return
-  const summary = chapterSummaryDraft.value.trim()
+  const summary = formatChapterSummaryText(chapterSummaryDraft.value)
   updateChapter({ id: ch.id, annotation: summary })
   chapterSummaryDraft.value = summary
+  chapterSummaryLoadedChapterId.value = ch.id
+  chapterSummaryLoadedText.value = summary
   reloadNovelContext()
-  closeRightPanel()
   showChapterSummarySavedToast()
 }
 
+function syncChapterSummaryDraftFromActive(force = false): void {
+  const chapterId = activeChapterForPanels.value?.id ?? ''
+  const nextText = normalizedActiveChapterSummary.value
+  const sourceChanged = chapterId !== chapterSummaryLoadedChapterId.value || nextText !== chapterSummaryLoadedText.value
+  if (!force && !sourceChanged) return
+
+  const hasLocalEdits = normalizedChapterSummaryDraft.value !== chapterSummaryLoadedText.value
+  if (force || chapterId !== chapterSummaryLoadedChapterId.value || !hasLocalEdits) {
+    chapterSummaryDraft.value = nextText
+  }
+
+  chapterSummaryLoadedChapterId.value = chapterId
+  chapterSummaryLoadedText.value = nextText
+  chapterSummaryAiError.value = ''
+}
+
+function formatChapterSummaryText(text: string): string {
+  const normalized = String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]*\n([，。！？；：、])/g, '$1')
+    .trim()
+  if (!normalized) return ''
+
+  const plotted = normalized
+    .replace(/\n*(情节[一二三四五六七八九十\d]+[：:])/g, '\n\n$1')
+    .replace(/(情节[一二三四五六七八九十\d]+[：:][^\n]*)\n?(?!\n)/g, '$1\n')
+    .replace(/[ \t]*\n([，。！？；：、])/g, '$1')
+    .trim()
+
+  if (/情节[一二三四五六七八九十\d]+[：:]/.test(plotted)) {
+    return plotted.replace(/\n{3,}/g, '\n\n')
+  }
+
+  const existingParagraphs = normalized
+    .split(/\n\s*\n+/)
+    .map((row) => row.replace(/[ \t]+\n/g, '\n').replace(/[ \t]*\n([，。！？；：、])/g, '$1').replace(/\n{3,}/g, '\n\n').trim())
+    .filter(Boolean)
+  if (existingParagraphs.length >= 2) return existingParagraphs.join('\n\n')
+
+  const sentenceGroups = normalized
+    .replace(/\n+/g, ' ')
+    .split(/(?<=[。！？!?；;])\s+/)
+    .map((row) => row.trim())
+    .filter(Boolean)
+  if (sentenceGroups.length <= 2) return sentenceGroups.join('\n\n')
+
+  const grouped: string[] = []
+  for (let index = 0; index < sentenceGroups.length; index += 2) {
+    grouped.push(sentenceGroups.slice(index, index + 2).join(' '))
+  }
+  return grouped.join('\n\n')
+}
+
+async function generateChapterSummaryWithAi(): Promise<void> {
+  const chapter = activeChapterForPanels.value
+  const novelId = currentNovelId.value
+  if (!chapter || !novelId) return
+  chapterSummaryAiAbortController?.abort()
+  chapterSummaryAiAbortController = new AbortController()
+  chapterSummaryAiLoading.value = true
+  chapterSummaryAiError.value = ''
+  chapterSummaryDraft.value = ''
+  try {
+    const snapshot = buildNovelWorkspacePayload(novelId)
+    const text = await summarizeNovelChapterFromWorkspaceStream(
+      snapshot,
+      { mode: 'current', chapterIds: [chapter.id] },
+      {
+        onChunk: (chunk: string) => {
+          chapterSummaryDraft.value = formatChapterSummaryText(chapterSummaryDraft.value + chunk)
+        },
+        onError: (error: Error) => {
+          if (error.name === 'AbortError') return
+          chapterSummaryAiError.value = error.message || 'AI 总结失败，请稍后重试。'
+        },
+      },
+      chapterSummaryAiAbortController.signal,
+    )
+    if (!String(text ?? '').trim()) {
+      chapterSummaryAiError.value = 'AI 没有生成可用的章节总结。'
+      return
+    }
+    chapterSummaryDraft.value = formatChapterSummaryText(text)
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') return
+    chapterSummaryAiError.value = error instanceof Error ? error.message : 'AI 总结失败，请稍后重试。'
+  } finally {
+    chapterSummaryAiLoading.value = false
+    chapterSummaryAiAbortController = null
+  }
+}
+
+function stopChapterSummaryAi(): void {
+  chapterSummaryAiAbortController?.abort()
+}
+
 watch(
-  () => activeChapterId.value,
-  (id) => {
-    chapterSummaryDraft.value = activeChapterForPanels.value?.annotation ?? ''
+  () => [activeChapterForPanels.value?.id ?? '', activeChapterForPanels.value?.annotation ?? ''],
+  ([id], previousValue) => {
+    const prevId = previousValue?.[0] ?? ''
+    syncChapterSummaryDraftFromActive(id !== prevId)
     if (!id) return
     void nextTick(() => {
       requestAnimationFrame(() => scrollChapterNavToActive(id))
@@ -1160,9 +1523,12 @@ try {
 
 onMounted(() => window.addEventListener('storage', onStorage))
 onMounted(() => window.addEventListener('novel-writing:changed', onNovelDataChanged))
+onMounted(() => window.addEventListener('novel-writing:ai-open', onAiStudioOpenEvent as EventListener))
+onMounted(() => window.addEventListener('novel-writing:ai-width', onAiStudioWidthEvent as EventListener))
 onMounted(() => window.addEventListener('pointerdown', closeChapterAreaMenu))
 onMounted(() => window.addEventListener('keydown', onGlobalChapterSwitch))
 onMounted(() => window.addEventListener('keydown', onEscapeCloseChapterModal))
+onMounted(() => window.addEventListener('resize', onWindowResizeForSummaryStudio))
 onMounted(() => {
   if (menuPoems.length > 0) poemIndex.value = Math.floor(Math.random() * menuPoems.length)
   if (menuPoems.length > 1) {
@@ -1173,10 +1539,14 @@ onMounted(() => {
 })
 onUnmounted(() => window.removeEventListener('storage', onStorage))
 onUnmounted(() => window.removeEventListener('novel-writing:changed', onNovelDataChanged))
+onUnmounted(() => window.removeEventListener('novel-writing:ai-open', onAiStudioOpenEvent as EventListener))
+onUnmounted(() => window.removeEventListener('novel-writing:ai-width', onAiStudioWidthEvent as EventListener))
 onUnmounted(() => window.removeEventListener('pointerdown', closeChapterAreaMenu))
 onUnmounted(() => window.removeEventListener('keydown', onGlobalChapterSwitch))
 onUnmounted(() => window.removeEventListener('keydown', onEscapeCloseChapterModal))
+onUnmounted(() => window.removeEventListener('resize', onWindowResizeForSummaryStudio))
 onUnmounted(() => {
+  summaryStudioResizeCleanup?.()
   if (poemRotateTimer != null) window.clearInterval(poemRotateTimer)
   poemRotateTimer = null
   if (chapterSummarySaveToastTimer != null) window.clearTimeout(chapterSummarySaveToastTimer)
@@ -1188,7 +1558,7 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return
   if (rightPanelOpen.value) {
     e.preventDefault()
-    closeRightPanel()
+    requestCloseRightPanel()
     return
   }
   if (chapterDeleteConfirmOpen.value) {
@@ -1203,149 +1573,202 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
 </script>
 
 <style scoped>
-.cursor-shell__chapter-top {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-  border-bottom: 1px solid var(--color-border);
-  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
-}
-
-.cursor-shell__chapter-tabs {
-  flex: 1;
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-  padding: 10px 10px 8px;
-  overflow-x: auto;
-}
-
-.cursor-shell__chapter-top-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px 8px 0;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-}
-
-.cursor-shell__chapter-top-btn {
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  box-shadow: none;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.cursor-shell__chapter-top-btn:hover {
-  border-color: color-mix(in srgb, var(--color-primary) 18%, transparent);
-  background: color-mix(in srgb, var(--color-primary-soft) 34%, transparent);
-  color: var(--color-text);
-}
-
-.cursor-shell__chapter-top-btn.is-active,
-.cursor-shell__chapter-top-btn--secondary.is-active {
-  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
-  background: color-mix(in srgb, var(--color-primary-soft) 62%, transparent);
-  color: var(--color-primary);
-  box-shadow: none;
-}
-
-.cursor-shell__chapter-top-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 
 .cursor-shell__right-panel-overlay {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, #000 28%, transparent);
-  z-index: 60;
+  z-index: 120;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cursor-shell__content {
+  height: 100%;
+  min-height: 0;
+}
+
+.cursor-shell__summary-studio {
+  grid-column: 4;
+  grid-row: 2;
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid color-mix(in srgb, var(--color-border-strong) 52%, transparent);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  box-shadow: none;
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 3;
+  transform: none;
+  transition:
+    width 0.2s ease,
+    opacity 0.16s ease,
+    border-color 0.16s ease;
+  will-change: width;
+}
+
+.cursor-shell__summary-studio:not(.cursor-shell__summary-studio--open) {
+  width: 0;
+  border-left-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cursor-shell__summary-studio-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 10px;
+  transform: translateX(-5px);
+  cursor: ew-resize;
+  z-index: 4;
+  touch-action: none;
+}
+
+.cursor-shell__summary-studio-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border-strong) 44%, transparent);
+  transition: background 0.16s ease, opacity 0.16s ease;
+  opacity: 0.9;
+}
+
+.cursor-shell__summary-studio-resizer:hover::before {
+  background: color-mix(in srgb, var(--color-primary) 38%, var(--color-border-strong));
+  opacity: 1;
+}
+
+.cursor-shell__summary-studio-surface {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 99%, #fff 1%), color-mix(in srgb, var(--color-surface) 96%, #000 4%));
+}
+
+.cursor-shell__summary-studio-head {
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 36%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 99%, #fff 1%);
+}
+
+.cursor-shell__summary-studio-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px 12px 12px;
+}
+
+@media (max-width: 980px) {
+  .cursor-shell__summary-studio {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    grid-column: auto;
+    grid-row: auto;
+    width: min(var(--chapter-shell-summary-width, 420px), calc(100vw - 20px));
+    border-left: 1px solid color-mix(in srgb, var(--color-border-strong) 52%, transparent);
+    z-index: 30;
+    transform: translate3d(18px, 0, 0);
+    transition:
+      transform 0.2s ease,
+      opacity 0.16s ease;
+    will-change: transform, opacity;
+  }
+
+  .cursor-shell__summary-studio--open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate3d(0, 0, 0);
+  }
+
+  .cursor-shell__summary-studio:not(.cursor-shell__summary-studio--open) {
+    width: min(var(--chapter-shell-summary-width, 420px), calc(100vw - 20px));
+    border-left-color: color-mix(in srgb, var(--color-border-strong) 52%, transparent);
+  }
 }
 
 .cursor-shell__right-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  height: 100%;
-  width: min(520px, 92vw);
-  background: var(--color-surface);
-  border-left: 1px solid color-mix(in srgb, var(--color-border-strong) 84%, transparent);
-  box-shadow: -16px 0 36px rgba(0, 0, 0, 0.16);
-  display: flex;
-  flex-direction: column;
-  animation: cursorShellRightPanelIn 140ms ease-out;
-}
-
-@keyframes cursorShellRightPanelIn {
-  from {
-    transform: translateX(14px);
-    opacity: 0.95;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  width: min(var(--chapter-shell-ai-width, 420px), calc(100vw - 24px));
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-left: 1px solid color-mix(in srgb, var(--color-border-strong) 64%, transparent);
 }
 
 .cursor-shell__right-panel-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 10px;
-  padding: 12px 12px 10px;
-  border-bottom: 1px solid var(--color-border);
+  gap: 14px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+}
+
+.cursor-shell__right-panel-kicker,
+.cursor-shell__assistant-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 .cursor-shell__right-panel-title {
-  font-weight: 700;
+  margin-top: 4px;
+  font-size: 1.28rem;
+  line-height: 1.1;
+  font-weight: 800;
 }
 
 .cursor-shell__right-panel-subtitle {
-  font-size: 12px;
-  margin-top: 2px;
-}
-
-.cursor-shell__right-panel-close {
-  width: 32px;
-  height: 32px;
-  padding: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text);
-  cursor: pointer;
-  font-size: 20px;
-  line-height: 1;
-  font-family: inherit;
+  min-height: 28px;
+  margin-top: 9px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 66%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  font-size: 12px;
 }
 
-.cursor-shell__right-panel-close:hover {
-  border-color: var(--color-primary);
+.cursor-shell__right-panel-head--sidebar {
+  padding: 18px 16px 12px;
 }
 
 .cursor-shell__right-panel-body {
-  padding: 12px;
+  padding: 14px 16px 18px;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-text-muted) 42%, transparent)
     color-mix(in srgb, var(--color-border) 48%, transparent);
 }
 
+.cursor-shell__right-panel-body--sidebar {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 .cursor-shell__right-panel-body::-webkit-scrollbar {
-  width: 10px;
+  width: 7px;
 }
 
 .cursor-shell__right-panel-body::-webkit-scrollbar-track {
@@ -1355,7 +1778,7 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
 
 .cursor-shell__right-panel-body::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   background-clip: padding-box;
   background: color-mix(in srgb, var(--color-text-muted) 44%, transparent);
 }
@@ -1364,32 +1787,175 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   background: color-mix(in srgb, var(--color-text) 35%, var(--color-primary) 18%);
 }
 
-[data-theme='dark'] .cursor-shell__right-panel-body {
+[data-theme='dark'] .cursor-shell__right-panel-body,
+[data-theme='codex'] .cursor-shell__right-panel-body {
   scrollbar-color: color-mix(in srgb, #cbd5e1 38%, transparent) color-mix(in srgb, #334155 58%, transparent);
 }
 
-[data-theme='dark'] .cursor-shell__right-panel-body::-webkit-scrollbar-track {
+[data-theme='dark'] .cursor-shell__right-panel-body::-webkit-scrollbar-track,
+[data-theme='codex'] .cursor-shell__right-panel-body::-webkit-scrollbar-track {
   background: color-mix(in srgb, #334155 58%, transparent);
 }
 
-[data-theme='dark'] .cursor-shell__right-panel-body::-webkit-scrollbar-thumb {
+[data-theme='dark'] .cursor-shell__right-panel-body::-webkit-scrollbar-thumb,
+[data-theme='codex'] .cursor-shell__right-panel-body::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, #cbd5e1 36%, transparent);
 }
 
-[data-theme='dark'] .cursor-shell__right-panel-body::-webkit-scrollbar-thumb:hover {
+[data-theme='dark'] .cursor-shell__right-panel-body::-webkit-scrollbar-thumb:hover,
+[data-theme='codex'] .cursor-shell__right-panel-body::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, #e2e8f0 46%, var(--color-primary) 18%);
+}
+
+.cursor-shell__assistant-section {
+  display: grid;
+  gap: 12px;
+}
+
+.cursor-shell__assistant-section--summary {
+  height: 100%;
+  align-content: start;
+}
+
+.cursor-shell__chapter-summary-field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.cursor-shell__chapter-summary-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-text) 82%, var(--color-primary) 18%);
+}
+
+.cursor-shell__chapter-summary-textarea-shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.cursor-shell__chapter-summary-textarea-caret {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 10px;
+  height: 20px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-primary) 74%, var(--color-text) 26%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-surface) 60%, transparent);
+  pointer-events: none;
+  animation: cursor-shell-summary-caret 0.9s steps(1) infinite;
+}
+
+.cursor-shell__chapter-summary-streaming {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 28%, var(--color-surface));
+  color: color-mix(in srgb, var(--color-text) 82%, var(--color-primary) 18%);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.cursor-shell__chapter-summary-streaming-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  animation: cursor-shell-summary-pulse 1s ease-in-out infinite;
+}
+
+.cursor-shell__chapter-summary-streaming-caret {
+  width: 9px;
+  height: 16px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: cursor-shell-summary-caret 0.9s steps(1) infinite;
+}
+
+@keyframes cursor-shell-summary-pulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes cursor-shell-summary-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.2; }
+}
+
+.cursor-shell__assistant-section--chapters {
+  min-height: 0;
+  height: 100%;
+}
+
+.cursor-shell__assistant-card {
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 66%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, rgba(255,255,255,0.7)), color-mix(in srgb, var(--color-surface-muted) 88%, transparent)),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-primary-soft) 34%, transparent), transparent 46%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 52%, transparent);
+}
+
+.cursor-shell__assistant-card--ink {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-surface) 96%, rgba(255,255,255,0.7)), color-mix(in srgb, var(--color-primary-soft) 24%, var(--color-surface-muted))),
+    radial-gradient(circle at bottom left, color-mix(in srgb, #7c5b2f 14%, transparent), transparent 48%);
+}
+
+.cursor-shell__assistant-card h3 {
+  margin: 5px 0 6px;
+}
+
+.cursor-shell__assistant-card p:last-child {
+  margin-bottom: 0;
 }
 
 .cursor-shell__right-panel-textarea {
   width: 100%;
-  resize: vertical;
-  border-radius: 12px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  height: 100%;
+  resize: none;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-text-muted) 28%, transparent) transparent;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 74%, transparent);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-surface) 96%, rgba(255,255,255,0.72)) 0,
+      color-mix(in srgb, var(--color-surface) 96%, rgba(255,255,255,0.72)) 31px,
+      color-mix(in srgb, var(--color-border) 54%, transparent) 32px
+    );
   color: var(--color-text);
-  padding: 10px 12px;
+  padding: 14px 16px;
+  line-height: 32px;
   outline: none;
-  min-height: 220px;
+  min-height: 240px;
+}
+
+.cursor-shell__right-panel-textarea::-webkit-scrollbar {
+  width: 5px;
+}
+
+.cursor-shell__right-panel-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cursor-shell__right-panel-textarea::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 28%, transparent);
+}
+
+.cursor-shell__right-panel-textarea::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-primary) 42%, var(--color-text-muted) 58%);
 }
 
 .cursor-shell__right-panel-textarea:focus {
@@ -1421,8 +1987,12 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
 }
 
 .cursor-shell__right-panel-note {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px dashed color-mix(in srgb, var(--color-border-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
   font-size: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .cursor-shell__chapter-entities-grid {
@@ -1431,22 +2001,46 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   gap: 12px;
 }
 
+.cursor-shell__chapter-entities-grid--section {
+  margin-bottom: 12px;
+}
+
+.cursor-shell__group-row--sidebar {
+  margin-bottom: 0;
+}
+
+.cursor-shell__chapter-entities-col {
+  min-width: 0;
+}
+
+.cursor-shell__chapter-entities-title--section {
+  margin: 2px 0 10px;
+}
+
 @media (max-width: 980px) {
   .cursor-shell__chapter-entities-grid {
     grid-template-columns: 1fr;
   }
+
+  .cursor-shell__right-panel {
+    width: calc(100vw - 20px);
+  }
 }
 
 .cursor-shell__chapter-entities-title {
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 800;
   margin-bottom: 8px;
+  color: color-mix(in srgb, var(--color-text) 82%, var(--color-primary) 18%);
 }
 
 .cursor-shell__chapter-entity-row {
-  padding: 10px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-border));
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 66%, transparent);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 94%, rgba(255,255,255,0.7)), color-mix(in srgb, var(--color-surface-muted) 84%, transparent));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--color-primary) 18%, transparent);
   margin-bottom: 8px;
 }
 
@@ -1454,6 +2048,7 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .cursor-shell__chapter-entity-name {
