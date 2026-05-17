@@ -16,6 +16,7 @@
               ref="overlayRef"
               class="chapter-hub__entity-overlay"
               v-show="shouldShowEntityOverlay && !isChapterTextareaFocused"
+              @wheel="onEntityWheel"
               @scroll="onOverlayScroll"
               @mousedown="onOverlayTextMouseDown"
             >
@@ -251,6 +252,18 @@ function focusTextareaAtPosition(pos: number): void {
   ta.scrollTop = preservedScrollTop
 }
 
+function focusTextareaWithSelection(start: number, end: number): void {
+  const ta = textareaRef.value
+  if (!ta) return
+  const max = ta.value.length
+  const left = Math.min(Math.max(0, start), max)
+  const right = Math.min(Math.max(0, end), max)
+  const preservedScrollTop = ta.scrollTop
+  ta.focus({ preventScroll: true })
+  ta.setSelectionRange(left, right)
+  ta.scrollTop = preservedScrollTop
+}
+
 function syncTextareaScrollFromOverlay(): void {
   const ta = textareaRef.value
   const overlay = overlayRef.value
@@ -343,6 +356,40 @@ function getTokenCaretPositionFromPoint(e: MouseEvent): number | null {
   return bestPos
 }
 
+let overlaySelectionAnchor: number | null = null
+let overlaySelectionLast: number | null = null
+
+function clearOverlaySelectionTracking(): void {
+  overlaySelectionAnchor = null
+  overlaySelectionLast = null
+  if (typeof window === 'undefined') return
+  window.removeEventListener('mousemove', onWindowMouseMoveForOverlaySelection, true)
+  window.removeEventListener('mouseup', onWindowMouseUpForOverlaySelection, true)
+}
+
+function onWindowMouseMoveForOverlaySelection(e: MouseEvent): void {
+  overlaySelectionLast = getTokenCaretPositionFromPoint(e)
+}
+
+function onWindowMouseUpForOverlaySelection(e: MouseEvent): void {
+  const anchor = overlaySelectionAnchor
+  const fallback = overlaySelectionLast
+  const current = getTokenCaretPositionFromPoint(e) ?? fallback
+  clearOverlaySelectionTracking()
+  if (anchor == null) return
+  if (current == null) {
+    focusTextareaAtPosition(anchor)
+    return
+  }
+  const start = Math.min(anchor, current)
+  const end = Math.max(anchor, current)
+  if (start === end) {
+    focusTextareaAtPosition(start)
+    return
+  }
+  focusTextareaWithSelection(start, end)
+}
+
 function onOverlayTextMouseDown(e: MouseEvent): void {
   if (props.isChapterTextareaFocused) return
   if (e.button !== 0) return
@@ -366,7 +413,12 @@ function onOverlayTextMouseDown(e: MouseEvent): void {
 
   const pos = getTokenCaretPositionFromPoint(e)
   if (pos == null) return
-  focusTextareaAtPosition(pos)
+  overlaySelectionAnchor = pos
+  overlaySelectionLast = pos
+  if (typeof window !== 'undefined') {
+    window.addEventListener('mousemove', onWindowMouseMoveForOverlaySelection, true)
+    window.addEventListener('mouseup', onWindowMouseUpForOverlaySelection, true)
+  }
 }
 
 function onOverlayScroll(): void {
@@ -492,10 +544,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearOverlaySelectionTracking()
   textareaResizeObserver?.disconnect()
   textareaResizeObserver = null
 })
 
 defineExpose({ textareaRef })
 </script>
-

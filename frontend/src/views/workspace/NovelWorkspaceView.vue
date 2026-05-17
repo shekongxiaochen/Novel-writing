@@ -56,6 +56,14 @@
           >
             伏笔
           </button>
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: activeTab === 'ai' }"
+            @click="switchTab('ai')"
+          >
+            模型控制室
+          </button>
         </nav>
       </div>
     </header>
@@ -651,6 +659,7 @@
               <section class="characters-graph-ui__section characters-graph-ui__toolbar">
               <CharacterGraphRelationToolbar
                 v-model:link-mode="graphLinkMode"
+                v-model:search-query="graphSphereSearchQuery"
                 :novel-id="novelId"
                 :focus-character-id="graphFocusCharacterId"
                 :pair-character-id="graphFocusSphereSelectedId"
@@ -1278,6 +1287,17 @@
       />
     </section>
 
+    <ConfirmDialog
+      v-model="categoryDeleteOpen"
+      title="删除分类"
+      :message="categoryDeleteMessage"
+      confirm-label="删除分类"
+      cancel-label="取消"
+      danger
+      @confirm="confirmCategoryDelete"
+      @cancel="onCategoryDeleteDialogCancel"
+    />
+
     <Teleport to="body">
       <Transition name="confirm">
         <div v-if="itemCreateOpen" class="confirm-overlay" role="presentation" @click.self="requestCloseItemCreate">
@@ -1809,6 +1829,7 @@
               <strong class="faction-row__title">{{ cat.name }}</strong>
               <div class="action-row action-row--inline">
                 <button type="button" class="faction-row__edit" @click="openCategoryEdit(cat.id)">修改</button>
+                <button type="button" class="faction-row__delete" @click="openCategoryDelete(cat.id)">删除</button>
                 <button
                   type="button"
                   class="confirm-dialog__btn confirm-dialog__btn--ghost"
@@ -2275,6 +2296,41 @@
       </Transition>
     </Teleport>
     </section>
+
+    <section class="card ai-settings-page" v-if="activeTab === 'ai'">
+      <div class="ai-settings-page__grid">
+        <div class="ai-settings-page__hero">
+          <div>
+            <p class="ai-settings-page__eyebrow">Model Control Room</p>
+            <h2>模型控制室</h2>
+            <p class="muted">这里配置一次，当前设备的前端 AI 功能会复用到大纲补全、章节分析、档案整理。</p>
+          </div>
+          <div class="ai-settings-page__chips">
+            <span>DeepSeek</span>
+            <span>DashScope</span>
+            <span>OpenAI Compatible</span>
+          </div>
+          <div class="ai-settings-page__notes">
+            <article>
+              <strong>1. 选服务</strong>
+              <p class="muted">可以直接用预设按钮填好 Base URL，再改成你的模型名。</p>
+            </article>
+            <article>
+              <strong>2. 测连接</strong>
+              <p class="muted">保存前先测试，确认 Key、地址和模型都能真正返回结果。</p>
+            </article>
+            <article>
+              <strong>3. 全局复用</strong>
+              <p class="muted">写作助手、AI 阅读台和档案整理会读取这里保存的本地配置。</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="ai-settings-page__panel">
+          <AiSettingsDialog inline />
+        </div>
+      </div>
+    </section>
   </section>
 
   <section v-else class="page-block">
@@ -2296,6 +2352,7 @@ import {
   createItem,
   createOutlineItem,
   createTimelineEvent,
+  deleteCategory,
   deleteCharacter,
   deleteFaction,
   deleteItem,
@@ -2335,7 +2392,9 @@ import {
   updateTimelineEvent,
 } from '../../lib/storage'
 import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
+import { expandOutlineItemByAi } from '../../lib/localAi'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
+import AiSettingsDialog from '../../components/AiSettingsDialog.vue'
 import type {
   Category,
   Character,
@@ -2383,6 +2442,7 @@ type WorkspaceTab =
   | 'factions'
   | 'categories'
   | 'issues'
+  | 'ai'
 
 const novelId = computed(() => String(route.params.id ?? ''))
 const novel = computed(() => getNovelById(novelId.value))
@@ -2425,6 +2485,8 @@ const categoryEditId = ref('')
 const categoryEditDraft = reactive({ name: '', notes: '' })
 const categoryEditInitial = ref({ name: '', notes: '' })
 const categoryEditCancelConfirmOpen = ref(false)
+const categoryDeleteOpen = ref(false)
+const pendingDeleteCategoryId = ref<string | null>(null)
 const selectedCategoryFilterId = ref('')
 const characterKeywordFilter = ref('')
 const itemKeywordFilter = ref('')
@@ -2868,6 +2930,7 @@ const graphAttributeValue = ref('')
 const graphLinkMode = ref(false)
 /** 下方聚焦图中点击的节点（非中心时展示与中心的双向关系） */
 const graphFocusSphereSelectedId = ref('')
+const graphSphereSearchQuery = ref('')
 
 const timelineChapterDropdownLabel = computed(() => {
   if (!timelineForm.chapterNoStart) return '不关联'
@@ -3280,12 +3343,12 @@ function onCharacterRelationsChanged(): void {
 }
 
 function onFocusSphereNodeSelect(id: string): void {
-  if (!id || id === graphFocusCharacterId.value) {
+  if (!id || id === graphFocusCharacterId.value) return
+  if (id === graphFocusSphereSelectedId.value) {
     graphFocusSphereSelectedId.value = ''
     return
   }
-  graphFocusCharacterId.value = id
-  graphFocusSphereSelectedId.value = ''
+  graphFocusSphereSelectedId.value = id
 }
 
 watch(
@@ -3668,26 +3731,7 @@ async function enhanceOutlineByAi(id: string, mode: 'full' | 'conflict' | 'twist
   if (!item) return
   outlineAiLoadingById[id] = true
   try {
-    const apiBase = String((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000')
-    const resp = await fetch(`${apiBase.replace(/\/$/, '')}/ai/outline-expand`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: item.title ?? '',
-        summary: item.summary ?? '',
-        goal: item.goal ?? '',
-        conflict: item.conflict ?? '',
-        twist: item.twist ?? '',
-        result: item.result ?? '',
-        suspense: item.suspense ?? '',
-        mode,
-      }),
-    })
-    if (!resp.ok) {
-      const txt = await resp.text()
-      throw new Error(txt || `HTTP ${resp.status}`)
-    }
-    const data = (await resp.json()) as Partial<Pick<OutlineItem, 'conflict' | 'twist' | 'suspense'>>
+    const data = await expandOutlineItemByAi(item, mode)
     const patch: Partial<OutlineItem> & Pick<OutlineItem, 'id'> = { id }
     if (mode === 'full' || mode === 'conflict') patch.conflict = String(data.conflict ?? '').trim() || (item.conflict ?? '')
     if (mode === 'full' || mode === 'twist') patch.twist = String(data.twist ?? '').trim() || (item.twist ?? '')
@@ -4681,10 +4725,19 @@ const filteredCharacters = computed(() => {
   return sortByPinyinName(list)
 })
 
+const graphScopedCharacters = computed(() => {
+  const cid = selectedCategoryFilterId.value
+  const list = characters.value.filter((c) => {
+    if (cid && !(c.categoryIds ?? []).includes(cid)) return false
+    return true
+  })
+  return sortByPinyinName(list)
+})
+
 const graphFocusCharacterDropdownLabel = computed(() => {
-  const selected = filteredCharacters.value.find((c) => c.id === graphFocusCharacterId.value)
+  const selected = graphScopedCharacters.value.find((c) => c.id === graphFocusCharacterId.value)
   if (selected) return selected.name
-  return filteredCharacters.value[0]?.name ?? '暂无角色'
+  return graphScopedCharacters.value[0]?.name ?? '暂无角色'
 })
 
 const filteredItems = computed(() => {
@@ -4804,6 +4857,14 @@ function onCategoryEditCancelDialogCancel(): void {
   categoryEditCancelConfirmOpen.value = false
 }
 
+const categoryDeleteMessage = computed(() => {
+  const id = pendingDeleteCategoryId.value
+  if (!id) return ''
+  const category = categories.value.find((item) => item.id === id)
+  if (!category) return '确定删除该分类？该分类会同时从已绑定的角色和势力中移除，此操作无法撤销。'
+  return `确定删除「${category.name}」？该分类会同时从已绑定的角色和势力中移除，此操作无法撤销。`
+})
+
 function saveCategoryEdit(): void {
   if (!novel.value) return
   const id = categoryEditId.value
@@ -4813,6 +4874,41 @@ function saveCategoryEdit(): void {
   updateCategory({ id, name, notes: categoryEditDraft.notes })
   categories.value = getCategoriesByNovelId(novel.value.id)
   forceCloseCategoryEdit()
+}
+
+function openCategoryDelete(categoryId: string): void {
+  pendingDeleteCategoryId.value = categoryId
+  categoryDeleteOpen.value = true
+}
+
+function confirmCategoryDelete(): void {
+  const id = String(pendingDeleteCategoryId.value ?? '').trim()
+  pendingDeleteCategoryId.value = null
+  if (!id) return
+
+  if (categoryEditId.value === id) forceCloseCategoryEdit()
+  if (categoryBindModalCategoryId.value === id) closeCategoryBindModal()
+  if (selectedCategoryFilterId.value === id) clearCategoryFilter()
+
+  delete categoryCharacterDraftById.value[id]
+  delete categoryFactionDraftById.value[id]
+  delete categoryCharacterDraftSetById.value[id]
+  delete categoryFactionDraftSetById.value[id]
+
+  if (!deleteCategory(id)) {
+    categoryDeleteOpen.value = false
+    return
+  }
+
+  categories.value = getCategoriesByNovelId(novelId.value)
+  characters.value = getCharactersByNovelId(novelId.value)
+  factions.value = getFactionsByNovelId(novelId.value)
+  categoryDeleteOpen.value = false
+}
+
+function onCategoryDeleteDialogCancel(): void {
+  categoryDeleteOpen.value = false
+  pendingDeleteCategoryId.value = null
 }
 
 const categoryCenterCharacters = computed(() => {
@@ -5319,11 +5415,11 @@ const graphCharacterHeldItems = computed(() => {
     .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'zh-Hans'))
 })
 
-const filteredCharacterIdSet = computed(() => new Set(filteredCharacters.value.map((c) => c.id)))
+const graphScopedCharacterIdSet = computed(() => new Set(graphScopedCharacters.value.map((c) => c.id)))
 
 const filteredCharacterRelations = computed(() =>
   characterRelations.value.filter(
-    (r) => filteredCharacterIdSet.value.has(r.fromCharacterId) && filteredCharacterIdSet.value.has(r.toCharacterId),
+    (r) => graphScopedCharacterIdSet.value.has(r.fromCharacterId) && graphScopedCharacterIdSet.value.has(r.toCharacterId),
   ),
 )
 
@@ -5362,7 +5458,15 @@ const visibleGraphCharacterIds = computed(() => {
   return ids
 })
 
-const visibleCharacters = computed(() => filteredCharacters.value.filter((c) => visibleGraphCharacterIds.value.has(c.id)))
+const visibleCharacters = computed(() => {
+  const q = graphSphereSearchQuery.value.trim().toLowerCase()
+  return graphScopedCharacters.value.filter((c) => {
+    if (!visibleGraphCharacterIds.value.has(c.id)) return false
+    if (!q) return true
+    if (c.id === graphFocusCharacterId.value) return true
+    return (c.name ?? '').toLowerCase().includes(q)
+  })
+})
 
 function factionNameById(id?: string | null): string {
   if (!id) return ''
@@ -6025,7 +6129,8 @@ function applyRoutePrefill(): void {
     tab === 'items' ||
     tab === 'factions' ||
     tab === 'categories' ||
-    tab === 'issues'
+    tab === 'issues' ||
+    tab === 'ai'
   ) {
     activeTab.value = tab
   }
@@ -6127,6 +6232,8 @@ function switchTab(tab: WorkspaceTab): void {
     lastTabBeforeCharacters.value = activeTab.value as Exclude<WorkspaceTab, 'characters'>
   }
   activeTab.value = tab
+  const nextQuery = { ...route.query, tab }
+  void router.replace({ path: route.path, query: nextQuery })
 }
 
 function parseOptionalChapterNo(raw: string): number | null {
@@ -6217,4 +6324,3 @@ onUnmounted(() => {
 })
 
 </script>
-

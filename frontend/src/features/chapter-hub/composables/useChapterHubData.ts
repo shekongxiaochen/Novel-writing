@@ -61,7 +61,9 @@ export function useChapterHubData() {
     reload()
   }
 
-  watch(novelId, () => reload(), { immediate: true })
+  watch(novelId, () => {
+    reload()
+  }, { immediate: true })
 
   watch(
     chapters,
@@ -90,6 +92,7 @@ export function useChapterHubData() {
   onMounted(() => {
     if (typeof window === 'undefined') return
     window.addEventListener('novel-writing:changed', onNovelDataChanged)
+    reload()
   })
 
   onUnmounted(() => {

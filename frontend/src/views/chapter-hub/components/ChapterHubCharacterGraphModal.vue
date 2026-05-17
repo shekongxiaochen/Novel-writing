@@ -336,7 +336,6 @@
               <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                 <div class="character-panel__block-head">
                   <h4 class="character-panel__block-title">分类</h4>
-                  <span class="character-panel__block-hint">可多选；需在「分类」页先创建分类</span>
                 </div>
                 <p v-if="sortedCategories.length === 0" class="muted" style="margin: 0 0 8px">暂无分类，请在工作台「分类」中新建。</p>
                 <div v-else class="character-panel__category-checks" role="group" aria-label="角色分类">
@@ -415,7 +414,6 @@
               <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
                 <div class="character-panel__block-head">
                   <h4 class="character-panel__block-title">绑定物品</h4>
-                  <span class="character-panel__block-hint">可绑定多个物品；选择已被占用的物品会在保存后转移持有者</span>
                 </div>
                 <p v-if="items.length === 0" class="muted" style="margin: 0 0 8px">暂无物品，请先到工作台「物品」页创建物品。</p>
                 <label v-else class="character-panel__field character-panel__field--tight">
@@ -433,7 +431,6 @@
                   >
                     <span class="category-bind-chip__state" aria-hidden="true">{{ item.bound ? '已绑定' : '未绑定' }}</span>
                     <span class="character-panel__category-chip-text">{{ item.name }}</span>
-                    <span class="muted">· {{ item.transferHint }}</span>
                   </button>
                 </div>
                 <p v-if="items.length > 0 && itemPickerRows.length === 0" class="muted" style="margin: 8px 0 0">没有匹配的物品。</p>

@@ -1,0 +1,805 @@
+diff --git a/frontend/src/App.vue b/frontend/src/App.vue
+index 0190fed9..b86affc4 100644
+--- a/frontend/src/App.vue
++++ b/frontend/src/App.vue
+@@ -6,18 +6,6 @@
+         <button type="button" class="cursor-shell-home__theme-btn" @click="handleThemePickerClick">
+           颜色主题 · {{ currentThemeOption.label }}
+         </button>
+-        <div class="cursor-shell-home__auth-actions">
+-          <template v-if="isLoggedIn">
+-            <span class="cursor-shell-home__auth-name" :title="displayName">{{ displayName }}</span>
+-            <button type="button" class="cursor-shell__auth-btn" @click="logoutAndGo">退出</button>
+-          </template>
+-          <template v-else>
+-            <button type="button" class="cursor-shell__auth-btn" @click="goTo('/login')">登录</button>
+-            <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="goTo('/register')">
+-              注册
+-            </button>
+-          </template>
+-        </div>
+       </div>
+     </header>
+     <RouterView />
+@@ -27,7 +15,7 @@
+     v-else
+     class="cursor-shell cursor-shell--novel"
+     :class="{ 'is-sidebar-collapsed': sidebarCollapsed, 'is-resizing-sidebar': isResizingSidebar }"
+-    :style="{ '--novel-sidebar-width': `${sidebarWidth}px` }"
++    :style="novelShellStyle"
+   >
+     <header class="cursor-shell__menu-bar">
+       <button
+@@ -61,16 +49,28 @@
+         <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="handleThemePickerClick">
+           颜色主题 · {{ currentThemeOption.label }}
+         </button>
+-        <template v-if="isLoggedIn">
+-          <span class="cursor-shell__auth-name" :title="displayName">{{ displayName }}</span>
+-          <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="logoutAndGo">退出</button>
+-        </template>
+-        <template v-else>
+-          <button type="button" class="cursor-shell__auth-btn" @click="goTo('/login')">登录</button>
+-          <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="goTo('/register')">
+-            注册
+-          </button>
+-        </template>
++        <button
++          v-if="isWritingRoute"
++          type="button"
++          class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary"
++          :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'summary' }"
++          :title="rightPanelOpen && rightPanelActive === 'summary' ? '收起章总结' : '展开章总结'"
++          :aria-label="rightPanelOpen && rightPanelActive === 'summary' ? '收起章总结' : '展开章总结'"
++          @click="toggleChapterSummarySidebar"
++        >
++          章总结
++        </button>
++        <button
++          v-if="isWritingRoute"
++          type="button"
++          class="cursor-shell__auth-btn cursor-shell__auth-btn--icon"
++          :class="{ 'is-active': aiStudioShellOpen }"
++          :title="aiStudioShellOpen ? '收起 AI 阅读台' : '展开 AI 阅读台'"
++          :aria-label="aiStudioShellOpen ? '收起 AI 阅读台' : '展开 AI 阅读台'"
++          @click="toggleHeaderAiStudio"
++        >
++          <span class="cursor-shell__auth-icon cursor-shell__auth-icon--ai" aria-hidden="true">AI</span>
++        </button>
+       </div>
+     </header>
+     <aside class="cursor-shell__sidebar cursor-shell__sidebar--chapters">
+@@ -112,86 +112,110 @@
+     </aside>
+     <div class="cursor-shell__resize-handle" @mousedown.prevent="startResizeSidebar"></div>
+     <section class="cursor-shell__main">
+-      <div v-if="route.name === 'novel-chapter-writing'" class="cursor-shell__chapter-top">
+-        <div class="cursor-shell__chapter-tabs" role="tablist" aria-label="打开的章节">
+-          <button
+-            v-for="ch in openChapters"
+-            :key="ch.id"
+-            type="button"
+-            class="cursor-shell__chapter-tab"
+-            :class="{ 'is-active': activeChapterId === ch.id }"
+-            :title="`第${ch.chapterNo}章 ${ch.title || '未命名章节'}`"
+-            @click="openChapter(ch.id)"
+-          >
+-            <span class="cursor-shell__chapter-tab-title">第{{ ch.chapterNo }}章 {{ ch.title || '未命名章节' }}</span>
+-            <span
+-              class="cursor-shell__chapter-tab-close"
+-              role="button"
+-              tabindex="0"
+-              @click.stop="closeChapterTab(ch.id)"
+-              @keydown.enter.stop.prevent="closeChapterTab(ch.id)"
+-            >
+-              ×
+-            </span>
+-          </button>
+-        </div>
+-        <div class="cursor-shell__chapter-top-actions">
+-          <button
+-            type="button"
+-            class="cursor-shell__chapter-top-btn"
+-            :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'summary' }"
+-            :disabled="!activeChapterId"
+-            @click="toggleChapterSummary"
+-            title="展开/收起：章节总结"
+-          >
+-            章总结
+-          </button>
+-          <button
+-            type="button"
+-            class="cursor-shell__chapter-top-btn cursor-shell__chapter-top-btn--secondary"
+-            :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'entities' }"
+-            :disabled="!activeChapterId"
+-            @click="toggleChapterEntities"
+-            title="展开/收起：本章角色/势力"
+-          >
+-            角色/势力
+-          </button>
++      <div class="cursor-shell__work-area" :class="{ 'cursor-shell__work-area--with-summary': isDockedSummaryPanel }">
++        <div class="cursor-shell__content" :class="{ 'cursor-shell__content--writing': route.name === 'novel-chapter-writing' }">
++          <RouterView v-slot="{ Component }">
++            <component :is="Component" v-bind="chapterWritingViewProps" />
++          </RouterView>
+         </div>
+-      </div>
+-      <div class="cursor-shell__content" :class="{ 'cursor-shell__content--writing': route.name === 'novel-chapter-writing' }">
+-        <RouterView />
++
++        <aside v-if="isDockedSummaryPanel" class="cursor-shell__summary-studio" @pointerdown.stop>
++          <div class="cursor-shell__summary-studio-resizer" @pointerdown="startResizeSummaryStudio" @dblclick="resetSummaryStudioWidth" />
++          <div class="cursor-shell__summary-studio-surface">
++            <header class="cursor-shell__right-panel-head cursor-shell__summary-studio-head">
++              <div class="cursor-shell__right-panel-head-titles">
++                <div class="cursor-shell__right-panel-kicker">{{ rightPanelKicker }}</div>
++                <div class="cursor-shell__right-panel-title">{{ rightPanelTitle }}</div>
++                <div v-if="activeChapterForPanels" class="cursor-shell__right-panel-subtitle muted">
++                  第{{ activeChapterForPanels.chapterNo }}章 · {{ activeChapterForPanels.title || '未命名章节' }}
++                </div>
++              </div>
++              <button type="button" class="cursor-shell__right-panel-close" @click="requestCloseRightPanel" aria-label="关闭侧边栏">×</button>
++            </header>
++
++            <div class="cursor-shell__right-panel-body cursor-shell__summary-studio-body">
++              <section class="cursor-shell__assistant-section cursor-shell__assistant-section--summary">
++                <label class="cursor-shell__chapter-summary-field">
++                  <span class="cursor-shell__chapter-summary-label">输入章总结</span>
++                  <div class="cursor-shell__chapter-summary-textarea-shell">
++                    <textarea
++                      v-model="chapterSummaryDraft"
++                      class="cursor-shell__right-panel-textarea"
++                      rows="10"
++                      maxlength="800"
++                    />
++                    <span v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-textarea-caret" aria-hidden="true"></span>
++                  </div>
++                </label>
++                <div v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-streaming" aria-live="polite">
++                  <span class="cursor-shell__chapter-summary-streaming-dot" aria-hidden="true"></span>
++                  <span>正在总结</span>
++                  <span class="cursor-shell__chapter-summary-streaming-caret" aria-hidden="true"></span>
++                </div>
++                <p v-if="chapterSummaryAiError" class="character-panel__alert">{{ chapterSummaryAiError }}</p>
++                <div class="cursor-shell__right-panel-actions">
++                  <button
++                    type="button"
++                    class="confirm-dialog__btn confirm-dialog__btn--ghost"
++                    @click="chapterSummaryAiLoading ? stopChapterSummaryAi() : generateChapterSummaryWithAi()"
++                    :disabled="!activeChapterId"
++                  >
++                    {{ chapterSummaryAiLoading ? '停止' : 'AI总结' }}
++                  </button>
++                  <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="saveChapterSummary" :disabled="!activeChapterId">
++                    保存
++                  </button>
++                </div>
++              </section>
++            </div>
++          </div>
++        </aside>
+       </div>
+ 
+-      <div
+-        v-if="route.name === 'novel-chapter-writing' && rightPanelOpen"
+-        class="cursor-shell__right-panel-overlay"
+-        @pointerdown.self="closeRightPanel"
+-      >
++      <div v-if="rightPanelOpen && !isDockedSummaryPanel" class="cursor-shell__right-panel-overlay" @pointerdown.self="requestCloseRightPanel">
+         <aside class="cursor-shell__right-panel" @pointerdown.stop>
+           <header class="cursor-shell__right-panel-head">
+             <div class="cursor-shell__right-panel-head-titles">
+-              <div class="cursor-shell__right-panel-title">
+-                {{ rightPanelActive === 'summary' ? '章节总结' : '本章角色 / 势力' }}
++              <div class="cursor-shell__right-panel-kicker">{{ rightPanelKicker }}</div>
++              <div class="cursor-shell__right-panel-title">{{ rightPanelTitle }}</div>
++              <div v-if="isWritingRoute && activeChapterForPanels" class="cursor-shell__right-panel-subtitle muted">
++                第{{ activeChapterForPanels.chapterNo }}章 · {{ activeChapterForPanels.title || '未命名章节' }}
+               </div>
+-              <div v-if="activeChapterForPanels" class="cursor-shell__right-panel-subtitle muted">
+-                第{{ activeChapterForPanels.chapterNo }}章 {{ activeChapterForPanels.title || '未命名章节' }}
++              <div v-else class="cursor-shell__right-panel-subtitle muted">
++                当前界面：{{ currentWorkspaceTabLabel }}
+               </div>
+             </div>
+-            <button type="button" class="cursor-shell__right-panel-close" @click="closeRightPanel" aria-label="关闭侧边栏">×</button>
++            <button type="button" class="cursor-shell__right-panel-close" @click="requestCloseRightPanel" aria-label="关闭侧边栏">×</button>
+           </header>
+ 
+           <div class="cursor-shell__right-panel-body">
+-            <section v-if="rightPanelActive === 'summary'">
+-              <textarea
+-                v-model="chapterSummaryDraft"
+-                class="cursor-shell__right-panel-textarea"
+-                rows="10"
+-                maxlength="800"
+-                placeholder="写下这一章发生了什么、推进了什么、留下了什么钩子（建议 2-6 句）。"
+-              />
++            <section v-if="isWritingRoute && rightPanelActive === 'summary'" class="cursor-shell__assistant-section">
++              <label class="cursor-shell__chapter-summary-field">
++                <span class="cursor-shell__chapter-summary-label">输入章总结</span>
++                <div class="cursor-shell__chapter-summary-textarea-shell">
++                  <textarea
++                    v-model="chapterSummaryDraft"
++                    class="cursor-shell__right-panel-textarea"
++                    rows="10"
++                    maxlength="800"
++                  />
++                  <span v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-textarea-caret" aria-hidden="true"></span>
++                </div>
++              </label>
++              <div v-if="chapterSummaryAiLoading" class="cursor-shell__chapter-summary-streaming" aria-live="polite">
++                <span class="cursor-shell__chapter-summary-streaming-dot" aria-hidden="true"></span>
++                <span>正在总结</span>
++                <span class="cursor-shell__chapter-summary-streaming-caret" aria-hidden="true"></span>
++              </div>
++              <p v-if="chapterSummaryAiError" class="character-panel__alert">{{ chapterSummaryAiError }}</p>
+               <div class="cursor-shell__right-panel-actions">
+-                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="cancelChapterSummary" :disabled="!activeChapterId">
+-                  取消
++                <button
++                  type="button"
++                  class="confirm-dialog__btn confirm-dialog__btn--ghost"
++                  @click="chapterSummaryAiLoading ? stopChapterSummaryAi() : generateChapterSummaryWithAi()"
++                  :disabled="!activeChapterId"
++                >
++                  {{ chapterSummaryAiLoading ? '停止' : 'AI总结' }}
+                 </button>
+                 <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="saveChapterSummary" :disabled="!activeChapterId">
+                   保存
+@@ -199,13 +223,18 @@
+               </div>
+             </section>
+ 
+-            <section v-else>
++            <section v-else-if="isWritingRoute" class="cursor-shell__assistant-section">
++              <div class="cursor-shell__assistant-card cursor-shell__assistant-card--ink">
++                <p class="cursor-shell__assistant-eyebrow">Scene Ledger</p>
++                <h3>本章出现与变更</h3>
++                <p class="muted">从当前正文与档案记录里整理角色、势力和本章改动；这里只展示线索，不会自动覆盖档案。</p>
++              </div>
+               <div class="cursor-shell__right-panel-note muted">自动从正文提取 + 记录本章新建/变更（仅展示）。</div>
+ 
+-              <div class="cursor-shell__chapter-entities-title" style="margin-bottom: 10px">
++              <div class="cursor-shell__chapter-entities-title cursor-shell__chapter-entities-title--section">
+                 本章修改记录（角色 {{ chapterChangedCharacters.length }} / 势力 {{ chapterChangedFactions.length }}）
+               </div>
+-              <div class="cursor-shell__chapter-entities-grid" style="margin-bottom: 12px">
++              <div class="cursor-shell__chapter-entities-grid cursor-shell__chapter-entities-grid--section">
+                 <div class="cursor-shell__chapter-entities-col">
+                   <div class="cursor-shell__chapter-entities-title">角色修改</div>
+                   <div v-if="chapterChangedCharacters.length === 0" class="muted">本章未修改角色档案。</div>
+@@ -284,6 +313,62 @@
+                 </div>
+               </div>
+             </section>
++
++            <section v-else class="cursor-shell__assistant-section">
++              <div class="cursor-shell__assistant-card">
++                <p class="cursor-shell__assistant-eyebrow">Workspace AI</p>
++                <h3>把 AI 侧栏带到整个工作台</h3>
++                <p class="muted">这里不再只服务写作页。你可以从任意工作台界面直接跳去 AI 设置、继续写作，或先查看当前作品的结构规模。</p>
++              </div>
++
++              <div class="cursor-shell__chapter-entities-grid cursor-shell__chapter-entities-grid--section">
++                <div class="cursor-shell__chapter-entities-col">
++                  <div class="cursor-shell__chapter-entities-title">快捷入口</div>
++                  <div class="cursor-shell__right-panel-actions">
++                    <button type="button" class="cursor-shell__right-panel-btn cursor-shell__right-panel-btn--primary" @click="goWriting">
++                      去写作区
++                    </button>
++                    <button type="button" class="cursor-shell__right-panel-btn" @click="goWorkspaceTab('ai')">
++                      打开 AI 设置
++                    </button>
++                  </div>
++                </div>
++                <div class="cursor-shell__chapter-entities-col">
++                  <div class="cursor-shell__chapter-entities-title">当前工作台</div>
++                  <div class="cursor-shell__chapter-entity-row">
++                    <div class="cursor-shell__chapter-entity-head">
++                      <span class="cursor-shell__chapter-entity-name">{{ currentWorkspaceTabLabel }}</span>
++                      <span class="cursor-shell__chapter-entity-badge">已接入 AI 侧栏</span>
++                    </div>
++                    <div class="cursor-shell__chapter-entity-fields muted">
++                      章节 {{ chapterList.length }} · 最近可继续回到写作页或模型控制室。
++                    </div>
++                  </div>
++                </div>
++              </div>
++
++              <div class="cursor-shell__chapter-entities-grid">
++                <div class="cursor-shell__chapter-entities-col">
++                  <div class="cursor-shell__chapter-entities-title">作品概览</div>
++                  <div class="cursor-shell__chapter-entity-row">
++                    <div class="cursor-shell__chapter-entity-head">
++                      <span class="cursor-shell__chapter-entity-name">{{ currentNovel?.title || '当前作品' }}</span>
++                    </div>
++                    <div class="cursor-shell__chapter-entity-fields muted">
++                      {{ currentNovel?.summary?.trim() || '暂无作品简介，可在工作台中继续补全设定。' }}
++                    </div>
++                  </div>
++                </div>
++                <div class="cursor-shell__chapter-entities-col">
++                  <div class="cursor-shell__chapter-entities-title">使用建议</div>
++                  <div class="cursor-shell__chapter-entity-row">
++                    <div class="cursor-shell__chapter-entity-fields muted">
++                      大纲页先理顺情节点，角色/势力/物品页补档案，最后回写作页结合 AI 阅读台继续推进正文。
++                    </div>
++                  </div>
++                </div>
++              </div>
++            </section>
+           </div>
+         </aside>
+       </div>
+@@ -366,12 +451,22 @@
+     :return-focus-el="themePickerReturnFocusEl"
+     @close="closeThemePicker"
+   />
++
++  <ConfirmDialog
++    v-model="chapterSummaryCloseConfirmOpen"
++    title="关闭章总结"
++    message="当前章总结有未保存的修改，确定要关闭吗？"
++    confirm-label="仍然关闭"
++    cancel-label="继续编辑"
++    @confirm="confirmCloseRightPanel"
++  />
+ </template>
+ 
+ <script setup lang="ts">
+ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+ import { RouterView, useRoute, useRouter } from 'vue-router'
+ import {
++  buildNovelWorkspacePayload,
+   createChapter,
+   deleteChapter,
+   getChapterDeletePreview,
+@@ -387,10 +482,11 @@ import {
+ } from './lib/storage'
+ import type { Chapter, Novel } from './types'
+ import type { CharacterChangeDetail } from './lib/storage'
++import { summarizeNovelChapterFromWorkspaceStream } from './lib/localAi'
+ import { currentThemeOption } from './composables/useTheme'
+-import { useAuth } from './composables/useAuth'
+ import { Teleport } from 'vue'
+ import { menuPoems } from './data/menuPoems'
+…111584 tokens truncated… ? [selectedChapter.value.id] : [],
++        novelId: id,
++      },
++      {
++        onChunk: (text: string) => {
++          if (aiChatThinking.value) aiChatThinking.value = false
++          msg.content += text
++        },
++        onError: (err: Error) => {
++          if (err.name === 'AbortError') return
++          aiExtractError.value = err.message || 'AI ??????'
++        },
++      },
++      conversationHistory.value.length > 0 ? conversationHistory.value : undefined,
++      aiChatAbortController.signal,
++    )
++    conversationHistory.value = history
++    if (!msg.content.trim()) {
++      msg.content = '?????????????'
++    }
++  } catch (e: unknown) {
++    if (e instanceof Error && e.name === 'AbortError') {
++      if (!msg.content.trim()) msg.content = '????'
++    } else if (!msg.content.trim()) {
++      msg.content = ''
++      aiChatMessages.value = aiChatMessages.value.filter((m) => m.id !== msgId)
++      aiExtractError.value = e instanceof Error ? e.message : 'AI ??????????'
++    }
++  } finally {
++    aiChatLoading.value = false
++    aiChatThinking.value = false
++    aiChatAbortController = null
++    if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
++  }
++}
++
+ const { paperBlockRef, chapterTextareaRef } = useChapterHubDomRefs()
+ 
+ useChapterHubForeshadowDeepLink({
+@@ -433,21 +1871,52 @@ const {
+ /** 打开弹窗瞬间快照选区：失焦后 ctxMenuRange 会被清空，不能再依赖它点「确认」 */
+ const pendingForeshadowSelection = ref<{ start: number; end: number; text: string } | null>(null)
+ 
+-function snapshotForeshadowSelectionFromCtxMenu(): void {
++function snapshotSelectionFromCtxMenu(): { start: number; end: number; text: string } | null {
+   const r = ctxMenuRange.value
+   const ch = selectedChapter.value
+-  if (!r || !ch || r.end <= r.start) {
+-    pendingForeshadowSelection.value = null
+-    return
+-  }
++  if (!r || !ch || r.end <= r.start) return null
+   const content = ch.content ?? ''
+-  pendingForeshadowSelection.value = {
++  return {
+     start: r.start,
+     end: r.end,
+     text: content.slice(r.start, r.end),
+   }
+ }
+ 
++function excerptForAiQuote(text: string, limit = 220): string {
++  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim()
++  if (!normalized) return ''
++  if (normalized.length <= limit) return normalized
++  return `${normalized.slice(0, Math.max(0, limit - 1)).trim()}...`
++}
++
++function snapshotForeshadowSelectionFromCtxMenu(): void {
++  pendingForeshadowSelection.value = snapshotSelectionFromCtxMenu()
++}
++
++function clearAiSelectionQuote(): void {
++  aiSelectionQuote.value = ''
++}
++
++function syncAiSelectionQuoteFromTextarea(): void {
++  const ta = chapterTextareaRef.value
++  const chapter = selectedChapter.value
++  if (!ta || !chapter) {
++    aiSelectionQuote.value = ''
++    return
++  }
++  const start = ta.selectionStart ?? 0
++  const end = ta.selectionEnd ?? start
++  if (end <= start) {
++    aiSelectionQuote.value = ''
++    return
++  }
++  aiSelectionQuote.value = excerptForAiQuote((chapter.content ?? '').slice(start, end))
++  if (aiSelectionQuote.value && !focusMode.value) {
++    aiStudioOpen.value = true
++  }
++}
++
+ function openForeshadowPlantModal(): void {
+   editingForeshadowPlantId.value = ''
+   editingForeshadowFulfillmentId.value = ''
+@@ -637,7 +2106,242 @@ function replaceChapterRangeContent(chapterId: string, start: number, end: numbe
+   updateChapter({ id: chapterId, content: nextContent })
+   chapters.value = chapters.value.map((item) =>
+     item.id === chapterId ? { ...item, content: nextContent } : item,
++    )
++}
++
++function normalizeAiSuggestionUiState(raw: any) {
++  if (raw?.status !== 'applied' && raw?.status !== 'ignored' && raw?.status !== 'pending') return undefined
++  return {
++    status: raw.status,
++    action: raw?.action === 'create' || raw?.action === 'merge' || raw?.action === 'ignore' ? raw.action : null,
++    editorEntityType: raw?.editorEntityType === 'character' || raw?.editorEntityType === 'faction' || raw?.editorEntityType === 'item' ? raw.editorEntityType : null,
++    editorTargetId: String(raw?.editorTargetId ?? '').trim() || null,
++  }
++}
++
++function normalizeForeshadowResult(raw: any): NovelForeshadowAnalysisResult {
++  return {
++    newPlants: Array.isArray(raw?.newPlants)
++      ? raw.newPlants
++          .map((item: any) => ({
++            title: String(item?.title ?? '').trim(),
++            summary: String(item?.summary ?? '').trim(),
++            payoffHint: String(item?.payoffHint ?? '').trim(),
++            confidence: Number.isFinite(Number(item?.confidence)) ? Math.max(0, Math.min(1, Number(item.confidence))) : 0,
++            evidences: Array.isArray(item?.evidences) ? item.evidences : [],
++            warnings: Array.isArray(item?.warnings) ? item.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++            uiState: normalizeAiSuggestionUiState(item?.uiState),
++          }))
++          .filter((item: { title: string }) => item.title)
++      : [],
++    fulfillments: Array.isArray(raw?.fulfillments)
++      ? raw.fulfillments
++          .map((item: any) => ({
++            title: String(item?.title ?? '').trim(),
++            summary: String(item?.summary ?? '').trim(),
++            relatedPlantTitle: String(item?.relatedPlantTitle ?? '').trim(),
++            status: item?.status === 'implicit' ? 'implicit' : 'existing',
++            confidence: Number.isFinite(Number(item?.confidence)) ? Math.max(0, Math.min(1, Number(item.confidence))) : 0,
++            evidences: Array.isArray(item?.evidences) ? item.evidences : [],
++            warnings: Array.isArray(item?.warnings) ? item.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++          }))
++          .filter((item: { title: string }) => item.title)
++      : [],
++    danglingThreads: Array.isArray(raw?.danglingThreads)
++      ? raw.danglingThreads
++          .map((item: any) => ({
++            title: String(item?.title ?? '').trim(),
++            summary: String(item?.summary ?? '').trim(),
++            lastMentionChapterNo: Number.isFinite(Number(item?.lastMentionChapterNo)) ? Math.trunc(Number(item.lastMentionChapterNo)) : null,
++            suggestedPayoff: String(item?.suggestedPayoff ?? '').trim(),
++            confidence: Number.isFinite(Number(item?.confidence)) ? Math.max(0, Math.min(1, Number(item.confidence))) : 0,
++            evidences: Array.isArray(item?.evidences) ? item.evidences : [],
++            warnings: Array.isArray(item?.warnings) ? item.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++          }))
++          .filter((item: { title: string }) => item.title)
++      : [],
++    warnings: Array.isArray(raw?.warnings) ? raw.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++  }
++}
++
++function normalizeClassificationResult(raw: any): NovelChapterClassificationResult {
++  const tensionLevel = Number(raw?.tensionLevel)
++  return {
++    chapterType: String(raw?.chapterType ?? '').trim(),
++    pacing: String(raw?.pacing ?? '').trim(),
++    tensionLevel: Number.isFinite(tensionLevel) ? Math.max(1, Math.min(5, Math.trunc(tensionLevel))) : 0,
++    storyFunctions: Array.isArray(raw?.storyFunctions) ? raw.storyFunctions.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++    informationGain: Array.isArray(raw?.informationGain) ? raw.informationGain.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++    activeForeshadows: Array.isArray(raw?.activeForeshadows) ? raw.activeForeshadows.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++    tags: Array.isArray(raw?.tags) ? raw.tags.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++    mainConflict: String(raw?.mainConflict ?? '').trim(),
++    summary: String(raw?.summary ?? '').trim(),
++    rationale: String(raw?.rationale ?? '').trim(),
++    warnings: Array.isArray(raw?.warnings) ? raw.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++    uiState: normalizeAiSuggestionUiState(raw?.uiState),
++  }
++}
++
++function normalizeAiExtractState(raw: any) {
++  const normalized = {
++    hasRun: !!raw?.hasRun,
++    analysisKind: raw?.analysisKind === 'foreshadows' || raw?.analysisKind === 'classification' ? raw.analysisKind : 'entities',
++    lastMode: raw?.lastMode === 'recent' || raw?.lastMode === 'all' ? raw.lastMode : raw?.lastMode === 'current' ? 'current' : null,
++    chapterId: String(raw?.chapterId ?? ''),
++    result: {
++      characters: Array.isArray(raw?.result?.characters) ? raw.result.characters : [],
++      factions: Array.isArray(raw?.result?.factions) ? raw.result.factions : [],
++      items: Array.isArray(raw?.result?.items) ? raw.result.items : [],
++      memberships: Array.isArray(raw?.result?.memberships) ? raw.result.memberships : [],
++      relations: Array.isArray(raw?.result?.relations) ? raw.result.relations : [],
++      warnings: Array.isArray(raw?.result?.warnings) ? raw.result.warnings.map((item: unknown) => String(item ?? '').trim()).filter(Boolean) : [],
++    } as NovelEntityExtractResult,
++    appliedActions: Array.isArray(raw?.appliedActions)
++      ? raw.appliedActions
++          .map((item: any) => ({
++            id: String(item?.id ?? '').trim(),
++            text: String(item?.text ?? '').trim(),
++            tone: item?.tone === 'ignored' ? 'ignored' : 'applied',
++          }))
++          .filter((item: { id: string; text: string; tone: 'applied' | 'ignored' }) => item.id && item.text)
++      : [],
++    foreshadowResult: normalizeForeshadowResult(raw?.foreshadowResult),
++    classificationResult: normalizeClassificationResult(raw?.classificationResult),
++    runs: Array.isArray(raw?.runs)
++      ? raw.runs
++          .map((item: any) => ({
++            id: String(item?.id ?? '').trim(),
++            createdAt: String(item?.createdAt ?? '').trim() || new Date().toISOString(),
++            kind: item?.kind === 'foreshadows' || item?.kind === 'classification' ? item.kind : 'entities',
++            mode: item?.mode === 'recent' || item?.mode === 'all' ? item.mode : item?.mode === 'current' ? 'current' : null,
++            chapterId: String(item?.chapterId ?? '').trim(),
++            result: {
++              characters: Array.isArray(item?.result?.characters) ? item.result.characters : [],
++              factions: Array.isArray(item?.result?.factions) ? item.result.factions : [],
++              items: Array.isArray(item?.result?.items) ? item.result.items : [],
++              memberships: Array.isArray(item?.result?.memberships) ? item.result.memberships : [],
++              relations: Array.isArray(item?.result?.relations) ? item.result.relations : [],
++              warnings: Array.isArray(item?.result?.warnings) ? item.result.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [],
++            } as NovelEntityExtractResult,
++            entityResult: {
++              characters: Array.isArray(item?.entityResult?.characters)
++                ? item.entityResult.characters
++                : Array.isArray(item?.result?.characters)
++                  ? item.result.characters
++                  : [],
++              factions: Array.isArray(item?.entityResult?.factions)
++                ? item.entityResult.factions
++                : Array.isArray(item?.result?.factions)
++                  ? item.result.factions
++                  : [],
++              items: Array.isArray(item?.entityResult?.items)
++                ? item.entityResult.items
++                : Array.isArray(item?.result?.items)
++                  ? item.result.items
++                  : [],
++              memberships: Array.isArray(item?.entityResult?.memberships)
++                ? item.entityResult.memberships
++                : Array.isArray(item?.result?.memberships)
++                  ? item.result.memberships
++                  : [],
++              relations: Array.isArray(item?.entityResult?.relations)
++                ? item.entityResult.relations
++                : Array.isArray(item?.result?.relations)
++                  ? item.result.relations
++                  : [],
++              warnings: Array.isArray(item?.entityResult?.warnings)
++                ? item.entityResult.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean)
++                : Array.isArray(item?.result?.warnings)
++                  ? item.result.warnings.map((value: unknown) => String(value ?? '').trim()).filter(Boolean)
++                  : [],
++            } as NovelEntityExtractResult,
++            foreshadowResult: normalizeForeshadowResult(item?.foreshadowResult),
++            classificationResult: normalizeClassificationResult(item?.classificationResult),
++            appliedActions: Array.isArray(item?.appliedActions)
++              ? item.appliedActions
++                  .map((entry: any) => ({
++                    id: String(entry?.id ?? '').trim(),
++                    text: String(entry?.text ?? '').trim(),
++                    tone: entry?.tone === 'ignored' ? 'ignored' : 'applied',
++                  }))
++                  .filter((entry: { id: string; text: string; tone: 'applied' | 'ignored' }) => entry.id && entry.text)
++              : [],
++          }))
++          .filter((item: AiExtractRun) => item.id)
++      : [],
++    pendingAppliedDetail: String(raw?.pendingAppliedDetail ?? ''),
++    error: String(raw?.error ?? ''),
++  }
++  if (normalized.runs.length === 0 && normalized.hasRun) {
++    normalized.runs = [
++      {
++        id: `extract-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
++        createdAt: new Date().toISOString(),
++        kind: normalized.analysisKind,
++        mode: normalized.lastMode,
++        chapterId: normalized.chapterId,
++        result: normalized.result,
++        entityResult: normalized.result,
++        foreshadowResult: normalized.foreshadowResult,
++        classificationResult: normalized.classificationResult,
++        appliedActions: normalized.appliedActions,
++      },
++    ]
++  }
++  return normalized
++}
++
++function currentAiExtractState() {
++  return {
++    hasRun: aiExtractHasRun.value,
++    analysisKind: aiAnalysisKind.value,
++    lastMode: aiExtractLastMode.value,
++    chapterId: selectedChapterId.value,
++    result: aiExtractResult.value,
++    foreshadowResult: aiForeshadowResult.value,
++    classificationResult: aiClassificationResult.value,
++    appliedActions: aiAppliedActions.value,
++    runs: aiExtractRuns.value,
++    pendingAppliedDetail: aiPendingAppliedDetail.value,
++    error: aiExtractError.value,
++  }
++}
++
++function restoreAiExtractStateFromSession(session: AiDeskChatSession | null | undefined): void {
++  const state = session?.extractState
++  if (!state) {
++    resetAiExtractState()
++    return
++  }
++  if (state.chapterId && state.chapterId !== selectedChapterId.value) {
++    resetAiExtractState()
++    return
++  }
++  aiExtractHasRun.value = state.hasRun
++  aiAnalysisKind.value = state.analysisKind ?? 'entities'
++  aiExtractLastMode.value = state.lastMode
++  aiExtractResult.value = state.result
++  aiForeshadowResult.value = state.foreshadowResult ?? emptyAiForeshadowResult()
++  aiClassificationResult.value = state.classificationResult ?? emptyAiClassificationResult()
++  aiAppliedActions.value = state.appliedActions
++  aiExtractRuns.value = state.runs ?? []
++  aiPendingAppliedDetail.value = state.pendingAppliedDetail
++  aiExtractError.value = state.error
++}
++
++function persistActiveAiSessionState(): void {
++  const id = novelId.value
++  const activeId = activeAiChatSessionId.value
++  if (!id || !activeId) return
++  aiChatSessions.value = aiChatSessions.value.map((session) =>
++    session.id === activeId
++      ? {
++          ...session,
++          extractState: currentAiExtractState(),
++        }
++      : session,
+   )
++  persistAiChatSessions(id, aiChatSessions.value)
+ }
+ 
+ const {
+@@ -865,11 +2569,11 @@ const {
+   entityPreviewLines,
+   shouldShowEntityOverlay,
+   onChapterTextareaKeydown,
+-  onChapterTextareaKeyup,
++  onChapterTextareaKeyup: handleChapterTextareaKeyup,
+   onChapterTextareaFocus,
+-  onChapterTextareaBlur,
+-  onChapterTextareaMouseup,
+-  onChapterTextareaSelect,
++  onChapterTextareaBlur: handleChapterTextareaBlur,
++  onChapterTextareaMouseup: handleChapterTextareaMouseup,
++  onChapterTextareaSelect: handleChapterTextareaSelect,
+ } = useChapterHubTextareaEditor({
+   selectedChapterId,
+   selectedChapter,
+@@ -895,6 +2599,65 @@ const {
+   onEntityNameLeave,
+ })
+ 
++function onChapterTextareaKeyup(event: KeyboardEvent): void {
++  handleChapterTextareaKeyup(event)
++  window.setTimeout(syncAiSelectionQuoteFromTextarea, 0)
++}
++
++function onChapterTextareaMouseup(event: MouseEvent): void {
++  handleChapterTextareaMouseup(event)
++  window.setTimeout(syncAiSelectionQuoteFromTextarea, 0)
++}
++
++function onChapterTextareaSelect(): void {
++  handleChapterTextareaSelect()
++  window.setTimeout(syncAiSelectionQuoteFromTextarea, 0)
++}
++
++function onChapterTextareaBlur(): void {
++  syncAiSelectionQuoteFromTextarea()
++  handleChapterTextareaBlur()
++}
++
++watch(selectedChapterId, () => {
++  clearAiSelectionQuote()
++  const activeSession = aiChatSessions.value.find((session) => session.id === activeAiChatSessionId.value)
++  restoreAiExtractStateFromSession(activeSession)
++})
++
++watch(aiStudioOpen, (open) => {
++  persistAiStudioOpen(open)
++})
++
++watch(
++  novelId,
++  (id) => {
++    const sessions = id ? loadAiChatSessions(id) : [createAiChatSession()]
++    aiChatSessions.value = sessions
++    const savedState = id ? loadAiDeskState(id) : null
++    const activeId = savedState?.activeSessionId && sessions.some((session) => session.id === savedState.activeSessionId)
++      ? savedState.activeSessionId
++      : sessions[0]?.id ?? ''
++    openAiChatSessionIds.value = normalizeOpenAiChatSessionIds(savedState?.openSessionIds ?? sessions.slice(0, 4).map((session) => session.id), sessions, activeId)
++    activeAiChatSessionId.value = activeId
++    const activeSession = sessions.find((session) => session.id === activeId) ?? sessions[0]
++    aiChatMessages.value = activeSession?.messages.slice(-200) ?? []
++    conversationHistory.value = activeSession?.history.slice(-60) ?? []
++    clearAiSelectionQuote()
++    restoreAiExtractStateFromSession(activeSession)
++  },
++  { immediate: true },
++)
++
++onMounted(() => {
++  if (typeof window === 'undefined') return
++  window.addEventListener('pointermove', onWindowPointerMoveForAiStudioResize)
++  window.addEventListener('pointerup', onWindowPointerUp)
++  window.addEventListener('pointercancel', onWindowPointerCancel)
++  window.addEventListener('resize', onWindowResize)
++  window.addEventListener('novel-writing:set-ai-open', onAiStudioOpenRequest as EventListener)
++})
++
+ /** 伏笔弹窗打开/关闭时：清选区浮层（菜单、联想、实体/伏笔提示），折叠选区避免关窗后仍冒出小窗 */
+ watch(foreshadowModalOpen, () => {
+   resetNameSuggest()
+@@ -922,5 +2685,12 @@ onUnmounted(() => {
+     window.clearTimeout(chapterHubSaveToastTimer)
+     chapterHubSaveToastTimer = null
+   }
++  if (typeof window !== 'undefined') {
++    window.removeEventListener('pointermove', onWindowPointerMoveForAiStudioResize)
++    window.removeEventListener('pointerup', onWindowPointerUp)
++    window.removeEventListener('pointercancel', onWindowPointerCancel)
++    window.removeEventListener('resize', onWindowResize)
++    window.removeEventListener('novel-writing:set-ai-open', onAiStudioOpenRequest as EventListener)
++  }
+ })
+ </script>
+warning: in the working copy of 'frontend/src/App.vue', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/styles.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/views/chapter-hub/NovelChapterHubView.vue', LF will be replaced by CRLF the next time Git touches it

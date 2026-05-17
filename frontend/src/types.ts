@@ -353,3 +353,195 @@ export type NewTimelineEventInput = {
   chapterNo?: number | null
   outlineItemId?: string | null
 }
+
+export type AiAnalysisKind = 'entities' | 'foreshadows' | 'classification'
+export type AiExtractMode = 'current' | 'recent' | 'all'
+export type AiChatRole = 'user' | 'assistant'
+
+export type AiDeskChatMessage = {
+  id: string
+  role: AiChatRole
+  content: string
+  mode: AiExtractMode
+  createdAt: string
+}
+
+export type AiToolDefinition = {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, any>
+  }
+}
+
+export type AiToolCall = {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
+export type AiMessage = {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | null
+  tool_calls?: AiToolCall[]
+  tool_call_id?: string
+  name?: string
+  reasoning_content?: string
+}
+
+export type AiToolResult = {
+  success: boolean
+  message: string
+  data?: Record<string, any>
+}
+
+export type EntityMatchType = 'new' | 'update' | 'possible_duplicate' | 'conflict'
+
+export type EntityEvidence = {
+  chapterId: string
+  chapterNo?: number | null
+  quote: string
+}
+
+export type EntityMatch = {
+  type: EntityMatchType
+  targetId?: string | null
+  targetName?: string | null
+}
+
+export type AiSuggestionUiState = {
+  status: 'pending' | 'applied' | 'ignored'
+  action?: 'create' | 'merge' | 'ignore' | null
+  editorEntityType?: 'character' | 'faction' | 'item' | null
+  editorTargetId?: string | null
+}
+
+export type ExtractedCharacter = {
+  name: string
+  aliases: string[]
+  gender: string
+  age: string
+  goal: string
+  secret: string
+  notes: string
+  attributes: CharacterAttribute[]
+  firstAppearanceChapterNo?: number | null
+  confidence: number
+  match: EntityMatch
+  evidences: EntityEvidence[]
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}
+
+export type ExtractedFaction = {
+  name: string
+  leader: string
+  notes: string
+  confidence: number
+  match: EntityMatch
+  evidences: EntityEvidence[]
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}
+
+export type ExtractedItem = {
+  name: string
+  summary: string
+  ownerType?: string | null
+  ownerId?: string | null
+  ownerName: string
+  firstAppearanceChapterNo?: number | null
+  confidence: number
+  match: EntityMatch
+  evidences: EntityEvidence[]
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}
+
+export type ExtractedMembership = {
+  characterName: string
+  factionName: string
+  description: string
+  confidence: number
+  match: EntityMatch
+  evidences: EntityEvidence[]
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}
+
+export type ExtractedRelation = {
+  fromCharacterName: string
+  toCharacterName: string
+  relationType: string
+  note: string
+  confidence: number
+  match: EntityMatch
+  evidences: EntityEvidence[]
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}
+
+export type NovelEntityExtractResult = {
+  characters: ExtractedCharacter[]
+  factions: ExtractedFaction[]
+  items: ExtractedItem[]
+  memberships: ExtractedMembership[]
+  relations: ExtractedRelation[]
+  warnings: string[]
+}
+
+export type ForeshadowCandidate = {
+  title: string
+  summary: string
+  payoffHint: string
+  confidence: number
+  evidences: EntityEvidence[]
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}
+
+export type ForeshadowFulfillmentFinding = {
+  title: string
+  summary: string
+  relatedPlantTitle: string
+  status: 'existing' | 'implicit'
+  confidence: number
+  evidences: EntityEvidence[]
+  warnings: string[]
+}
+
+export type ForeshadowDanglingFinding = {
+  title: string
+  summary: string
+  lastMentionChapterNo?: number | null
+  suggestedPayoff: string
+  confidence: number
+  evidences: EntityEvidence[]
+  warnings: string[]
+}
+
+export type NovelForeshadowAnalysisResult = {
+  newPlants: ForeshadowCandidate[]
+  fulfillments: ForeshadowFulfillmentFinding[]
+  danglingThreads: ForeshadowDanglingFinding[]
+  warnings: string[]
+}
+
+export type NovelChapterClassificationResult = {
+  chapterType: string
+  pacing: string
+  tensionLevel: number
+  storyFunctions: string[]
+  informationGain: string[]
+  activeForeshadows: string[]
+  tags: string[]
+  mainConflict: string
+  summary: string
+  rationale: string
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}

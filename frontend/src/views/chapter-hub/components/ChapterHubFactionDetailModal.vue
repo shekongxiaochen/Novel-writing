@@ -153,9 +153,7 @@
                 <section class="chapter-hub__faction-panel">
                   <div class="chapter-hub__faction-panel-head">
                     <h3 class="chapter-hub__faction-panel-title">绑定物品</h3>
-                    <p class="chapter-hub__faction-panel-hint">
-                      点击物品切换绑定状态；选择已被占用的物品会在保存后转移持有者
-                    </p>
+                    <p class="chapter-hub__faction-panel-hint">点击物品切换绑定状态</p>
                   </div>
                   <div class="chapter-hub__faction-panel-inner">
                     <p v-if="items.length === 0" class="chapter-hub__faction-empty">
@@ -174,7 +172,7 @@
                         @click="toggleItem(item.id)"
                       >
                         <span class="category-bind-chip__state">{{ item.bound ? '已绑定' : '未绑定' }}</span>
-                        {{ item.name }} · {{ item.transferHint }}
+                        {{ item.name }}
                       </small>
                     </div>
                     <p v-if="items.length > 0 && itemPickerRows.length === 0" class="chapter-hub__faction-empty">
@@ -284,23 +282,6 @@ function itemName(itemId: string): string {
   return props.items.find((item) => item.id === itemId)?.name ?? itemId
 }
 
-function itemOwnerLabel(item: Item): string {
-  if (item.ownerType === 'character' && item.ownerId) return `角色：${characterName(item.ownerId)}`
-  if (item.ownerType === 'faction' && item.ownerId) {
-    const name = getFactionsByNovelId(props.novelId).find((f) => f.id === item.ownerId)?.name
-    return name ? `势力：${name}` : '未知势力'
-  }
-  return '未绑定'
-}
-
-function itemTransferHint(item: Item): string {
-  const f = props.faction
-  if (!f) return ''
-  if (!item.ownerType || !item.ownerId) return '保存后绑定到当前势力'
-  if (item.ownerType === 'faction' && item.ownerId === f.id) return '当前势力已绑定'
-  return `保存后将转移自：${itemOwnerLabel(item)}`
-}
-
 const pinyinCollator = new Intl.Collator('zh-Hans-u-co-pinyin', { sensitivity: 'base', numeric: true })
 const sortByPinyin = (list: Character[]) => [...list].sort((a, b) => pinyinCollator.compare(a.name ?? '', b.name ?? ''))
 
@@ -346,7 +327,6 @@ const itemPickerRows = computed(() => {
     .map((item) => ({
       ...item,
       bound: itemIds.value.includes(item.id),
-      transferHint: itemTransferHint(item),
     }))
   return rows.sort((a, b) => {
     const groupA = a.bound ? 0 : !a.ownerType ? 1 : 2
