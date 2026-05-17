@@ -536,6 +536,7 @@ const SIDEBAR_COLLAPSED_KEY = 'novel-writing.sidebar-collapsed'
 const OPEN_CHAPTERS_KEY_PREFIX = 'novel-writing.open-chapters.'
 const AI_STUDIO_OPEN_STORAGE_KEY = 'novel-writing.ai-studio-open'
 const AI_STUDIO_WIDTH_STORAGE_KEY = 'novel-writing.ai-studio-width'
+const SUMMARY_STUDIO_WIDTH_KEY = 'novel-writing.summary-studio-width'
 const SIDEBAR_MIN = 248
 const SIDEBAR_MAX = 520
 const AI_STUDIO_WIDTH_MIN = 360
@@ -544,6 +545,7 @@ const poemIndex = ref(0)
 let poemRotateTimer: number | null = null
 const aiStudioShellOpen = ref(readInitialAiStudioShellOpen())
 const aiStudioShellWidth = ref(readInitialAiStudioShellWidth())
+const summaryStudioWidth = ref(readInitialSummaryStudioWidth())
 let summaryStudioResizeCleanup: (() => void) | null = null
 
 function readInitialAiStudioShellOpen(): boolean {
@@ -572,6 +574,23 @@ function readInitialAiStudioShellWidth(): number {
   return clampAiStudioShellWidth(Math.round(window.innerWidth * 0.28))
 }
 
+function clampSummaryStudioWidth(raw: number): number {
+  if (typeof window === 'undefined') return Math.max(AI_STUDIO_WIDTH_MIN, raw)
+  const max = Math.min(AI_STUDIO_WIDTH_MAX, Math.max(AI_STUDIO_WIDTH_MIN + 40, Math.floor(window.innerWidth * 0.56)))
+  return Math.min(max, Math.max(AI_STUDIO_WIDTH_MIN, raw))
+}
+
+function readInitialSummaryStudioWidth(): number {
+  if (typeof window === 'undefined') return 420
+  try {
+    const raw = Number(localStorage.getItem(SUMMARY_STUDIO_WIDTH_KEY) ?? '')
+    if (Number.isFinite(raw)) return clampSummaryStudioWidth(raw)
+  } catch {
+    /* ignore */
+  }
+  return clampSummaryStudioWidth(Math.round(window.innerWidth * 0.28))
+}
+
 function syncAiStudioShellWidth(next: number): void {
   aiStudioShellWidth.value = clampAiStudioShellWidth(next)
 }
@@ -580,6 +599,19 @@ function persistAiStudioShellWidth(): void {
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(AI_STUDIO_WIDTH_STORAGE_KEY, String(Math.round(aiStudioShellWidth.value)))
+  } catch {
+    /* ignore */
+  }
+}
+
+function syncSummaryStudioWidth(next: number): void {
+  summaryStudioWidth.value = clampSummaryStudioWidth(next)
+}
+
+function persistSummaryStudioWidth(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(SUMMARY_STUDIO_WIDTH_KEY, String(Math.round(summaryStudioWidth.value)))
   } catch {
     /* ignore */
   }
@@ -612,12 +644,12 @@ function toggleHeaderAiStudio(): void {
 function startResizeSummaryStudio(event: PointerEvent): void {
   if (typeof window === 'undefined') return
   const startX = event.clientX
-  const startWidth = aiStudioShellWidth.value
+  const startWidth = summaryStudioWidth.value
   document.body.style.userSelect = 'none'
+  document.body.classList.add('is-resizing-summary-studio')
 
   const onMove = (ev: PointerEvent) => {
-    syncAiStudioShellWidth(startWidth - (ev.clientX - startX))
-    dispatchAiStudioShellWidth()
+    syncSummaryStudioWidth(startWidth - (ev.clientX - startX))
   }
 
   const finish = () => {
@@ -625,8 +657,9 @@ function startResizeSummaryStudio(event: PointerEvent): void {
     window.removeEventListener('pointerup', finish)
     window.removeEventListener('pointercancel', finish)
     document.body.style.userSelect = ''
+    document.body.classList.remove('is-resizing-summary-studio')
     summaryStudioResizeCleanup = null
-    persistAiStudioShellWidth()
+    persistSummaryStudioWidth()
   }
 
   summaryStudioResizeCleanup?.()
@@ -639,13 +672,13 @@ function startResizeSummaryStudio(event: PointerEvent): void {
 
 function resetSummaryStudioWidth(): void {
   if (typeof window === 'undefined') return
-  syncAiStudioShellWidth(Math.round(window.innerWidth * 0.28))
-  dispatchAiStudioShellWidth()
-  persistAiStudioShellWidth()
+  syncSummaryStudioWidth(Math.round(window.innerWidth * 0.28))
+  persistSummaryStudioWidth()
 }
 
 function onWindowResizeForSummaryStudio(): void {
   syncAiStudioShellWidth(aiStudioShellWidth.value)
+  syncSummaryStudioWidth(summaryStudioWidth.value)
   dispatchAiStudioShellWidth()
 }
 
@@ -695,10 +728,12 @@ const isNovelContext = computed(() => route.name === 'novel-workspace' || route.
 const novelShellStyle = computed(() => ({
   '--novel-sidebar-width': `${sidebarWidth.value}px`,
   '--chapter-shell-ai-width': `${Math.round(aiStudioShellWidth.value)}px`,
-  '--chapter-shell-summary-width': `${Math.round(aiStudioShellWidth.value)}px`,
+  '--chapter-shell-summary-width': `${Math.round(summaryStudioWidth.value)}px`,
+  '--chapter-shell-panel-width':
+    rightPanelActive.value === 'summary' ? `${Math.round(summaryStudioWidth.value)}px` : `${Math.round(aiStudioShellWidth.value)}px`,
   '--chapter-shell-summary-column':
     route.name === 'novel-chapter-writing' && rightPanelOpen.value && rightPanelActive.value === 'summary'
-      ? `${Math.round(aiStudioShellWidth.value)}px`
+      ? `${Math.round(summaryStudioWidth.value)}px`
       : '0px',
   '--chapter-shell-ai-gap': '0px',
 }))
@@ -735,8 +770,29 @@ function goWorkspaceTab(tab: WorkspaceTabKey): void {
   void router.push({ path: `/novels/${currentNovelId.value}`, query: { ...route.query, tab } })
 }
 
+function resolveWritingReturnChapterId(): string {
+  const validIds = new Set(chapterList.value.map((c) => c.id))
+  const queryChapterId = String(route.query.chapterId ?? '').trim()
+  if (queryChapterId && validIds.has(queryChapterId)) return queryChapterId
+
+  const lastOpenedChapterId = [...openChapterIds.value].reverse().find((id) => validIds.has(id))
+  if (lastOpenedChapterId) return lastOpenedChapterId
+
+  return ''
+}
+
 function goWriting(): void {
   if (!currentNovelId.value) return
+  const returnChapterId = resolveWritingReturnChapterId()
+  if (returnChapterId) {
+    ensureChapterOpened(returnChapterId)
+    void router.push({
+      path: `/novels/${currentNovelId.value}/chapter-writing`,
+      query: { ...route.query, chapterId: returnChapterId },
+    })
+    return
+  }
+
   const hasContent = (v: string | null | undefined) => (v ?? '').trim().length > 0
   const contentChapters = chapterList.value.filter((c) => hasContent((c as { content?: string }).content))
   const targetId =
@@ -764,7 +820,7 @@ function scrollChapterNavToActive(chapterId: string): void {
   const el = document.getElementById(`cursor-shell-chapter-nav-${chapterId}`)
   if (!el) return
   try {
-    el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   } catch {
     el.scrollIntoView()
   }
@@ -1547,12 +1603,14 @@ onUnmounted(() => window.removeEventListener('keydown', onEscapeCloseChapterModa
 onUnmounted(() => window.removeEventListener('resize', onWindowResizeForSummaryStudio))
 onUnmounted(() => {
   summaryStudioResizeCleanup?.()
+  document.body.classList.remove('is-resizing-summary-studio')
+  document.body.style.userSelect = ''
   if (poemRotateTimer != null) window.clearInterval(poemRotateTimer)
   poemRotateTimer = null
   if (chapterSummarySaveToastTimer != null) window.clearTimeout(chapterSummarySaveToastTimer)
   chapterSummarySaveToastTimer = null
 })
-watch(() => route.fullPath, reloadNovelContext, { immediate: true })
+watch(currentNovelId, reloadNovelContext, { immediate: true })
 
 function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return
@@ -1588,6 +1646,7 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
 }
 
 .cursor-shell__summary-studio {
+  position: relative;
   grid-column: 4;
   grid-row: 2;
   align-self: stretch;
@@ -1652,6 +1711,11 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   opacity: 1;
 }
 
+body.is-resizing-summary-studio .cursor-shell__summary-studio-resizer::before {
+  background: color-mix(in srgb, var(--color-primary) 38%, var(--color-border-strong));
+  opacity: 1;
+}
+
 .cursor-shell__summary-studio-surface {
   display: flex;
   flex-direction: column;
@@ -1666,6 +1730,15 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
   padding: 8px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 36%, transparent);
   background: color-mix(in srgb, var(--color-surface) 99%, #fff 1%);
+}
+
+.cursor-shell__right-panel-close {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .cursor-shell__summary-studio-body {
@@ -1705,7 +1778,7 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
 }
 
 .cursor-shell__right-panel {
-  width: min(var(--chapter-shell-ai-width, 420px), calc(100vw - 24px));
+  width: min(var(--chapter-shell-panel-width, 420px), calc(100vw - 24px));
   height: 100dvh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
