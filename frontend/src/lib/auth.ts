@@ -169,4 +169,3 @@ export async function login(input: { identifier: string; password: string }): Pr
   writeSession(session)
   return session
 }
-

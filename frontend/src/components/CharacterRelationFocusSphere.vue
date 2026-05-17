@@ -147,8 +147,8 @@ function makeTextSprite(text: string, opts?: { fontSize?: number }) {
   ctx.textBaseline = 'middle'
 
   const theme = document.documentElement.getAttribute('data-theme') || 'light'
-  const isDark = theme === 'dark'
-  const isBlueprint = theme === 'blueprint'
+  const isDark = theme === 'dark' || theme === 'codex'
+  const isBlueprint = theme === 'codex'
 
   const padX = 18
   const padY = 10
@@ -222,26 +222,28 @@ function build() {
   if (!focusChar) return
 
   const theme = document.documentElement.getAttribute('data-theme') || 'light'
-  const isDark = theme === 'dark' || theme === 'blueprint'
+  const isDark = theme === 'dark' || theme === 'codex'
 
   const palettes: Record<string, number[]> = {
     mint: [0x00a884, 0xf0b85a, 0x2dd4bf, 0x6ee7b7, 0x0f766e, 0xf59e0b, 0x14b8a6, 0x84cc16],
-    blueprint: [0x38bdf8, 0x818cf8, 0x60a5fa, 0xa5b4fc, 0x22d3ee, 0xfbbf24, 0x7dd3fc, 0x4f46e5],
+    codex: [0x58a6ff, 0x7ee787, 0x79c0ff, 0xa5d6ff, 0x1f6feb, 0x238636, 0x8b949e, 0x2f81f7],
     dark: [0x75665b, 0x74846f, 0x9a7957, 0x8a7260, 0x63756a, 0xb08c61, 0x8f8274, 0xa49787],
     light: [0x2563eb, 0x0f766e, 0x7c3aed, 0xc2410c, 0x0284c7, 0x16a34a, 0x9333ea, 0xd97706],
   }
   const palette = palettes[theme] ?? palettes.light
 
+  const visibleCharIds = new Set(props.characters.map((c) => c.id))
+
   const otherIds: string[] = []
   const otherSet = new Set<string>()
 
   for (const r of props.relations) {
-    if (r.fromCharacterId === focusId && r.toCharacterId) {
+    if (r.fromCharacterId === focusId && r.toCharacterId && visibleCharIds.has(r.toCharacterId)) {
       if (!otherSet.has(r.toCharacterId)) {
         otherSet.add(r.toCharacterId)
         otherIds.push(r.toCharacterId)
       }
-    } else if (r.toCharacterId === focusId && r.fromCharacterId) {
+    } else if (r.toCharacterId === focusId && r.fromCharacterId && visibleCharIds.has(r.fromCharacterId)) {
       if (!otherSet.has(r.fromCharacterId)) {
         otherSet.add(r.fromCharacterId)
         otherIds.push(r.fromCharacterId)
@@ -392,9 +394,9 @@ function build() {
   }
 
   for (const r of props.relations) {
-    if (r.fromCharacterId === focusId) {
+    if (r.fromCharacterId === focusId && visibleCharIds.has(r.toCharacterId)) {
       drawDirectedRelation(focusId, r.toCharacterId)
-    } else if (r.toCharacterId === focusId) {
+    } else if (r.toCharacterId === focusId && visibleCharIds.has(r.fromCharacterId)) {
       drawDirectedRelation(r.fromCharacterId, focusId)
     }
   }
@@ -567,15 +569,7 @@ onBeforeUnmount(() => {
     linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 98%, transparent), color-mix(in srgb, var(--color-surface-muted) 82%, transparent));
 }
 
-[data-theme='blueprint'] .focus-sphere-wrap {
-  background:
-    radial-gradient(ellipse at 28% 18%, rgba(56, 189, 248, 0.16) 0%, rgba(56, 189, 248, 0.06) 36%, rgba(255, 255, 255, 0) 68%),
-    radial-gradient(ellipse at 78% 84%, rgba(129, 140, 248, 0.12) 0%, rgba(129, 140, 248, 0.04) 34%, rgba(255, 255, 255, 0) 70%),
-    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 96%, #020617 4%), color-mix(in srgb, var(--color-surface-muted) 82%, #020617 18%));
-  border-color: rgba(125, 211, 252, 0.2);
-}
-
-:root:not([data-theme='dark']):not([data-theme='blueprint']) .focus-sphere-wrap {
+:root:not([data-theme='dark']):not([data-theme='codex']) .focus-sphere-wrap {
   background:
     radial-gradient(ellipse at 28% 18%, rgba(47, 111, 237, 0.08) 0%, rgba(47, 111, 237, 0.03) 36%, rgba(255, 255, 255, 0) 68%),
     radial-gradient(ellipse at 78% 84%, rgba(15, 159, 203, 0.07) 0%, rgba(15, 159, 203, 0.02) 34%, rgba(255, 255, 255, 0) 70%),

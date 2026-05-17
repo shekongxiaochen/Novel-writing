@@ -45,6 +45,20 @@ const CATEGORIES_KEY = 'novel-writing.categories'
 const TIMELINE_KEY = 'novel-writing.timeline-events'
 const FORESHADOWS_KEY = 'novel-writing.foreshadows'
 
+export type WorkspaceSnapshotPayload = {
+  chapters?: Chapter[]
+  outline?: OutlineItem[]
+  outlineStorylines?: OutlineStoryline[]
+  characters?: Character[]
+  characterRelations?: CharacterRelation[]
+  factions?: Faction[]
+  items?: Item[]
+  characterFactionMemberships?: CharacterFactionMembership[]
+  categories?: Category[]
+  timelineEvents?: TimelineEvent[]
+  foreshadows?: ForeshadowPlant[]
+}
+
 function nowIso(): string {
   return new Date().toISOString()
 }
@@ -56,6 +70,27 @@ function uid(): string {
 function emitStorageChange(): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new Event('novel-writing:changed'))
+}
+
+function readArrayFromStorage<T>(key: string): T[] {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? (parsed as T[]) : []
+  } catch {
+    return []
+  }
+}
+
+function writeArrayToStorage<T>(key: string, items: T[]): void {
+  localStorage.setItem(key, JSON.stringify(items))
+}
+
+function replaceNovelScopedRows<T extends { novelId: string }>(key: string, novelId: string, rows: T[]): void {
+  const current = readArrayFromStorage<T>(key)
+  const next = current.filter((row) => String(row.novelId ?? '') !== novelId).concat(rows)
+  writeArrayToStorage(key, next)
 }
 
 function normalizeIdList(ids?: unknown): string[] {
@@ -100,6 +135,7 @@ function getAllCategories(): Category[] {
 
 function saveAllCategories(items: Category[]): void {
   localStorage.setItem(CATEGORIES_KEY, JSON.stringify(items))
+  emitStorageChange()
 }
 
 export function getCategoriesByNovelId(novelId: string): Category[] {
@@ -145,6 +181,48 @@ export function updateCategory(partial: Pick<Category, 'id'> & Partial<Pick<Cate
   return updated
 }
 
+export function deleteCategory(categoryId: string): boolean {
+  const id = String(categoryId ?? '').trim()
+  if (!id) return false
+
+  const allCategories = getAllCategories()
+  const nextCategories = allCategories.filter((c) => c.id !== id)
+  if (nextCategories.length === allCategories.length) return false
+  saveAllCategories(nextCategories)
+
+  const allCharacters = getAllCharacters()
+  let characterChanged = false
+  const nextCharacters = allCharacters.map((character) => {
+    const nextCategoryIds = normalizeCategoryIds(character.categoryIds).filter((categoryItemId) => categoryItemId !== id)
+    const prevCategoryIds = normalizeCategoryIds(character.categoryIds)
+    if (nextCategoryIds.length === prevCategoryIds.length) return character
+    characterChanged = true
+    return {
+      ...character,
+      categoryIds: nextCategoryIds,
+      updatedAt: nowIso(),
+    }
+  })
+  if (characterChanged) saveAllCharacters(nextCharacters)
+
+  const allFactions = getAllFactions()
+  let factionChanged = false
+  const nextFactions = allFactions.map((faction) => {
+    const nextCategoryIds = normalizeCategoryIds(faction.categoryIds).filter((categoryItemId) => categoryItemId !== id)
+    const prevCategoryIds = normalizeCategoryIds(faction.categoryIds)
+    if (nextCategoryIds.length === prevCategoryIds.length) return faction
+    factionChanged = true
+    return {
+      ...faction,
+      categoryIds: nextCategoryIds,
+      updatedAt: nowIso(),
+    }
+  })
+  if (factionChanged) saveAllFactions(nextFactions)
+
+  return true
+}
+
 export function getNovels(): Novel[] {
   const raw = localStorage.getItem(NOVELS_KEY)
   if (!raw) return []
@@ -179,6 +257,61 @@ export function createNovel(input: NewNovelInput): Novel {
   novels.unshift(novel)
   localStorage.setItem(NOVELS_KEY, JSON.stringify(novels))
   return novel
+}
+
+export function upsertNovelRecord(novel: Novel): Novel {
+  const all = getNovels()
+  const idx = all.findIndex((item) => item.id === novel.id)
+  if (idx >= 0) all[idx] = novel
+  else all.unshift(novel)
+  localStorage.setItem(NOVELS_KEY, JSON.stringify(all))
+  emitStorageChange()
+  return novel
+}
+
+export function hydrateNovelWorkspaceFromPayload(novelId: string, payload: WorkspaceSnapshotPayload): void {
+  const id = String(novelId ?? '').trim()
+  if (!id) return
+  replaceNovelScopedRows(CHAPTERS_KEY, id, Array.isArray(payload.chapters) ? payload.chapters : [])
+  replaceNovelScopedRows(OUTLINE_KEY, id, Array.isArray(payload.outline) ? payload.outline : [])
+  replaceNovelScopedRows(
+    OUTLINE_STORYLINES_KEY,
+    id,
+    Array.isArray(payload.outlineStorylines) ? payload.outlineStorylines : [],
+  )
+  replaceNovelScopedRows(CHARACTERS_KEY, id, Array.isArray(payload.characters) ? payload.characters : [])
+  replaceNovelScopedRows(
+    CHARACTER_RELATIONS_KEY,
+    id,
+    Array.isArray(payload.characterRelations) ? payload.characterRelations : [],
+  )
+  replaceNovelScopedRows(FACTIONS_KEY, id, Array.isArray(payload.factions) ? payload.factions : [])
+  replaceNovelScopedRows(ITEMS_KEY, id, Array.isArray(payload.items) ? payload.items : [])
+  replaceNovelScopedRows(
+    CHARACTER_FACTION_MEMBERSHIPS_KEY,
+    id,
+    Array.isArray(payload.characterFactionMemberships) ? payload.characterFactionMemberships : [],
+  )
+  replaceNovelScopedRows(CATEGORIES_KEY, id, Array.isArray(payload.categories) ? payload.categories : [])
+  replaceNovelScopedRows(TIMELINE_KEY, id, Array.isArray(payload.timelineEvents) ? payload.timelineEvents : [])
+  replaceNovelScopedRows(FORESHADOWS_KEY, id, Array.isArray(payload.foreshadows) ? payload.foreshadows : [])
+  emitStorageChange()
+}
+
+export function buildNovelWorkspacePayload(novelId: string): WorkspaceSnapshotPayload {
+  return {
+    chapters: getChaptersByNovelId(novelId),
+    outline: getOutlineByNovelId(novelId),
+    outlineStorylines: getOutlineStorylinesByNovelId(novelId),
+    characters: getCharactersByNovelId(novelId),
+    characterRelations: getCharacterRelationsByNovelId(novelId),
+    factions: getFactionsByNovelId(novelId),
+    items: getItemsByNovelId(novelId),
+    characterFactionMemberships: getCharacterFactionMembershipsByNovelId(novelId),
+    categories: getCategoriesByNovelId(novelId),
+    timelineEvents: getTimelineByNovelId(novelId),
+    foreshadows: getForeshadowsByNovelId(novelId),
+  }
 }
 
 export function getChaptersByNovelId(novelId: string): Chapter[] {

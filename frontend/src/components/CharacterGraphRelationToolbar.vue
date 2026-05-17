@@ -299,6 +299,7 @@ const emit = defineEmits<{
 }>()
 
 const linkMode = defineModel<boolean>('linkMode', { default: false })
+const searchQuery = defineModel<string>('searchQuery', { default: '' })
 const panelMode = ref<'edit' | 'add'>('edit')
 
 const targetBId = ref('')
@@ -307,7 +308,14 @@ const typeFromB = ref('')
 const note = ref('')
 const linkError = ref('')
 const linkSuccess = ref('')
-const relationEditSearchQuery = ref('')
+const relationEditSearchQuery = ref(searchQuery.value ?? '')
+
+watch(relationEditSearchQuery, (v) => {
+  searchQuery.value = v
+})
+watch(searchQuery, (v) => {
+  if (v !== relationEditSearchQuery.value) relationEditSearchQuery.value = v
+})
 const relationEditModalOpen = ref(false)
 const relationAddModalOpen = ref(false)
 const relationAddDialogRef = ref<HTMLElement | null>(null)
@@ -612,7 +620,7 @@ watch(
   (pid) => {
     const id = String(pid ?? '').trim()
     if (!id || id === props.focusCharacterId) {
-      // 清空点选：恢复全量展示（保留用户手动输入的搜索词则会“锁住”过滤）
+      relationEditSearchQuery.value = ''
       return
     }
     const name = props.characters.find((c) => c.id === id)?.name ?? ''

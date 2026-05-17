@@ -46,7 +46,11 @@ def ping_db() -> None:
 
 def init_db() -> None:
     from app import models  # noqa: F401  # 确保模型被注册
+    from app.services.novel_sync import backfill_all_novels_from_snapshots
 
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
 
+    with SessionLocal() as db:
+        backfill_all_novels_from_snapshots(db)
+        db.commit()

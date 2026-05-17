@@ -23,7 +23,7 @@ import type {
 
 type MembershipDraftRow = { factionId: string; description: string }
 
-type ItemPickerRow = Item & { ownerLabel: string; transferHint: string; bound: boolean }
+type ItemPickerRow = Item & { bound: boolean }
 
 function normalizeItemIds(ids: string[]): string[] {
   return Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-Hans'))
@@ -135,35 +135,13 @@ export function useCharacterGraphCharacterEditor(params: UseCharacterGraphCharac
     return params.items.value.find((item) => item.id === itemId)?.name ?? itemId
   }
 
-  function itemOwnerLabel(item: Item): string {
-    if (item.ownerType === 'character' && item.ownerId) {
-      const name = params.characters.value.find((c) => c.id === item.ownerId)?.name
-      return name ? `角色：${name}` : '未知角色'
-    }
-    if (item.ownerType === 'faction' && item.ownerId) {
-      const name = params.factionOptions.value.find((f) => f.id === item.ownerId)?.name
-      return name ? `势力：${name}` : '未知势力'
-    }
-    return '未绑定'
-  }
-
-  function itemTransferHint(item: Item, selected: Character | null): string {
-    if (!selected) return ''
-    if (!item.ownerType || !item.ownerId) return '保存后绑定到当前角色'
-    if (item.ownerType === 'character' && item.ownerId === selected.id) return '当前角色已绑定'
-    return `保存后将转移自：${itemOwnerLabel(item)}`
-  }
-
   const itemPickerRows = computed<ItemPickerRow[]>(() => {
-    const selected = params.editingCharacter.value
     const q = itemQuery.value.trim().toLowerCase()
     const rows = params.items.value
       .filter((item) => item.novelId === params.novelId.value)
       .filter((item) => !q || `${item.name ?? ''} ${item.summary ?? ''}`.toLowerCase().includes(q))
       .map((item) => ({
         ...item,
-        ownerLabel: itemOwnerLabel(item),
-        transferHint: itemTransferHint(item, selected),
         bound: draft.itemIds.includes(item.id),
       }))
     return rows.sort((a, b) => {

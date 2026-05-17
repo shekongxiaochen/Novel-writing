@@ -58,11 +58,7 @@
               :width="node.width"
               height="72"
               rx="22"
-              tabindex="0"
-              role="button"
               @click="emit('select', node.id)"
-              @keydown.enter.prevent="emit('select', node.id)"
-              @keydown.space.prevent="emit('select', node.id)"
             />
 
             <rect
@@ -656,62 +652,6 @@ function onPointerLeave(e: PointerEvent): void {
   font-size: 13px;
   font-weight: 900;
   text-anchor: middle;
-}
-
-[data-theme='blueprint'] .relation-overview {
-  background:
-    radial-gradient(circle at 18% 18%, rgba(56, 189, 248, 0.13), transparent 34%),
-    radial-gradient(circle at 78% 86%, rgba(129, 140, 248, 0.1), transparent 42%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(8, 13, 26, 0.96));
-  border-color: rgba(125, 211, 252, 0.22);
-  box-shadow:
-    inset 0 1px 0 rgba(186, 230, 253, 0.08),
-    0 22px 48px rgba(2, 8, 23, 0.34);
-}
-
-[data-theme='blueprint'] .relation-overview__legend {
-  border-color: rgba(125, 211, 252, 0.18);
-  background: rgba(15, 23, 42, 0.74);
-  box-shadow: 0 12px 28px rgba(2, 8, 23, 0.28);
-}
-
-[data-theme='blueprint'] .relation-overview__ring {
-  stroke: rgba(125, 211, 252, 0.16);
-}
-
-[data-theme='blueprint'] .relation-overview__node-card--heat-0 {
-  fill: color-mix(in srgb, #1e293b 78%, #0ea5e9 22%);
-  stroke: rgba(125, 211, 252, 0.26);
-}
-
-[data-theme='blueprint'] .relation-overview__node-card--heat-1 {
-  fill: color-mix(in srgb, #0ea5e9 20%, var(--color-surface));
-  stroke: rgba(56, 189, 248, 0.38);
-}
-
-[data-theme='blueprint'] .relation-overview__node-card--heat-2 {
-  fill: color-mix(in srgb, #38bdf8 26%, var(--color-surface));
-  stroke: rgba(125, 211, 252, 0.48);
-}
-
-[data-theme='blueprint'] .relation-overview__node-card--heat-3 {
-  fill: color-mix(in srgb, #818cf8 32%, var(--color-surface));
-  stroke: rgba(129, 140, 248, 0.58);
-}
-
-[data-theme='blueprint'] .relation-overview__node-card--heat-4 {
-  fill: color-mix(in srgb, #22d3ee 38%, var(--color-surface));
-  stroke: rgba(34, 211, 238, 0.66);
-}
-
-[data-theme='blueprint'] .relation-overview__node-card--focus {
-  stroke: rgba(186, 230, 253, 0.86);
-  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.24));
-}
-
-[data-theme='blueprint'] .relation-overview__badge {
-  fill: color-mix(in srgb, #38bdf8 88%, #020617 12%);
-  stroke: rgba(224, 242, 254, 0.42);
 }
 
 .relation-overview__badge-text--heat-0 {
