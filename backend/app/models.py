@@ -30,6 +30,8 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc, onupdate=now_utc)
 
     sessions: Mapped[list["AuthSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    ai_subscriptions: Mapped[list["AiSubscription"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    payment_orders: Mapped[list["PaymentOrder"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     novels: Mapped[list["Novel"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
@@ -62,6 +64,74 @@ class AuthSession(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
 
     user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    __table_args__ = (
+        Index("ix_login_attempts_email_created", "email", "created_at"),
+        Index("ix_login_attempts_ip_created", "ip", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
+
+
+class AiSubscription(Base):
+    __tablename__ = "ai_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "plan_code", name="uq_ai_subscription_user_plan"),
+        Index("ix_ai_subscriptions_status_expires", "status", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_code: Mapped[str] = mapped_column(String(64), default="ai_monthly")
+    billing_cycle: Mapped[str] = mapped_column(String(32), default="monthly")
+    status: Mapped[str] = mapped_column(String(32), default="inactive")
+    price_cents: Mapped[int] = mapped_column(Integer, default=2900)
+    currency: Mapped[str] = mapped_column(String(16), default="CNY")
+    payment_provider: Mapped[str] = mapped_column(String(32), default="wechat_qr_mock")
+    provider_customer_id: Mapped[str] = mapped_column(String(128), default="")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    pending_order_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    meta_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc, onupdate=now_utc)
+
+    user: Mapped["User"] = relationship(back_populates="ai_subscriptions")
+    payment_orders: Mapped[list["PaymentOrder"]] = relationship(back_populates="subscription")
+
+
+class PaymentOrder(Base):
+    __tablename__ = "payment_orders"
+    __table_args__ = (
+        Index("ix_payment_orders_user_status_created", "user_id", "status", "created_at"),
+        Index("ix_payment_orders_subscription_created", "subscription_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    subscription_id: Mapped[str | None] = mapped_column(ForeignKey("ai_subscriptions.id", ondelete="SET NULL"), nullable=True)
+    product_code: Mapped[str] = mapped_column(String(64), default="ai_sidebar")
+    plan_code: Mapped[str] = mapped_column(String(64), default="ai_monthly")
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    amount_cents: Mapped[int] = mapped_column(Integer, default=2900)
+    currency: Mapped[str] = mapped_column(String(16), default="CNY")
+    payment_provider: Mapped[str] = mapped_column(String(32), default="wechat_qr_mock")
+    provider_trade_no: Mapped[str] = mapped_column(String(128), default="")
+    checkout_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc, onupdate=now_utc)
+
+    user: Mapped["User"] = relationship(back_populates="payment_orders")
+    subscription: Mapped["AiSubscription | None"] = relationship(back_populates="payment_orders")
 
 
 class Novel(Base):

@@ -11,6 +11,11 @@ class EmailCodeSendIn(BaseModel):
     purpose: str = "register"
 
 
+class EmailCodeSendOut(BaseModel):
+    message: str
+    debug_code: str | None = None
+
+
 class RegisterIn(BaseModel):
     email: str
     password: str = Field(min_length=6, max_length=128)
@@ -21,6 +26,12 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: str
     password: str = Field(min_length=6, max_length=128)
+
+
+class ResetPasswordIn(BaseModel):
+    email: str
+    code: str = Field(min_length=4, max_length=12)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class UserOut(BaseModel):
@@ -46,7 +57,7 @@ class NovelBase(BaseModel):
 
 
 class NovelCreateIn(NovelBase):
-    pass
+    id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class NovelUpdateIn(BaseModel):
@@ -574,3 +585,57 @@ class NovelEntityExtractOut(BaseModel):
     memberships: list[ExtractedMembership] = Field(default_factory=list)
     relations: list[ExtractedRelation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class AiSubscriptionOut(BaseModel):
+    id: str
+    plan_code: str
+    billing_cycle: str
+    status: str
+    price_cents: int
+    currency: str
+    payment_provider: str
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+    pending_order_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PaymentOrderOut(BaseModel):
+    id: str
+    subscription_id: str | None = None
+    product_code: str
+    plan_code: str
+    status: str
+    amount_cents: int
+    currency: str
+    payment_provider: str
+    provider_trade_no: str
+    checkout_payload: dict[str, Any] = Field(default_factory=dict)
+    paid_at: datetime | None = None
+    expires_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AiSubscriptionStatusOut(BaseModel):
+    subscription: AiSubscriptionOut
+    active: bool
+    requires_payment: bool
+    latest_order: PaymentOrderOut | None = None
+
+
+class AiSubscriptionCreateOrderIn(BaseModel):
+    refresh_existing_pending: bool = True
+
+
+class AiSubscriptionCreateOrderOut(BaseModel):
+    subscription: AiSubscriptionOut
+    order: PaymentOrderOut
+
+
+class AiAccessOut(BaseModel):
+    allowed: bool
+    reason: str
+    subscription: AiSubscriptionOut

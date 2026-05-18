@@ -421,7 +421,11 @@ def create_novel(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> NovelOut:
+    novel_id = (payload.id or "").strip() or None
+    if novel_id and db.query(Novel).filter(Novel.id == novel_id).first() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="作品 id 已存在")
     novel = Novel(
+        id=novel_id,
         user_id=user.id,
         title=payload.title.strip(),
         summary=payload.summary.strip(),

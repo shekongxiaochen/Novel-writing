@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.admin import init_admin
 from app.core.config import settings
 from app.db import init_db
 from app.routers.auth import router as auth_router
+from app.routers.billing import router as billing_router
 from app.routers.health import router as health_router
 from app.routers.novels import router as novels_router
 from app.routers.ai import router as ai_router
@@ -24,6 +26,7 @@ def on_startup() -> None:
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(billing_router)
 app.include_router(novels_router)
 app.include_router(ai_router)
-
+init_admin(app)

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_active_ai_subscription
 from app.models import Novel, NovelSnapshot, User
 from app.schemas import NovelEntityExtractIn, NovelEntityExtractOut, OutlineAiExpandIn, OutlineAiExpandOut
 from app.services.ai_entity_extract import extract_entities
@@ -25,7 +25,11 @@ def _owned_novel_or_404(db: Session, user: User, novel_id: str) -> Novel:
 
 
 @router.post("/outline-expand", response_model=OutlineAiExpandOut)
-async def outline_expand(payload: OutlineAiExpandIn) -> OutlineAiExpandOut:
+async def outline_expand(
+    payload: OutlineAiExpandIn,
+    user: User = Depends(get_current_user),
+    _subscription=Depends(require_active_ai_subscription),
+) -> OutlineAiExpandOut:
     if not settings.dashscope_api_key.strip():
         raise HTTPException(status_code=400, detail="未配置 DASHSCOPE_API_KEY")
 
@@ -89,6 +93,7 @@ async def extract_novel_entities(
     novel_id: str,
     payload: NovelEntityExtractIn,
     user: User = Depends(get_current_user),
+    _subscription=Depends(require_active_ai_subscription),
     db: Session = Depends(get_db),
 ) -> NovelEntityExtractOut:
     if not settings.dashscope_api_key.strip():

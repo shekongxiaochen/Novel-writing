@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import NovelListView from './views/novel-list/NovelListView.vue'
+import HomeView from './views/home/HomeView.vue'
 import NovelWorkspaceView from './views/workspace/NovelWorkspaceView.vue'
 import NovelChapterHubView from './views/chapter-hub/NovelChapterHubView.vue'
 import AuthView from './views/auth/AuthView.vue'
@@ -10,7 +10,7 @@ export const router = createRouter({
     {
       path: '/',
       name: 'novels',
-      component: NovelListView,
+      component: HomeView,
     },
     {
       path: '/login',
@@ -23,6 +23,12 @@ export const router = createRouter({
       name: 'register',
       component: AuthView,
       props: { mode: 'register' },
+    },
+    {
+      path: '/reset-password',
+      name: 'reset-password',
+      component: AuthView,
+      props: { mode: 'reset-password' },
     },
     {
       path: '/novels/:id',

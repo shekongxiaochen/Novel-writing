@@ -27,14 +27,12 @@
     <section class="novel-list-layout">
       <form ref="createCardRef" class="card form-grid novel-list-create" @submit.prevent="handleCreate">
         <div class="novel-list-create__head">
-          <p class="novel-list-create__eyebrow">Start A Project</p>
           <h2>新建作品</h2>
-          <p class="muted">先定下作品的标题、基调和叙事视角，后面的大纲与写作区都会围绕这里展开。</p>
         </div>
 
         <label>
           作品标题 *
-          <input v-model="form.title" required maxlength="60" placeholder="先取一个能稳住气质的名字" />
+          <input v-model="form.title" required maxlength="60" placeholder="输入作品标题" />
         </label>
 
         <label>
@@ -44,14 +42,14 @@
             rows="4"
             maxlength="500"
             class="scrollbar-paper novel-list__summary-input"
-            placeholder="用 2-4 句话记下核心冲突、世界观或主人公的出发点"
+            placeholder="输入简介"
           />
         </label>
 
         <div class="grid-2">
           <label>
             题材
-            <input v-model="form.genre" maxlength="30" placeholder="如：玄幻、悬疑、科幻" />
+            <input v-model="form.genre" maxlength="30" placeholder="输入题材" />
           </label>
           <label>
             叙事视角
@@ -69,7 +67,7 @@
         <div class="grid-2">
           <label>
             基调
-            <input v-model="form.tone" maxlength="30" placeholder="如：热血、治愈、黑暗" />
+            <input v-model="form.tone" maxlength="30" placeholder="输入基调" />
           </label>
           <label class="checkbox-line novel-list-create__checkbox">
             <input v-model="form.isMultiLineNarrative" type="checkbox" />
@@ -112,7 +110,10 @@
                 <span class="novel-meta-chip">上次码字：{{ formatDateTime(novelLastWritingAt(novel)) }}</span>
               </div>
             </div>
-            <button type="button" class="btn-primary novel-list-card__enter" @click="goNovel(novel.id)">进入</button>
+            <div class="novel-list-card__actions">
+              <button type="button" class="novel-list-card__delete" @click="handleDeleteNovel(novel)">删除</button>
+              <button type="button" class="btn-primary novel-list-card__enter" @click="goNovel(novel.id)">进入</button>
+            </div>
           </li>
         </ul>
       </section>
@@ -121,14 +122,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
-import { createNovel, getChaptersByNovelId, getNovels } from '../../lib/storage'
+import { useAuth } from '../../composables/useAuth'
+import { useCloudSync } from '../../composables/useCloudSync'
+import { createNovel, deleteNovel, getChaptersByNovelId, getNovels } from '../../lib/storage'
 import type { NewNovelInput, Novel } from '../../types'
 
 const router = useRouter()
 const route = useRoute()
+const { isLoggedIn } = useAuth()
+const { syncNow } = useCloudSync()
 const listChromeAnchorRef = ref<HTMLElement | null>(null)
 const createCardRef = ref<HTMLElement | null>(null)
 watch(listChromeAnchorRef, (el) => setChromeAnchor(el), { immediate: true })
@@ -164,6 +169,10 @@ const form = reactive<Pick<NewNovelInput, 'title' | 'summary' | 'genre' | 'persp
   isMultiLineNarrative: false,
 })
 
+function refreshNovels(): void {
+  novels.value = getNovels()
+}
+
 function resetForm() {
   form.title = ''
   form.summary = ''
@@ -186,7 +195,7 @@ async function handleCreate() {
       tone: form.tone,
       isMultiLineNarrative: form.isMultiLineNarrative,
     })
-    novels.value = getNovels()
+    refreshNovels()
     resetForm()
     void router.push(`/novels/${novel.id}`)
   } finally {
@@ -202,6 +211,23 @@ function formatDateTime(v: string): string {
 
 function goNovel(id: string) {
   void router.push(`/novels/${id}`)
+}
+
+async function handleDeleteNovel(novel: Novel): Promise<void> {
+  const label = novel.title || '未命名作品'
+  const confirmed = window.confirm(`确认删除《${label}》？相关章节、大纲、角色与伏笔数据都会一起删除。`)
+  if (!confirmed) return
+
+  const deleted = deleteNovel(novel.id)
+  if (!deleted) return
+  refreshNovels()
+
+  if (!isLoggedIn.value) return
+  try {
+    await syncNow()
+  } catch {
+    /* tombstone remains locally; next sync can continue deleting remotely */
+  }
 }
 
 function novelLastWritingAt(novel: Novel): string {
@@ -242,8 +268,16 @@ watch(
 watch(
   () => route.fullPath,
   () => {
-    novels.value = getNovels()
+    refreshNovels()
   },
   { immediate: true },
 )
+
+onMounted(() => {
+  window.addEventListener('novel-writing:changed', refreshNovels)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('novel-writing:changed', refreshNovels)
+})
 </script>
