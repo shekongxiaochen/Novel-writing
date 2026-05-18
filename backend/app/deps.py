@@ -6,7 +6,8 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import AuthSession, User
+from app.models import AiSubscription, AuthSession, User
+from app.services.ai_subscription import get_or_create_ai_subscription, has_active_ai_subscription
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -36,4 +37,26 @@ def get_current_user(
     db.add(session)
     db.commit()
     return user
+
+
+def get_current_user_ai_subscription(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AiSubscription:
+    subscription = get_or_create_ai_subscription(db, user)
+    db.add(subscription)
+    db.commit()
+    db.refresh(subscription)
+    return subscription
+
+
+def require_active_ai_subscription(
+    subscription: AiSubscription = Depends(get_current_user_ai_subscription),
+) -> AiSubscription:
+    if not has_active_ai_subscription(subscription):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI 订阅未开通或已过期",
+        )
+    return subscription
 

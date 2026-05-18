@@ -7,4 +7,5 @@ python-dotenv
 alembic
 cryptography
 httpx
-
+itsdangerous
+sqladmin

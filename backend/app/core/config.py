@@ -24,7 +24,14 @@ class Settings(BaseSettings):
     app_env: str = "development"
     auth_token_ttl_hours: int = 24 * 30
     verify_code_ttl_minutes: int = 10
+    verify_code_send_cooldown_seconds: int = 60
+    verify_code_send_window_minutes: int = 10
+    verify_code_send_max_per_window: int = 5
     password_hash_iterations: int = 120_000
+    login_failure_window_minutes: int = 15
+    login_failure_limit: int = 5
+    admin_emails: str = ""
+    admin_secret_key: str = "change-me-admin-secret"
 
     # 邮件验证码
     smtp_host: str = ""
@@ -44,4 +51,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

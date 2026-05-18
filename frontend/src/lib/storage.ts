@@ -28,6 +28,7 @@ import type {
   OutlineTension,
   TimelineEvent,
 } from '../types'
+import { getCurrentUser } from './auth'
 import { normalizeCharacterAliases } from './characterLabels'
 
 const NOVELS_KEY = 'novel-writing.novels'
@@ -44,6 +45,24 @@ const FACTION_LAST_CHANGED_FIELDS_KEY = 'novel-writing.faction-last-changed-fiel
 const CATEGORIES_KEY = 'novel-writing.categories'
 const TIMELINE_KEY = 'novel-writing.timeline-events'
 const FORESHADOWS_KEY = 'novel-writing.foreshadows'
+const DELETED_NOVEL_IDS_KEY = 'novel-writing.deleted-novel-ids'
+
+function currentStorageScope(): string {
+  const userId = String(getCurrentUser()?.id ?? '').trim()
+  return userId ? `user:${userId}` : 'guest'
+}
+
+function scopedStorageKey(key: string): string {
+  return `${key}.${currentStorageScope()}`
+}
+
+function readScopedStorageItem(key: string): string | null {
+  return localStorage.getItem(scopedStorageKey(key))
+}
+
+function writeScopedStorageItem(key: string, value: string): void {
+  localStorage.setItem(scopedStorageKey(key), value)
+}
 
 export type WorkspaceSnapshotPayload = {
   chapters?: Chapter[]
@@ -74,7 +93,7 @@ function emitStorageChange(): void {
 
 function readArrayFromStorage<T>(key: string): T[] {
   try {
-    const raw = localStorage.getItem(key)
+    const raw = readScopedStorageItem(key)
     if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed) ? (parsed as T[]) : []
@@ -84,13 +103,42 @@ function readArrayFromStorage<T>(key: string): T[] {
 }
 
 function writeArrayToStorage<T>(key: string, items: T[]): void {
-  localStorage.setItem(key, JSON.stringify(items))
+  writeScopedStorageItem(key, JSON.stringify(items))
 }
 
 function replaceNovelScopedRows<T extends { novelId: string }>(key: string, novelId: string, rows: T[]): void {
   const current = readArrayFromStorage<T>(key)
   const next = current.filter((row) => String(row.novelId ?? '') !== novelId).concat(rows)
   writeArrayToStorage(key, next)
+}
+
+function removeNovelScopedRows<T extends { novelId: string }>(key: string, novelId: string): void {
+  const current = readArrayFromStorage<T>(key)
+  const next = current.filter((row) => String(row.novelId ?? '') !== novelId)
+  writeArrayToStorage(key, next)
+}
+
+function readDeletedNovelIds(): string[] {
+  return normalizeIdList(readArrayFromStorage<string>(DELETED_NOVEL_IDS_KEY))
+}
+
+function writeDeletedNovelIds(ids: string[]): void {
+  writeArrayToStorage(DELETED_NOVEL_IDS_KEY, normalizeIdList(ids))
+}
+
+function markDeletedNovelId(novelId: string): void {
+  const id = String(novelId ?? '').trim()
+  if (!id) return
+  const next = new Set(readDeletedNovelIds())
+  next.add(id)
+  writeDeletedNovelIds(Array.from(next))
+}
+
+function unmarkDeletedNovelId(novelId: string): void {
+  const id = String(novelId ?? '').trim()
+  if (!id) return
+  const next = readDeletedNovelIds().filter((item) => item !== id)
+  writeDeletedNovelIds(next)
 }
 
 function normalizeIdList(ids?: unknown): string[] {
@@ -111,7 +159,7 @@ export function normalizeCategoryIds(ids?: string[] | null): string[] {
 }
 
 function getAllCategories(): Category[] {
-  const raw = localStorage.getItem(CATEGORIES_KEY)
+  const raw = readScopedStorageItem(CATEGORIES_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown[]
@@ -134,7 +182,7 @@ function getAllCategories(): Category[] {
 }
 
 function saveAllCategories(items: Category[]): void {
-  localStorage.setItem(CATEGORIES_KEY, JSON.stringify(items))
+  writeScopedStorageItem(CATEGORIES_KEY, JSON.stringify(items))
   emitStorageChange()
 }
 
@@ -224,7 +272,7 @@ export function deleteCategory(categoryId: string): boolean {
 }
 
 export function getNovels(): Novel[] {
-  const raw = localStorage.getItem(NOVELS_KEY)
+  const raw = readScopedStorageItem(NOVELS_KEY)
   if (!raw) return []
 
   try {
@@ -237,6 +285,10 @@ export function getNovels(): Novel[] {
 
 export function getNovelById(id: string): Novel | null {
   return getNovels().find((n) => n.id === id) ?? null
+}
+
+export function getDeletedNovelIds(): string[] {
+  return readDeletedNovelIds()
 }
 
 export function createNovel(input: NewNovelInput): Novel {
@@ -255,7 +307,9 @@ export function createNovel(input: NewNovelInput): Novel {
   }
 
   novels.unshift(novel)
-  localStorage.setItem(NOVELS_KEY, JSON.stringify(novels))
+  writeScopedStorageItem(NOVELS_KEY, JSON.stringify(novels))
+  unmarkDeletedNovelId(novel.id)
+  emitStorageChange()
   return novel
 }
 
@@ -264,7 +318,8 @@ export function upsertNovelRecord(novel: Novel): Novel {
   const idx = all.findIndex((item) => item.id === novel.id)
   if (idx >= 0) all[idx] = novel
   else all.unshift(novel)
-  localStorage.setItem(NOVELS_KEY, JSON.stringify(all))
+  writeScopedStorageItem(NOVELS_KEY, JSON.stringify(all))
+  unmarkDeletedNovelId(novel.id)
   emitStorageChange()
   return novel
 }
@@ -272,6 +327,7 @@ export function upsertNovelRecord(novel: Novel): Novel {
 export function hydrateNovelWorkspaceFromPayload(novelId: string, payload: WorkspaceSnapshotPayload): void {
   const id = String(novelId ?? '').trim()
   if (!id) return
+  unmarkDeletedNovelId(id)
   replaceNovelScopedRows(CHAPTERS_KEY, id, Array.isArray(payload.chapters) ? payload.chapters : [])
   replaceNovelScopedRows(OUTLINE_KEY, id, Array.isArray(payload.outline) ? payload.outline : [])
   replaceNovelScopedRows(
@@ -298,6 +354,59 @@ export function hydrateNovelWorkspaceFromPayload(novelId: string, payload: Works
   emitStorageChange()
 }
 
+export function clearDeletedNovelTracking(novelIds: string[]): void {
+  const pending = new Set(readDeletedNovelIds())
+  let changed = false
+  for (const rawId of novelIds) {
+    const id = String(rawId ?? '').trim()
+    if (!id || !pending.has(id)) continue
+    pending.delete(id)
+    changed = true
+  }
+  if (changed) writeDeletedNovelIds(Array.from(pending))
+}
+
+export function deleteNovel(novelId: string, options?: { trackDeletion?: boolean }): boolean {
+  const id = String(novelId ?? '').trim()
+  if (!id) return false
+
+  const novels = getNovels()
+  const nextNovels = novels.filter((novel) => novel.id !== id)
+  if (nextNovels.length === novels.length) return false
+
+  const chapterIds = getChaptersByNovelId(id).map((chapter) => chapter.id)
+  const characterIds = getCharactersByNovelId(id).map((character) => character.id)
+  const factionIds = getFactionsByNovelId(id).map((faction) => faction.id)
+
+  writeScopedStorageItem(NOVELS_KEY, JSON.stringify(nextNovels))
+  removeNovelScopedRows<Chapter>(CHAPTERS_KEY, id)
+  removeNovelScopedRows<OutlineItem>(OUTLINE_KEY, id)
+  removeNovelScopedRows<OutlineStoryline>(OUTLINE_STORYLINES_KEY, id)
+  removeNovelScopedRows<Character>(CHARACTERS_KEY, id)
+  removeNovelScopedRows<CharacterRelation>(CHARACTER_RELATIONS_KEY, id)
+  removeNovelScopedRows<Faction>(FACTIONS_KEY, id)
+  removeNovelScopedRows<Item>(ITEMS_KEY, id)
+  removeNovelScopedRows<CharacterFactionMembership>(CHARACTER_FACTION_MEMBERSHIPS_KEY, id)
+  removeNovelScopedRows<Category>(CATEGORIES_KEY, id)
+  removeNovelScopedRows<TimelineEvent>(TIMELINE_KEY, id)
+  removeNovelScopedRows<ForeshadowPlant>(FORESHADOWS_KEY, id)
+
+  for (const chapterId of chapterIds) {
+    removeEntityChangeAnchorsForChapter(chapterId)
+  }
+  for (const characterId of characterIds) {
+    removeCharacterLastChangedFields(characterId)
+  }
+  for (const factionId of factionIds) {
+    removeFactionLastChangedFields(factionId)
+  }
+
+  if (options?.trackDeletion !== false) markDeletedNovelId(id)
+  else unmarkDeletedNovelId(id)
+  emitStorageChange()
+  return true
+}
+
 export function buildNovelWorkspacePayload(novelId: string): WorkspaceSnapshotPayload {
   return {
     chapters: getChaptersByNovelId(novelId),
@@ -315,7 +424,7 @@ export function buildNovelWorkspacePayload(novelId: string): WorkspaceSnapshotPa
 }
 
 export function getChaptersByNovelId(novelId: string): Chapter[] {
-  const raw = localStorage.getItem(CHAPTERS_KEY)
+  const raw = readScopedStorageItem(CHAPTERS_KEY)
   if (!raw) return []
 
   try {
@@ -329,11 +438,11 @@ export function getChaptersByNovelId(novelId: string): Chapter[] {
 }
 
 function saveAllChapters(chapters: Chapter[]): void {
-  localStorage.setItem(CHAPTERS_KEY, JSON.stringify(chapters))
+  writeScopedStorageItem(CHAPTERS_KEY, JSON.stringify(chapters))
 }
 
 function getAllChapters(): Chapter[] {
-  const raw = localStorage.getItem(CHAPTERS_KEY)
+  const raw = readScopedStorageItem(CHAPTERS_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as Chapter[]
@@ -830,7 +939,7 @@ export function deleteChapter(chapterId: string): boolean {
 }
 
 function getAllOutlineStorylines(): OutlineStoryline[] {
-  const raw = localStorage.getItem(OUTLINE_STORYLINES_KEY)
+  const raw = readScopedStorageItem(OUTLINE_STORYLINES_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown[]
@@ -855,7 +964,7 @@ function getAllOutlineStorylines(): OutlineStoryline[] {
 }
 
 function saveAllOutlineStorylines(items: OutlineStoryline[]): void {
-  localStorage.setItem(OUTLINE_STORYLINES_KEY, JSON.stringify(items))
+  writeScopedStorageItem(OUTLINE_STORYLINES_KEY, JSON.stringify(items))
 }
 
 function normalizeOutlineStorylineType(type?: unknown): OutlineStorylineType {
@@ -1023,7 +1132,7 @@ export function moveOutlineStoryline(storylineId: string, direction: 'up' | 'dow
   return true
 }
 function getAllOutlineItems(): OutlineItem[] {
-  const raw = localStorage.getItem(OUTLINE_KEY)
+  const raw = readScopedStorageItem(OUTLINE_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown[]
@@ -1037,7 +1146,7 @@ function getAllOutlineItems(): OutlineItem[] {
 }
 
 function saveAllOutlineItems(items: OutlineItem[]): void {
-  localStorage.setItem(OUTLINE_KEY, JSON.stringify(items))
+  writeScopedStorageItem(OUTLINE_KEY, JSON.stringify(items))
 }
 
 export function getOutlineByNovelId(novelId: string): OutlineItem[] {
@@ -1175,7 +1284,7 @@ export function moveOutlineItem(outlineId: string, direction: 'up' | 'down'): bo
 }
 
 function getAllCharacterFactionMemberships(): CharacterFactionMembership[] {
-  const raw = localStorage.getItem(CHARACTER_FACTION_MEMBERSHIPS_KEY)
+  const raw = readScopedStorageItem(CHARACTER_FACTION_MEMBERSHIPS_KEY)
   if (!raw) return []
   try {
     return JSON.parse(raw) as CharacterFactionMembership[]
@@ -1185,7 +1294,7 @@ function getAllCharacterFactionMemberships(): CharacterFactionMembership[] {
 }
 
 function saveAllCharacterFactionMemberships(items: CharacterFactionMembership[]): void {
-  localStorage.setItem(CHARACTER_FACTION_MEMBERSHIPS_KEY, JSON.stringify(items))
+  writeScopedStorageItem(CHARACTER_FACTION_MEMBERSHIPS_KEY, JSON.stringify(items))
   emitStorageChange()
 }
 
@@ -1306,7 +1415,7 @@ export function replaceMembershipsForFaction(
 }
 
 function getAllCharacters(): Character[] {
-  const raw = localStorage.getItem(CHARACTERS_KEY)
+  const raw = readScopedStorageItem(CHARACTERS_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown[]
@@ -1358,7 +1467,7 @@ function getAllCharacters(): Character[] {
 }
 
 function saveAllCharacters(items: Character[]): void {
-  localStorage.setItem(CHARACTERS_KEY, JSON.stringify(items))
+  writeScopedStorageItem(CHARACTERS_KEY, JSON.stringify(items))
   emitStorageChange()
 }
 
@@ -1617,7 +1726,7 @@ type CharacterChangeHistoryRow = {
 }
 
 function readCharacterLastChangedMap(): Record<string, CharacterChangeHistoryRow> {
-  const raw = localStorage.getItem(CHARACTER_LAST_CHANGED_FIELDS_KEY)
+  const raw = readScopedStorageItem(CHARACTER_LAST_CHANGED_FIELDS_KEY)
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
@@ -1643,7 +1752,7 @@ function readCharacterLastChangedMap(): Record<string, CharacterChangeHistoryRow
 }
 
 function saveCharacterLastChangedMap(map: Record<string, CharacterChangeHistoryRow>): void {
-  localStorage.setItem(CHARACTER_LAST_CHANGED_FIELDS_KEY, JSON.stringify(map))
+  writeScopedStorageItem(CHARACTER_LAST_CHANGED_FIELDS_KEY, JSON.stringify(map))
   emitStorageChange()
 }
 
@@ -2038,7 +2147,7 @@ type FactionChangeHistoryRow = {
 }
 
 function readFactionLastChangedMap(): Record<string, FactionChangeHistoryRow> {
-  const raw = localStorage.getItem(FACTION_LAST_CHANGED_FIELDS_KEY)
+  const raw = readScopedStorageItem(FACTION_LAST_CHANGED_FIELDS_KEY)
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
@@ -2064,7 +2173,7 @@ function readFactionLastChangedMap(): Record<string, FactionChangeHistoryRow> {
 }
 
 function saveFactionLastChangedMap(map: Record<string, FactionChangeHistoryRow>): void {
-  localStorage.setItem(FACTION_LAST_CHANGED_FIELDS_KEY, JSON.stringify(map))
+  writeScopedStorageItem(FACTION_LAST_CHANGED_FIELDS_KEY, JSON.stringify(map))
   emitStorageChange()
 }
 
@@ -2261,7 +2370,7 @@ export function getCharactersByNovelId(novelId: string): Character[] {
 }
 
 function getAllCharacterRelations(): CharacterRelation[] {
-  const raw = localStorage.getItem(CHARACTER_RELATIONS_KEY)
+  const raw = readScopedStorageItem(CHARACTER_RELATIONS_KEY)
   if (!raw) return []
   try {
     return JSON.parse(raw) as CharacterRelation[]
@@ -2271,7 +2380,7 @@ function getAllCharacterRelations(): CharacterRelation[] {
 }
 
 function saveAllCharacterRelations(items: CharacterRelation[]): void {
-  localStorage.setItem(CHARACTER_RELATIONS_KEY, JSON.stringify(items))
+  writeScopedStorageItem(CHARACTER_RELATIONS_KEY, JSON.stringify(items))
 }
 
 export function getCharacterRelationsByNovelId(novelId: string): CharacterRelation[] {
@@ -2436,7 +2545,7 @@ function normalizeFactionRow(raw: Record<string, unknown>): Faction {
 }
 
 function getAllFactions(): Faction[] {
-  const raw = localStorage.getItem(FACTIONS_KEY)
+  const raw = readScopedStorageItem(FACTIONS_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>[]
@@ -2456,7 +2565,7 @@ function getAllFactions(): Faction[] {
 }
 
 function saveAllFactions(items: Faction[]): void {
-  localStorage.setItem(FACTIONS_KEY, JSON.stringify(items))
+  writeScopedStorageItem(FACTIONS_KEY, JSON.stringify(items))
   emitStorageChange()
 }
 
@@ -2592,7 +2701,7 @@ function normalizeItemRow(raw: Record<string, unknown>): Item {
 }
 
 function getAllItems(): Item[] {
-  const raw = localStorage.getItem(ITEMS_KEY)
+  const raw = readScopedStorageItem(ITEMS_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown[]
@@ -2618,7 +2727,7 @@ function getAllItems(): Item[] {
 }
 
 function saveAllItems(items: Item[]): void {
-  localStorage.setItem(ITEMS_KEY, JSON.stringify(items))
+  writeScopedStorageItem(ITEMS_KEY, JSON.stringify(items))
   emitStorageChange()
 }
 
@@ -2770,7 +2879,7 @@ export function deleteItem(itemId: string): boolean {
 }
 
 function getAllTimelineEvents(): TimelineEvent[] {
-  const raw = localStorage.getItem(TIMELINE_KEY)
+  const raw = readScopedStorageItem(TIMELINE_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as Array<TimelineEvent & { chapterNo?: number | null }>
@@ -2805,7 +2914,7 @@ function getAllTimelineEvents(): TimelineEvent[] {
 }
 
 function saveAllTimelineEvents(items: TimelineEvent[]): void {
-  localStorage.setItem(TIMELINE_KEY, JSON.stringify(items))
+  writeScopedStorageItem(TIMELINE_KEY, JSON.stringify(items))
 }
 
 export function getTimelineByNovelId(novelId: string): TimelineEvent[] {
@@ -2918,7 +3027,7 @@ export function moveTimelineEvent(eventId: string, direction: 'up' | 'down'): bo
 // ─── Foreshadow Plants ──────────────────────────────────────────────────────
 
 function getAllForeshadows(): ForeshadowPlant[] {
-  const raw = localStorage.getItem(FORESHADOWS_KEY)
+  const raw = readScopedStorageItem(FORESHADOWS_KEY)
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as unknown[]
@@ -2930,7 +3039,7 @@ function getAllForeshadows(): ForeshadowPlant[] {
 }
 
 function saveAllForeshadows(items: ForeshadowPlant[]): void {
-  localStorage.setItem(FORESHADOWS_KEY, JSON.stringify(items))
+  writeScopedStorageItem(FORESHADOWS_KEY, JSON.stringify(items))
 }
 
 export function getForeshadowsByNovelId(novelId: string): ForeshadowPlant[] {

@@ -256,6 +256,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useAiSubscription } from '../../composables/useAiSubscription'
 import { focusMode } from '../../composables/useFocusMode'
 import type {
   AiDeskChatMessage,
@@ -350,6 +351,7 @@ const props = withDefaults(defineProps<ChapterHubShellProps>(), {
 
 const route = useRoute()
 const router = useRouter()
+const { isAiSubscriptionActive, requestAiSidebarAccess, refreshAiSubscriptionState } = useAiSubscription()
 
 const emptyAiExtractResult = (): NovelEntityExtractResult => ({
   characters: [],
@@ -547,6 +549,10 @@ function persistAiStudioOpen(open: boolean): void {
 
 function onSetAiStudioOpenEvent(event: Event): void {
   const open = Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open)
+  if (open && !requestAiSidebarAccess('chapter-hub')) {
+    aiStudioOpen.value = false
+    return
+  }
   aiStudioOpen.value = open
 }
 
@@ -815,6 +821,7 @@ function toggleAiStudio(): void {
     suppressAiToggleClick.value = false
     return
   }
+  if (!aiStudioOpen.value && !requestAiSidebarAccess('chapter-hub')) return
   aiStudioOpen.value = !aiStudioOpen.value
 }
 
@@ -1757,11 +1764,14 @@ ${question}` : question, 'current')
   aiChatAbortController?.abort()
   aiChatAbortController = new AbortController()
   const msgId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-  aiChatMessages.value = [
-    ...aiChatMessages.value,
-    { id: msgId, role: 'assistant' as const, content: '', mode: 'current' as const, createdAt: new Date().toISOString() },
-  ]
-  const msg = aiChatMessages.value[aiChatMessages.value.length - 1]
+  const msg: AiDeskChatMessage = {
+    id: msgId,
+    role: 'assistant' as const,
+    content: '',
+    mode: 'current' as const,
+    createdAt: new Date().toISOString(),
+  }
+  aiChatMessages.value = [...aiChatMessages.value, msg]
   try {
     const snapshot = buildNovelWorkspacePayload(id)
     const { history } = await askAiWithToolsStream(
@@ -1787,13 +1797,12 @@ ${question}` : question, 'current')
     )
     conversationHistory.value = history
     if (!msg.content.trim()) {
-      msg.content = '?????????????'
+      msg.content = '已回答完毕，但这次没有生成可显示的内容。'
     }
   } catch (e: unknown) {
     if (e instanceof Error && e.name === 'AbortError') {
-      if (!msg.content.trim()) msg.content = '????'
+      if (!msg.content.trim()) msg.content = '已停止回答。'
     } else if (!msg.content.trim()) {
-      msg.content = ''
       aiChatMessages.value = aiChatMessages.value.filter((m) => m.id !== msgId)
       aiExtractError.value = e instanceof Error ? e.message : 'AI ??????????'
     }
@@ -1991,6 +2000,7 @@ function syncAiSelectionQuoteFromTextarea(): void {
   }
   aiSelectionQuote.value = excerptForAiQuote((chapter.content ?? '').slice(start, end))
   if (aiSelectionQuote.value && !focusMode.value) {
+    if (!requestAiSidebarAccess('selection-quote')) return
     aiStudioOpen.value = true
   }
 }
@@ -2704,8 +2714,21 @@ watch(selectedChapterId, () => {
 })
 
 watch(aiStudioOpen, (open) => {
+  if (open && !isAiSubscriptionActive.value) {
+    aiStudioOpen.value = false
+    return
+  }
   persistAiStudioOpen(open)
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    refreshAiSubscriptionState()
+    if (aiStudioOpen.value && !isAiSubscriptionActive.value) aiStudioOpen.value = false
+  },
+  { immediate: true },
+)
 
 watch(
   novelId,

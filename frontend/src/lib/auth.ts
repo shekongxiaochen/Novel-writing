@@ -1,77 +1,85 @@
 export type AuthUser = {
   id: string
-  /**
-   * 登录标识（用户名或邮箱，已做 normalize）
-   * - 用于唯一性校验与登录匹配
-   */
-  loginId: string
-  /** 展示用名称 */
+  email: string
   displayName: string
-  passwordSalt: string
-  passwordHash: string
   createdAt: string
 }
 
 export type AuthSession = {
   token: string
-  userId: string
-  createdAt: string
+  expiresAt: string
+  user: AuthUser
 }
 
-const USERS_KEY = 'novel-writing.auth.users'
+export type SendCodeResult = {
+  message: string
+  debugCode?: string
+}
+
+type AuthApiUser = {
+  id: string
+  email: string
+  display_name: string
+  created_at: string
+}
+
+type AuthApiSession = {
+  token: string
+  expires_at: string
+  user: AuthApiUser
+}
+
+type SendCodeApiResult = {
+  message: string
+  debug_code?: string
+}
+
 const SESSION_KEY = 'novel-writing.auth.session'
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '')
 
-function nowIso(): string {
-  return new Date().toISOString()
+function emitAuthSessionChanged(): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event('novel-writing:changed'))
 }
 
-function uid(): string {
-  return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
-}
-
-function normalizeLoginId(input: string): string {
+function normalizeEmail(input: string): string {
   return String(input ?? '')
     .trim()
     .toLowerCase()
 }
 
-function readUsers(): AuthUser[] {
-  try {
-    const raw = localStorage.getItem(USERS_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(Boolean).map((u) => u as Partial<AuthUser>).filter((u) => u && typeof u === 'object')
-      .map((u) => ({
-        id: String((u as AuthUser).id ?? ''),
-        loginId: String((u as AuthUser).loginId ?? ''),
-        displayName: String((u as AuthUser).displayName ?? ''),
-        passwordSalt: String((u as AuthUser).passwordSalt ?? ''),
-        passwordHash: String((u as AuthUser).passwordHash ?? ''),
-        createdAt: String((u as AuthUser).createdAt ?? ''),
-      }))
-      .filter((u) => u.id && u.loginId && u.passwordSalt && u.passwordHash)
-  } catch {
-    return []
+function mapUser(user: AuthApiUser): AuthUser {
+  return {
+    id: String(user.id),
+    email: String(user.email),
+    displayName: String(user.display_name ?? ''),
+    createdAt: String(user.created_at ?? ''),
   }
 }
 
-function writeUsers(users: AuthUser[]): void {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
+function mapSession(session: AuthApiSession): AuthSession {
+  return {
+    token: String(session.token),
+    expiresAt: String(session.expires_at),
+    user: mapUser(session.user),
+  }
 }
 
 function readSession(): AuthSession | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object') return null
-    const s = parsed as Partial<AuthSession>
-    if (!s.token || !s.userId) return null
+    const parsed = JSON.parse(raw) as Partial<AuthSession> | null
+    if (!parsed?.token || !parsed?.user?.id) return null
     return {
-      token: String(s.token),
-      userId: String(s.userId),
-      createdAt: String(s.createdAt ?? ''),
+      token: String(parsed.token),
+      expiresAt: String(parsed.expiresAt ?? ''),
+      user: {
+        id: String(parsed.user.id),
+        email: String(parsed.user.email ?? ''),
+        displayName: String(parsed.user.displayName ?? ''),
+        createdAt: String(parsed.user.createdAt ?? ''),
+      },
     }
   } catch {
     return null
@@ -80,92 +88,170 @@ function readSession(): AuthSession | null {
 
 function writeSession(session: AuthSession): void {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+  emitAuthSessionChanged()
 }
 
-function randomHex(bytes = 16): string {
-  // 仍尽量保持鲁棒性：在极端环境下退回到非安全实现
-  if (typeof crypto === 'undefined' || !crypto.getRandomValues) {
-    return uid().replace(/[-.]/g, '').slice(0, bytes * 2)
-  }
-  const arr = new Uint8Array(bytes)
-  crypto.getRandomValues(arr)
-  return Array.from(arr)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  if (typeof crypto === 'undefined' || !crypto.subtle || typeof TextEncoder === 'undefined') {
-    // fallback：仅用于本地 MVP（不应视为安全方案）
-    return `weak:${text}`
-  }
-  const enc = new TextEncoder().encode(text)
-  const buf = await crypto.subtle.digest('SHA-256', enc)
-  const hashArr = Array.from(new Uint8Array(buf))
-  return hashArr.map((b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-export function getCurrentUser(): AuthUser | null {
-  const session = readSession()
-  if (!session) return null
-  const users = readUsers()
-  return users.find((u) => u.id === session.userId) ?? null
-}
-
-export function logout(): void {
+function clearSession(): void {
   try {
     localStorage.removeItem(SESSION_KEY)
+    emitAuthSessionChanged()
   } catch {
     /* ignore */
   }
 }
 
-export async function register(input: { identifier: string; password: string }): Promise<AuthUser> {
-  const loginId = normalizeLoginId(input.identifier)
-  const password = String(input.password ?? '')
-  if (loginId.length < 3) throw new Error('用户名/邮箱至少 3 个字符')
-  if (password.length < 6) throw new Error('密码至少 6 个字符')
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.headers ?? {}),
+    },
+  })
 
-  const users = readUsers()
-  if (users.some((u) => u.loginId === loginId)) {
-    throw new Error('该用户名/邮箱已注册')
+  const text = await resp.text()
+  const payload = text ? JSON.parse(text) as unknown : null
+
+  if (!resp.ok) {
+    const detail =
+      payload && typeof payload === 'object' && 'detail' in payload
+        ? String((payload as { detail?: unknown }).detail ?? '')
+        : ''
+    throw new Error(detail || `请求失败（${resp.status}）`)
   }
 
-  const salt = randomHex(16)
-  const hash = await sha256Hex(`${salt}:${password}`)
-
-  const user: AuthUser = {
-    id: uid(),
-    loginId,
-    displayName: loginId,
-    passwordSalt: salt,
-    passwordHash: hash,
-    createdAt: nowIso(),
-  }
-
-  users.push(user)
-  writeUsers(users)
-  return user
+  return payload as T
 }
 
-export async function login(input: { identifier: string; password: string }): Promise<AuthSession> {
-  const loginId = normalizeLoginId(input.identifier)
-  const password = String(input.password ?? '')
-  if (!loginId) throw new Error('请输入用户名/邮箱')
-  if (!password) throw new Error('请输入密码')
+export function getCurrentSession(): AuthSession | null {
+  return readSession()
+}
 
-  const users = readUsers()
-  const user = users.find((u) => u.loginId === loginId)
-  if (!user) throw new Error('账号或密码错误')
+export function getCurrentUser(): AuthUser | null {
+  return readSession()?.user ?? null
+}
 
-  const hash = await sha256Hex(`${user.passwordSalt}:${password}`)
-  if (hash !== user.passwordHash) throw new Error('账号或密码错误')
+export async function sendRegisterCode(input: { email: string }): Promise<SendCodeResult> {
+  return sendCode({ email: input.email, purpose: 'register' })
+}
 
-  const session: AuthSession = {
-    token: randomHex(16),
-    userId: user.id,
-    createdAt: nowIso(),
+export async function sendResetPasswordCode(input: { email: string }): Promise<SendCodeResult> {
+  return sendCode({ email: input.email, purpose: 'reset_password' })
+}
+
+async function sendCode(input: { email: string; purpose: 'register' | 'reset_password' }): Promise<SendCodeResult> {
+  const email = normalizeEmail(input.email)
+  if (!email) throw new Error('请输入邮箱')
+
+  const result = await request<SendCodeApiResult>('/auth/send-code', {
+    method: 'POST',
+    body: JSON.stringify({
+      email,
+      purpose: input.purpose,
+    }),
+  })
+
+  return {
+    message: String(result.message ?? ''),
+    debugCode: result.debug_code ? String(result.debug_code) : undefined,
   }
-  writeSession(session)
-  return session
+}
+
+export async function register(input: {
+  email: string
+  password: string
+  code: string
+  displayName?: string
+}): Promise<AuthSession> {
+  const session = await request<AuthApiSession>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: normalizeEmail(input.email),
+      password: String(input.password ?? ''),
+      code: String(input.code ?? '').trim(),
+      display_name: String(input.displayName ?? '').trim(),
+    }),
+  })
+
+  const mapped = mapSession(session)
+  writeSession(mapped)
+  return mapped
+}
+
+export async function resetPassword(input: {
+  email: string
+  code: string
+  newPassword: string
+}): Promise<{ message: string }> {
+  return request<{ message: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: normalizeEmail(input.email),
+      code: String(input.code ?? '').trim(),
+      new_password: String(input.newPassword ?? ''),
+    }),
+  })
+}
+
+export async function login(input: { email: string; password: string }): Promise<AuthSession> {
+  const session = await request<AuthApiSession>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: normalizeEmail(input.email),
+      password: String(input.password ?? ''),
+    }),
+  })
+
+  const mapped = mapSession(session)
+  writeSession(mapped)
+  return mapped
+}
+
+export async function fetchCurrentUser(): Promise<AuthUser> {
+  const session = readSession()
+  if (!session?.token) {
+    throw new Error('未登录')
+  }
+
+  const user = await request<AuthApiUser>('/auth/me', {
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+    },
+  })
+
+  const next: AuthSession = {
+    ...session,
+    user: mapUser(user),
+  }
+  writeSession(next)
+  return next.user
+}
+
+export async function restoreSession(): Promise<AuthUser | null> {
+  const session = readSession()
+  if (!session?.token) return null
+
+  try {
+    return await fetchCurrentUser()
+  } catch {
+    clearSession()
+    return null
+  }
+}
+
+export async function logout(): Promise<void> {
+  const session = readSession()
+  try {
+    if (session?.token) {
+      await request<{ message: string }>('/auth/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+        },
+      })
+    }
+  } finally {
+    clearSession()
+  }
 }
