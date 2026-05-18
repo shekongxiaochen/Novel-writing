@@ -3,8 +3,24 @@
     <header class="cursor-shell-home__head">
       <h1 class="cursor-shell-home__title">小说工作台</h1>
       <div class="cursor-shell-home__head-actions">
-        <button type="button" class="cursor-shell-home__theme-btn" @click="handleThemePickerClick">
-          颜色主题 · {{ currentThemeOption.label }}
+        <template v-if="isLoggedIn">
+          <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" :disabled="syncing" @click="handleCloudSync">
+            <span class="cursor-shell__menu-title">{{ syncing ? '同步中' : '同步' }}</span>
+          </button>
+          <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="handleLogout">
+            <span class="cursor-shell__menu-title">退出</span>
+          </button>
+        </template>
+        <template v-else>
+          <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="goLogin">
+            <span class="cursor-shell__menu-title">登录</span>
+          </button>
+          <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="goRegister">
+            <span class="cursor-shell__menu-title">注册</span>
+          </button>
+        </template>
+        <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="handleThemePickerClick">
+          <span class="cursor-shell__menu-title">主题</span>
         </button>
       </div>
     </header>
@@ -46,36 +62,63 @@
         <span class="cursor-shell__collapse-icon" aria-hidden="true"></span>
       </button>
       <div class="cursor-shell__auth-actions">
-        <button type="button" class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary" @click="handleThemePickerClick">
-          颜色主题 · {{ currentThemeOption.label }}
+        <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="handleThemePickerClick">
+          <span class="cursor-shell__menu-title">主题</span>
+        </button>
+        <button
+          v-if="isLoggedIn"
+          type="button"
+          class="cursor-shell__menu-item cursor-shell__menu-item--utility"
+          :disabled="syncing"
+          @click="handleCloudSync"
+        >
+          <span class="cursor-shell__menu-title">{{ syncing ? '同步中' : '同步' }}</span>
+        </button>
+        <button
+          v-if="isLoggedIn"
+          type="button"
+          class="cursor-shell__menu-item cursor-shell__menu-item--utility"
+          @click="handleLogout"
+        >
+          <span class="cursor-shell__menu-title">退出</span>
+        </button>
+        <button
+          v-else
+          type="button"
+          class="cursor-shell__menu-item cursor-shell__menu-item--utility"
+          @click="goLogin"
+        >
+          <span class="cursor-shell__menu-title">登录</span>
         </button>
         <button
           v-if="isWritingRoute"
           type="button"
-          class="cursor-shell__auth-btn cursor-shell__auth-btn--secondary"
+          class="cursor-shell__menu-item cursor-shell__menu-item--utility"
           :class="{ 'is-active': rightPanelOpen && rightPanelActive === 'summary' }"
           :title="rightPanelOpen && rightPanelActive === 'summary' ? '收起章总结' : '展开章总结'"
           :aria-label="rightPanelOpen && rightPanelActive === 'summary' ? '收起章总结' : '展开章总结'"
           @click="toggleChapterSummarySidebar"
         >
-          章总结
+          <span class="cursor-shell__menu-title">章总结</span>
         </button>
         <button
           v-if="isWritingRoute"
           type="button"
-          class="cursor-shell__auth-btn cursor-shell__auth-btn--icon"
+          class="cursor-shell__menu-item cursor-shell__menu-item--utility"
           :class="{ 'is-active': aiStudioShellOpen }"
           :title="aiStudioShellOpen ? '收起 AI 阅读台' : '展开 AI 阅读台'"
           :aria-label="aiStudioShellOpen ? '收起 AI 阅读台' : '展开 AI 阅读台'"
           @click="toggleHeaderAiStudio"
         >
-          <span class="cursor-shell__auth-icon cursor-shell__auth-icon--ai" aria-hidden="true">AI</span>
+          <span class="cursor-shell__menu-title">AI</span>
         </button>
       </div>
     </header>
     <aside class="cursor-shell__sidebar cursor-shell__sidebar--chapters">
       <div class="cursor-shell__brand-row">
-        <div class="cursor-shell__brand">{{ currentNovel?.title || '作品' }}</div>
+        <button type="button" class="cursor-shell__brand-btn" @click="openNovelShelfDialog">
+          <div class="cursor-shell__brand">{{ currentNovel?.title || '作品' }}</div>
+        </button>
       </div>
       <div class="cursor-shell__group-row">
         <p class="cursor-shell__group-title">章节导航</p>
@@ -107,7 +150,7 @@
       </nav>
       <div class="cursor-shell__sidebar-foot">
         <button type="button" class="cursor-shell__side-action" @click="goWriting">开始码字</button>
-        <button type="button" class="cursor-shell__side-action" @click="backToNovelListCreate">返回作品页</button>
+        <button type="button" class="cursor-shell__side-action" @click="backToNovelList">返回选书</button>
       </div>
     </aside>
     <div class="cursor-shell__resize-handle" @mousedown.prevent="startResizeSidebar"></div>
@@ -454,6 +497,17 @@
     @close="closeThemePicker"
   />
 
+  <AiSubscriptionDialog
+    :open="paywallOpen"
+    :subscription="subscriptionState"
+    :source="paywallSource"
+    :price-label="aiSubscriptionPriceLabel"
+    @close="closeAiPaywall"
+    @refresh-order="createPendingOrder"
+    @activate-mock="activateMockSubscription"
+    @reset="resetAiSubscription"
+  />
+
   <ConfirmDialog
     v-model="chapterSummaryCloseConfirmOpen"
     title="关闭章总结"
@@ -461,6 +515,29 @@
     confirm-label="仍然关闭"
     cancel-label="继续编辑"
     @confirm="confirmCloseRightPanel"
+  />
+
+  <AuthDialog
+    :open="authDialogOpen"
+    :initial-mode="authDialogMode"
+    @close="closeAuthDialog"
+    @authenticated="handleAuthSuccess"
+  />
+
+  <CreateNovelDialog
+    :open="createNovelDialogOpen"
+    @close="createNovelDialogOpen = false"
+    @created="handleNovelCreated"
+  />
+
+  <NovelShelfDialog
+    :open="novelShelfDialogOpen"
+    :novels="novelRecords"
+    :current-novel-id="currentNovelId || ''"
+    @close="novelShelfDialogOpen = false"
+    @create="handleNovelShelfCreate"
+    @select="openNovelFromShelf"
+    @delete="handleDeleteNovelFromShelf"
   />
 </template>
 
@@ -480,20 +557,44 @@ import {
   getFactionChangeHistory,
   hasCharacterChangeInChapter,
   hasFactionChangeInChapter,
+  getNovels,
+  deleteNovel,
   updateChapter,
 } from './lib/storage'
 import type { Chapter, Novel } from './types'
 import type { CharacterChangeDetail } from './lib/storage'
 import { summarizeNovelChapterFromWorkspaceStream } from './lib/localAi'
 import { currentThemeOption } from './composables/useTheme'
+import { useAuth } from './composables/useAuth'
+import { useAiSubscription } from './composables/useAiSubscription'
+import { useCloudSync } from './composables/useCloudSync'
 import { Teleport } from 'vue'
 import { menuPoems } from './data/menuPoems'
+import AiSubscriptionDialog from './components/AiSubscriptionDialog.vue'
+import AuthDialog from './components/AuthDialog.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import CreateNovelDialog from './components/CreateNovelDialog.vue'
+import NovelShelfDialog from './components/NovelShelfDialog.vue'
 import ThemePickerPopover from './components/ThemePickerPopover.vue'
 import SaveToast from './components/SaveToast.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { user, isLoggedIn, displayName, logout } = useAuth()
+const { syncing, lastSummary, syncError, syncNow, clearSyncState } = useCloudSync()
+const {
+  paywallOpen,
+  paywallSource,
+  subscriptionState,
+  aiSubscriptionPriceLabel,
+  isAiSubscriptionActive,
+  refreshAiSubscriptionState,
+  closeAiPaywall,
+  createPendingOrder,
+  requestAiSidebarAccess,
+  activateMockSubscription,
+  resetAiSubscription,
+} = useAiSubscription()
 const currentNovel = ref<Novel | null>(null)
 const chapterList = ref<Chapter[]>([])
 const chapterMenuOpen = ref(false)
@@ -503,9 +604,97 @@ const chapterMenuTargetId = ref('')
 const chapterMenuTargetTitle = ref('')
 const themePickerReturnFocusEl = ref<HTMLElement | null>(null)
 const isThemePickerOpen = ref(false)
+const authDialogOpen = ref(false)
+const authDialogMode = ref<'login' | 'register' | 'reset-password'>('login')
+const createNovelDialogOpen = ref(false)
+const novelShelfDialogOpen = ref(false)
+const novelRecords = ref(getNovels())
 
 function handleThemePickerClick(event: MouseEvent): void {
   openThemePicker(event.currentTarget instanceof HTMLElement ? event.currentTarget : null)
+}
+
+function openAuthDialog(mode: 'login' | 'register' | 'reset-password'): void {
+  authDialogMode.value = mode
+  authDialogOpen.value = true
+}
+
+function closeAuthDialog(): void {
+  authDialogOpen.value = false
+}
+
+function goLogin(): void {
+  openAuthDialog('login')
+}
+
+function goRegister(): void {
+  openAuthDialog('register')
+}
+
+async function handleLogout(): Promise<void> {
+  await logout()
+  clearSyncState()
+  void router.push('/')
+  openAuthDialog('login')
+}
+
+function handleAuthSuccess(): void {
+  authDialogOpen.value = false
+  if (route.name === 'login' || route.name === 'register' || route.name === 'reset-password') {
+    void router.replace('/')
+  }
+}
+
+function handleNovelCreated(novelId: string): void {
+  createNovelDialogOpen.value = false
+  novelShelfDialogOpen.value = false
+  refreshNovelRecords()
+  void router.push(`/novels/${novelId}`)
+}
+
+function handleNovelShelfCreate(): void {
+  novelShelfDialogOpen.value = false
+  createNovelDialogOpen.value = true
+}
+
+function openNovelFromShelf(novelId: string): void {
+  novelShelfDialogOpen.value = false
+  if (!novelId) return
+  void router.push(`/novels/${novelId}`)
+}
+
+async function handleDeleteNovelFromShelf(novelId: string): Promise<void> {
+  const novel = novelRecords.value.find((item) => item.id === novelId)
+  if (!novel) return
+  const label = novel.title || '未命名书籍'
+  const confirmed = window.confirm(`确认删除《${label}》？相关章节、大纲、角色与伏笔数据都会一起删除。`)
+  if (!confirmed) return
+
+  const deleted = deleteNovel(novelId)
+  if (!deleted) return
+  refreshNovelRecords()
+  novelShelfDialogOpen.value = false
+
+  if (currentNovelId.value === novelId) {
+    const nextId = novelRecords.value[0]?.id
+    if (nextId) void router.replace(`/novels/${nextId}`)
+    else void router.replace('/')
+  }
+
+  if (!isLoggedIn.value) return
+  try {
+    await syncNow()
+  } catch {
+    /* tombstone remains locally; next sync can continue deleting remotely */
+  }
+}
+
+async function handleCloudSync(): Promise<void> {
+  try {
+    await syncNow()
+  } catch {
+    /* state already captured in composable */
+  }
 }
 
 function openThemePicker(returnFocusEl: HTMLElement | null): void {
@@ -515,6 +704,18 @@ function openThemePicker(returnFocusEl: HTMLElement | null): void {
 
 function closeThemePicker(): void {
   isThemePickerOpen.value = false
+}
+
+function refreshNovelRecords(): void {
+  novelRecords.value = getNovels()
+}
+
+function openCreateNovelDialog(): void {
+  createNovelDialogOpen.value = true
+}
+
+function openNovelShelfDialog(): void {
+  novelShelfDialogOpen.value = true
 }
 
 const chapterEditorOpen = ref(false)
@@ -544,6 +745,37 @@ const AI_STUDIO_WIDTH_MAX = 720
 const poemIndex = ref(0)
 let poemRotateTimer: number | null = null
 const aiStudioShellOpen = ref(readInitialAiStudioShellOpen())
+
+watch(
+  () => route.name,
+  (name) => {
+    if (name === 'login' || name === 'register' || name === 'reset-password') {
+      openAuthDialog(name)
+      void router.replace('/')
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => user.value?.id ?? '',
+  (userId, prevUserId) => {
+    refreshNovelRecords()
+    refreshAiSubscriptionState()
+    if (!isAiSubscriptionActive.value) {
+      aiStudioShellOpen.value = false
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('novel-writing:set-ai-open', { detail: { open: false } }))
+      }
+    }
+    if (!userId) {
+      if (prevUserId) clearSyncState()
+      return
+    }
+    void handleCloudSync()
+  },
+  { immediate: true },
+)
 const aiStudioShellWidth = ref(readInitialAiStudioShellWidth())
 const summaryStudioWidth = ref(readInitialSummaryStudioWidth())
 let summaryStudioResizeCleanup: (() => void) | null = null
@@ -636,6 +868,7 @@ function onAiStudioOpenEvent(event: Event): void {
 function toggleHeaderAiStudio(): void {
   if (typeof window === 'undefined' || !isWritingRoute.value) return
   const open = !aiStudioShellOpen.value
+  if (open && !requestAiSidebarAccess('header')) return
   if (open) rightPanelOpen.value = false
   window.dispatchEvent(new CustomEvent('novel-writing:set-ai-open', { detail: { open } }))
   aiStudioShellOpen.value = open
@@ -737,6 +970,21 @@ const novelShellStyle = computed(() => ({
       : '0px',
   '--chapter-shell-ai-gap': '0px',
 }))
+
+watch(
+  [() => route.name, () => route.params.id, novelRecords],
+  ([name, novelId]) => {
+    if ((name === 'novel-workspace' || name === 'novel-chapter-writing') && novelId && !getNovels().some((novel) => novel.id === novelId)) {
+      const firstNovelId = novelRecords.value[0]?.id
+      if (firstNovelId) void router.replace(`/novels/${firstNovelId}`)
+      else {
+        void router.replace('/')
+      }
+    }
+  },
+  { immediate: true },
+)
+
 type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues' | 'ai'
 const workspaceTabs = [
   { key: 'write' as const, label: '写作' },
@@ -757,8 +1005,8 @@ function goTo(to: string): void {
   void router.push(to)
 }
 
-function backToNovelListCreate(): void {
-  void router.push({ path: '/', query: { focus: 'create' } })
+function backToNovelList(): void {
+  void router.push('/')
 }
 
 function goWorkspaceTab(tab: WorkspaceTabKey): void {
@@ -1532,10 +1780,12 @@ function onGlobalChapterSwitch(e: KeyboardEvent): void {
 }
 
 function onStorage(): void {
+  refreshNovelRecords()
   reloadNovelContext()
 }
 
 function onNovelDataChanged(): void {
+  refreshNovelRecords()
   reloadNovelContext()
 }
 
@@ -1585,6 +1835,20 @@ onMounted(() => window.addEventListener('pointerdown', closeChapterAreaMenu))
 onMounted(() => window.addEventListener('keydown', onGlobalChapterSwitch))
 onMounted(() => window.addEventListener('keydown', onEscapeCloseChapterModal))
 onMounted(() => window.addEventListener('resize', onWindowResizeForSummaryStudio))
+onMounted(() => {
+  try {
+    const key = 'novel-writing.session-started'
+    const started = sessionStorage.getItem(key) === '1'
+    if (!started) {
+      sessionStorage.setItem(key, '1')
+      if (route.name === 'novel-workspace' || route.name === 'novel-chapter-writing') {
+        void router.replace('/')
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+})
 onMounted(() => {
   if (menuPoems.length > 0) poemIndex.value = Math.floor(Math.random() * menuPoems.length)
   if (menuPoems.length > 1) {

@@ -97,12 +97,41 @@
           v-for="message in chatMessages"
           :key="message.id"
           class="chapter-hub-ai-message"
-          :class="message.role === 'user' ? 'chapter-hub-ai-message--user' : 'chapter-hub-ai-message--assistant'"
+          :class="[
+            message.role === 'user' ? 'chapter-hub-ai-message--user' : 'chapter-hub-ai-message--assistant',
+            { 'chapter-hub-ai-message--live': isLiveAssistantMessage(message) },
+          ]"
         >
           <div class="chapter-hub-ai-message__meta">
             <span class="chapter-hub-ai-message__author">{{ message.role === 'user' ? 'You' : 'Assistant' }}</span>
           </div>
-          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--markdown" v-html="renderMessageMarkdown(message.content)" />
+          <div
+            v-if="isLiveAssistantMessage(message) && !message.content.trim()"
+            class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming"
+          >
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">正在回答你的问题...</p>
+              <p class="chapter-hub-ai-streaming__desc">我会结合当前章节、上下文和已整理信息来组织回答。</p>
+              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else
+            class="chapter-hub-ai-message__body chapter-hub-ai-message__body--markdown"
+            :class="{ 'chapter-hub-ai-message__body--live-markdown': isLiveAssistantMessage(message) }"
+          >
+            <div v-html="renderMessageMarkdown(message.content)" />
+            <span v-if="isLiveAssistantMessage(message)" class="chapter-hub-ai-message__caret" aria-hidden="true"></span>
+          </div>
         </article>
 
         <article v-if="loading" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
@@ -110,16 +139,42 @@
             <span class="chapter-hub-ai-message__author">Assistant</span>
           </div>
           <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
-            <p>正在整理当前章的人物、势力、物品、关系、伏笔和章节分类...</p>
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">正在整理当前章...</p>
+              <p class="chapter-hub-ai-streaming__desc">人物、势力、物品、关系、伏笔和章节分类会整理到当前会话里。</p>
+              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
+              </div>
+            </div>
           </div>
         </article>
 
-        <article v-if="chatThinking" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
+        <article v-if="chatThinking && !hasLiveAssistantMessage" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
           <div class="chapter-hub-ai-message__meta">
             <span class="chapter-hub-ai-message__author">Assistant</span>
           </div>
           <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
-            <p>正在回答你的问题...</p>
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">正在回答你的问题...</p>
+              <p class="chapter-hub-ai-streaming__desc">我会结合当前章节、上下文和已整理信息来组织回答。</p>
+              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
+              </div>
+            </div>
           </div>
         </article>
 
@@ -686,6 +741,19 @@ const composerInputRef = ref<HTMLTextAreaElement | null>(null)
 const historyOpen = ref(false)
 const expandedRunIds = ref<string[]>([])
 const busy = computed(() => props.loading || props.chatLoading)
+const hasLiveAssistantMessage = computed(() =>
+  props.chatLoading &&
+  props.chatMessages.length > 0 &&
+  props.chatMessages[props.chatMessages.length - 1]?.role === 'assistant',
+)
+
+function isLiveAssistantMessage(message: AiDeskChatMessage): boolean {
+  return Boolean(
+    props.chatLoading &&
+    props.chatMessages[props.chatMessages.length - 1]?.id === message.id &&
+    message.role === 'assistant',
+  )
+}
 const canSend = computed(() => !!draft.value.trim())
 
 function formatLastQuestionAt(value: string): string {
@@ -1360,6 +1428,10 @@ function relationSummary(item: ExtractedRelation): string {
   border-left: 2px solid color-mix(in srgb, var(--color-primary) 26%, transparent);
 }
 
+.chapter-hub-ai-message--live .chapter-hub-ai-message__body {
+  border-left-color: color-mix(in srgb, var(--color-primary) 54%, transparent);
+}
+
 .chapter-hub-ai-message--user .chapter-hub-ai-message__body {
   max-width: min(88%, 520px);
   background: color-mix(in srgb, var(--color-primary-soft) 26%, var(--color-surface));
@@ -1369,6 +1441,135 @@ function relationSummary(item: ExtractedRelation): string {
 .chapter-hub-ai-message__body--hint,
 .chapter-hub-ai-message__body--streaming {
   color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-message__body--live-markdown {
+  position: relative;
+}
+
+.chapter-hub-ai-message__body--live-markdown > :deep(*) {
+  margin-bottom: 0;
+}
+
+.chapter-hub-ai-message__caret {
+  display: inline-block;
+  width: 9px;
+  height: 16px;
+  margin-left: 4px;
+  border-radius: 2px;
+  vertical-align: -2px;
+  background: color-mix(in srgb, var(--color-primary) 74%, var(--color-text) 26%);
+  animation: chapter-hub-ai-message-caret 0.9s steps(1) infinite;
+}
+
+.chapter-hub-ai-message__body--streaming {
+  padding: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-muted) 92%, transparent), color-mix(in srgb, var(--color-surface) 96%, transparent));
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 32%, transparent);
+}
+
+.chapter-hub-ai-streaming {
+  display: grid;
+  gap: 10px;
+}
+
+.chapter-hub-ai-streaming__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chapter-hub-ai-streaming__dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 72%, #fff 28%);
+  animation: chapter-hub-ai-streaming-dot 1.15s ease-in-out infinite;
+}
+
+.chapter-hub-ai-streaming__dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.chapter-hub-ai-streaming__dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.chapter-hub-ai-streaming__title,
+.chapter-hub-ai-streaming__desc {
+  margin: 0;
+}
+
+.chapter-hub-ai-streaming__title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-streaming__desc {
+  font-size: 0.64rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-streaming__lines {
+  display: grid;
+  gap: 7px;
+}
+
+.chapter-hub-ai-streaming__line {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-primary-soft) 22%, var(--color-surface-muted)) 0%, color-mix(in srgb, #fff 72%, var(--color-surface)) 50%, color-mix(in srgb, var(--color-primary-soft) 22%, var(--color-surface-muted)) 100%);
+  background-size: 220% 100%;
+  animation: chapter-hub-ai-streaming-line 1.8s linear infinite;
+}
+
+.chapter-hub-ai-streaming__line--lg {
+  width: 100%;
+}
+
+.chapter-hub-ai-streaming__line--md {
+  width: 76%;
+}
+
+.chapter-hub-ai-streaming__line--sm {
+  width: 54%;
+}
+
+@keyframes chapter-hub-ai-streaming-dot {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.42;
+  }
+
+  40% {
+    transform: translateY(-2px);
+    opacity: 1;
+  }
+}
+
+@keyframes chapter-hub-ai-streaming-line {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes chapter-hub-ai-message-caret {
+  0%, 49% {
+    opacity: 1;
+  }
+
+  50%, 100% {
+    opacity: 0;
+  }
 }
 
 .chapter-hub-ai-message__body--empty {
