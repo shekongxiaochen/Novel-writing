@@ -11,7 +11,6 @@ import type {
   NewItemInput,
   NewNovelInput,
   NewOutlineInput,
-  NewOutlineStorylineInput,
   NewTimelineEventInput,
   CharacterFactionMembership,
   Faction,
@@ -24,7 +23,6 @@ import type {
   Novel,
   OutlineItem,
   OutlineStoryline,
-  OutlineStorylineType,
   OutlineTension,
   TimelineEvent,
 } from '../types'
@@ -34,7 +32,6 @@ import { normalizeCharacterAliases } from './characterLabels'
 const NOVELS_KEY = 'novel-writing.novels'
 const CHAPTERS_KEY = 'novel-writing.chapters'
 const OUTLINE_KEY = 'novel-writing.outline'
-const OUTLINE_STORYLINES_KEY = 'novel-writing.outline-storylines'
 const CHARACTERS_KEY = 'novel-writing.characters'
 const CHARACTER_RELATIONS_KEY = 'novel-writing.character-relations'
 const FACTIONS_KEY = 'novel-writing.factions'
@@ -330,11 +327,6 @@ export function hydrateNovelWorkspaceFromPayload(novelId: string, payload: Works
   unmarkDeletedNovelId(id)
   replaceNovelScopedRows(CHAPTERS_KEY, id, Array.isArray(payload.chapters) ? payload.chapters : [])
   replaceNovelScopedRows(OUTLINE_KEY, id, Array.isArray(payload.outline) ? payload.outline : [])
-  replaceNovelScopedRows(
-    OUTLINE_STORYLINES_KEY,
-    id,
-    Array.isArray(payload.outlineStorylines) ? payload.outlineStorylines : [],
-  )
   replaceNovelScopedRows(CHARACTERS_KEY, id, Array.isArray(payload.characters) ? payload.characters : [])
   replaceNovelScopedRows(
     CHARACTER_RELATIONS_KEY,
@@ -381,7 +373,6 @@ export function deleteNovel(novelId: string, options?: { trackDeletion?: boolean
   writeScopedStorageItem(NOVELS_KEY, JSON.stringify(nextNovels))
   removeNovelScopedRows<Chapter>(CHAPTERS_KEY, id)
   removeNovelScopedRows<OutlineItem>(OUTLINE_KEY, id)
-  removeNovelScopedRows<OutlineStoryline>(OUTLINE_STORYLINES_KEY, id)
   removeNovelScopedRows<Character>(CHARACTERS_KEY, id)
   removeNovelScopedRows<CharacterRelation>(CHARACTER_RELATIONS_KEY, id)
   removeNovelScopedRows<Faction>(FACTIONS_KEY, id)
@@ -411,7 +402,6 @@ export function buildNovelWorkspacePayload(novelId: string): WorkspaceSnapshotPa
   return {
     chapters: getChaptersByNovelId(novelId),
     outline: getOutlineByNovelId(novelId),
-    outlineStorylines: getOutlineStorylinesByNovelId(novelId),
     characters: getCharactersByNovelId(novelId),
     characterRelations: getCharacterRelationsByNovelId(novelId),
     factions: getFactionsByNovelId(novelId),
@@ -750,6 +740,7 @@ export function createChapter(input: NewChapterInput): Chapter {
   }
   all.push(chapter)
   saveAllChapters(all)
+  emitStorageChange()
   return chapter
 }
 
@@ -938,61 +929,6 @@ export function deleteChapter(chapterId: string): boolean {
   return true
 }
 
-function getAllOutlineStorylines(): OutlineStoryline[] {
-  const raw = readScopedStorageItem(OUTLINE_STORYLINES_KEY)
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown[]
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((row) => row as Partial<OutlineStoryline> & Record<string, unknown>)
-      .map((row) => ({
-        id: String(row.id ?? '').trim(),
-        novelId: String(row.novelId ?? '').trim(),
-        name: String(row.name ?? '').trim(),
-        type: normalizeOutlineStorylineType(row.type),
-        color: String(row.color ?? '').trim() || outlineStorylineDefaultColor(normalizeOutlineStorylineType(row.type)),
-        description: String(row.description ?? '').trim(),
-        order: Number.isFinite(Number(row.order)) ? Number(row.order) : 0,
-        createdAt: String(row.createdAt ?? '') || nowIso(),
-        updatedAt: String(row.updatedAt ?? '') || nowIso(),
-      }))
-      .filter((s) => s.id && s.novelId && s.name)
-  } catch {
-    return []
-  }
-}
-
-function saveAllOutlineStorylines(items: OutlineStoryline[]): void {
-  writeScopedStorageItem(OUTLINE_STORYLINES_KEY, JSON.stringify(items))
-}
-
-function normalizeOutlineStorylineType(type?: unknown): OutlineStorylineType {
-  const value = String(type ?? '').trim()
-  if (
-    value === 'main' ||
-    value === 'subplot' ||
-    value === 'character' ||
-    value === 'romance' ||
-    value === 'antagonist' ||
-    value === 'world' ||
-    value === 'custom'
-  ) {
-    return value
-  }
-  return 'custom'
-}
-
-function outlineStorylineDefaultColor(type: OutlineStorylineType): string {
-  if (type === 'main') return '#8b5cf6'
-  if (type === 'subplot') return '#0ea5e9'
-  if (type === 'character') return '#22c55e'
-  if (type === 'romance') return '#f43f5e'
-  if (type === 'antagonist') return '#f97316'
-  if (type === 'world') return '#14b8a6'
-  return '#64748b'
-}
-
 function normalizeOutlineTension(value: unknown): OutlineTension {
   const n = Math.round(Number(value))
   if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) return n
@@ -1015,7 +951,6 @@ function normalizeOutlineItem(row: OutlineItem | (Partial<OutlineItem> & Record<
     result: String(row.result ?? '').trim(),
     suspense: String(row.suspense ?? '').trim(),
     plotStage: row.plotStage === 'drafted' || row.plotStage === 'written' || row.plotStage === 'resolved' ? row.plotStage : 'idea',
-    storylineIds: normalizeIdList(row.storylineIds),
     parentId: String(row.parentId ?? '').trim() || null,
     location: String(row.location ?? '').trim(),
     timeLabel: String(row.timeLabel ?? '').trim(),
@@ -1030,106 +965,8 @@ function normalizeOutlineItem(row: OutlineItem | (Partial<OutlineItem> & Record<
   }
 }
 
-export function getOutlineStorylinesByNovelId(novelId: string): OutlineStoryline[] {
-  return getAllOutlineStorylines()
-    .filter((s) => s.novelId === novelId)
-    .sort((a, b) => a.order - b.order)
-}
-
-export function createOutlineStoryline(input: NewOutlineStorylineInput): OutlineStoryline {
-  const all = getAllOutlineStorylines()
-  const novelId = input.novelId.trim()
-  const novelItems = all.filter((s) => s.novelId === novelId)
-  const maxOrder = novelItems.reduce((max, s) => Math.max(max, s.order), 0)
-  const type = normalizeOutlineStorylineType(input.type)
-  const now = nowIso()
-  const item: OutlineStoryline = {
-    id: uid(),
-    novelId,
-    name: input.name.trim() || `故事线 ${maxOrder + 1}`,
-    type,
-    color: String(input.color ?? '').trim() || outlineStorylineDefaultColor(type),
-    description: String(input.description ?? '').trim(),
-    order: maxOrder + 1,
-    createdAt: now,
-    updatedAt: now,
-  }
-  all.push(item)
-  saveAllOutlineStorylines(all)
-  return item
-}
-
-export function updateOutlineStoryline(
-  partial: Pick<OutlineStoryline, 'id'> & Partial<OutlineStoryline>,
-): OutlineStoryline | null {
-  const all = getAllOutlineStorylines()
-  const idx = all.findIndex((s) => s.id === partial.id)
-  if (idx < 0) return null
-  const type = partial.type != null ? normalizeOutlineStorylineType(partial.type) : all[idx].type
-  const updated: OutlineStoryline = {
-    ...all[idx],
-    ...partial,
-    name: partial.name != null ? String(partial.name).trim() || all[idx].name : all[idx].name,
-    type,
-    color: partial.color != null ? String(partial.color).trim() || outlineStorylineDefaultColor(type) : all[idx].color,
-    description: partial.description != null ? String(partial.description).trim() : all[idx].description,
-    updatedAt: nowIso(),
-  }
-  all[idx] = updated
-  saveAllOutlineStorylines(all)
-  return updated
-}
-
-export function deleteOutlineStoryline(storylineId: string): boolean {
-  const all = getAllOutlineStorylines()
-  const target = all.find((s) => s.id === storylineId)
-  if (!target) return false
-  const filtered = all.filter((s) => s.id !== storylineId)
-  const novelItems = filtered
-    .filter((s) => s.novelId === target.novelId)
-    .sort((a, b) => a.order - b.order)
-  const now = nowIso()
-  novelItems.forEach((item, i) => {
-    const idx = filtered.findIndex((s) => s.id === item.id)
-    if (idx >= 0) filtered[idx] = { ...filtered[idx], order: i + 1, updatedAt: now }
-  })
-  saveAllOutlineStorylines(filtered)
-
-  const outlineItems = getAllOutlineItems()
-  const nextOutlineItems = outlineItems.map((item) => {
-    const ids = item.storylineIds ?? []
-    if (!ids.includes(storylineId)) return item
-    return {
-      ...item,
-      storylineIds: ids.filter((id) => id !== storylineId),
-      updatedAt: now,
-    }
-  })
-  saveAllOutlineItems(nextOutlineItems)
-  return true
-}
-
-export function moveOutlineStoryline(storylineId: string, direction: 'up' | 'down'): boolean {
-  const all = getAllOutlineStorylines()
-  const target = all.find((s) => s.id === storylineId)
-  if (!target) return false
-  const novelItems = all
-    .filter((s) => s.novelId === target.novelId)
-    .sort((a, b) => a.order - b.order)
-  const pos = novelItems.findIndex((s) => s.id === storylineId)
-  if (pos < 0) return false
-  const newPos = direction === 'up' ? pos - 1 : pos + 1
-  if (newPos < 0 || newPos >= novelItems.length) return false
-  const a = novelItems[pos]
-  const b = novelItems[newPos]
-  const ia = all.findIndex((x) => x.id === a.id)
-  const ib = all.findIndex((x) => x.id === b.id)
-  if (ia < 0 || ib < 0) return false
-  const now = nowIso()
-  all[ia] = { ...a, order: b.order, updatedAt: now }
-  all[ib] = { ...b, order: a.order, updatedAt: now }
-  saveAllOutlineStorylines(all)
-  return true
+export function getOutlineStorylinesByNovelId(_novelId: string): OutlineStoryline[] {
+  return []
 }
 function getAllOutlineItems(): OutlineItem[] {
   const raw = readScopedStorageItem(OUTLINE_KEY)
@@ -1174,7 +1011,6 @@ export function createOutlineItem(input: NewOutlineInput): OutlineItem {
     result: String(input.result ?? '').trim(),
     suspense: String(input.suspense ?? '').trim(),
     plotStage: input.plotStage ?? 'idea',
-    storylineIds: normalizeIdList(input.storylineIds),
     parentId: String(input.parentId ?? '').trim() || null,
     location: String(input.location ?? '').trim(),
     timeLabel: String(input.timeLabel ?? '').trim(),
@@ -1202,7 +1038,6 @@ export function updateOutlineItem(
   const updated: OutlineItem = {
     ...all[idx],
     ...partial,
-    storylineIds: partial.storylineIds !== undefined ? normalizeIdList(partial.storylineIds) : all[idx].storylineIds ?? [],
     characterIds: partial.characterIds !== undefined ? normalizeIdList(partial.characterIds) : all[idx].characterIds ?? [],
     factionIds: partial.factionIds !== undefined ? normalizeIdList(partial.factionIds) : all[idx].factionIds ?? [],
     foreshadowIds: partial.foreshadowIds !== undefined ? normalizeIdList(partial.foreshadowIds) : all[idx].foreshadowIds ?? [],

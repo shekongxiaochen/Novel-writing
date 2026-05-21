@@ -19,7 +19,6 @@ from app.models import (
     NovelSnapshot,
     NovelChapter,
     OutlineItemRecord,
-    OutlineStorylineRecord,
     TimelineEventRecord,
 )
 
@@ -32,7 +31,6 @@ def default_snapshot_payload() -> dict[str, Any]:
     return {
         "chapters": [],
         "outline": [],
-        "outlineStorylines": [],
         "characters": [],
         "characterRelations": [],
         "factions": [],
@@ -109,7 +107,6 @@ def sync_novel_workspace_from_snapshot(db: Session, novel: Novel, payload: dict[
     db.execute(delete(CharacterRecord).where(CharacterRecord.novel_id == novel_id))
     db.execute(delete(CategoryRecord).where(CategoryRecord.novel_id == novel_id))
     db.execute(delete(OutlineItemRecord).where(OutlineItemRecord.novel_id == novel_id))
-    db.execute(delete(OutlineStorylineRecord).where(OutlineStorylineRecord.novel_id == novel_id))
     db.execute(delete(NovelChapter).where(NovelChapter.novel_id == novel_id))
 
     for row in _row_list(normalized["chapters"]):
@@ -127,24 +124,6 @@ def sync_novel_workspace_from_snapshot(db: Session, novel: Novel, payload: dict[
                 content=_s(row.get("content")),
                 outline_item_ids=_json_list(row.get("outlineItemIds")),
                 status=_s(row.get("status"), "draft") or "draft",
-                created_at=_dt(row.get("createdAt")),
-                updated_at=_dt(row.get("updatedAt")),
-            )
-        )
-
-    for row in _row_list(normalized["outlineStorylines"]):
-        storyline_id = _s(row.get("id"))
-        if not storyline_id:
-            continue
-        db.add(
-            OutlineStorylineRecord(
-                id=storyline_id,
-                novel_id=novel_id,
-                name=_s(row.get("name")),
-                type=_s(row.get("type"), "custom") or "custom",
-                color=_s(row.get("color")),
-                description=_s(row.get("description")),
-                display_order=_i(row.get("order")) or 0,
                 created_at=_dt(row.get("createdAt")),
                 updated_at=_dt(row.get("updatedAt")),
             )
@@ -169,7 +148,6 @@ def sync_novel_workspace_from_snapshot(db: Session, novel: Novel, payload: dict[
                 result=_s(row.get("result")),
                 suspense=_s(row.get("suspense")),
                 plot_stage=_s(row.get("plotStage")),
-                storyline_ids=_json_list(row.get("storylineIds")),
                 parent_id=_s(row.get("parentId")) or None,
                 location=_s(row.get("location")),
                 time_label=_s(row.get("timeLabel")),
@@ -390,24 +368,6 @@ def build_workspace_payload_from_db(db: Session, novel_id: str) -> dict[str, Any
         .all()
     ]
 
-    payload["outlineStorylines"] = [
-        {
-            "id": row.id,
-            "novelId": row.novel_id,
-            "name": row.name,
-            "type": row.type,
-            "color": row.color,
-            "description": row.description,
-            "order": row.display_order,
-            "createdAt": row.created_at.isoformat(),
-            "updatedAt": row.updated_at.isoformat(),
-        }
-        for row in db.query(OutlineStorylineRecord)
-        .filter(OutlineStorylineRecord.novel_id == novel_id)
-        .order_by(OutlineStorylineRecord.display_order.asc(), OutlineStorylineRecord.created_at.asc())
-        .all()
-    ]
-
     payload["outline"] = [
         {
             "id": row.id,
@@ -423,7 +383,6 @@ def build_workspace_payload_from_db(db: Session, novel_id: str) -> dict[str, Any
             "result": row.result or "",
             "suspense": row.suspense or "",
             "plotStage": row.plot_stage or None,
-            "storylineIds": row.storyline_ids or [],
             "parentId": row.parent_id,
             "location": row.location or "",
             "timeLabel": row.time_label or "",

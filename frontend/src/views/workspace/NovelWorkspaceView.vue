@@ -103,12 +103,9 @@
             <dt>已绑定</dt>
             <dd>{{ outlineConsoleStats.linked }}</dd>
           </div>
-          <div>
-            <dt>故事线</dt>
-            <dd>{{ outlineStorylines.length }}</dd>
-          </div>
         </dl>
         <div class="outline-map-hero__actions">
+          <button type="button" class="btn-secondary" @click="openOutlineAiDesigner">AI设计大纲</button>
           <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
         </div>
       </header>
@@ -116,7 +113,10 @@
       <div v-if="outlineItems.length === 0" class="outline-map-empty-state">
         <h2>先建立第一张情节导图</h2>
         <p class="muted">创建第一个节点后，这里会直接呈现思维导图和右侧编辑区。</p>
-        <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
+        <div class="outline-map-empty-state__actions">
+          <button type="button" class="btn-secondary" @click="openOutlineAiDesigner">AI设计大纲</button>
+          <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
+        </div>
       </div>
       <div v-else class="outline-map-workspace">
         <OutlineMindMapCanvas
@@ -151,6 +151,196 @@
       </div>
 
       <Teleport to="body">
+        <Transition name="confirm">
+          <div v-if="outlineAiDesignerOpen" class="confirm-overlay" role="presentation" @click.self="closeOutlineAiDesigner">
+            <div class="confirm-dialog workspace-outline-dialog workspace-outline-ai-dialog" role="dialog" aria-modal="true">
+              <div class="confirm-dialog__accent" aria-hidden="true" />
+              <div class="confirm-dialog__body workspace-outline-dialog__body">
+                <div class="workspace-outline-ai-dialog__head">
+                  <div>
+                    <h2 class="confirm-dialog__title">AI设计大纲</h2>
+                    <p class="muted workspace-outline-dialog__sub">
+                      {{
+                        outlineAiDesignerStep === 'interview'
+                          ? 'AI 会像编辑一样一步一步追问，问到信息够用为止。'
+                          : outlineAiDesignerStep === 'options'
+                            ? '从备选方案里挑一个最顺手的，再展开成正式大纲。'
+                            : '确认这份大纲草案后，直接写入当前作品。'
+                      }}
+                    </p>
+                  </div>
+                  <span class="workspace-outline-ai-dialog__progress">
+                      {{
+                        outlineAiDesignerStep === 'interview'
+                          ? `访谈中 · ${outlineAiInterviewTurnCount}`
+                          : outlineAiDesignerStep === 'options'
+                            ? '方案选择'
+                            : '草案预览'
+                      }}
+                    </span>
+                  </div>
+
+                <div class="workspace-outline-dialog__scroll scrollbar-paper workspace-outline-ai-dialog__scroll">
+                  <template v-if="outlineAiDesignerStep === 'interview'">
+                    <section class="workspace-outline-ai-panel">
+                      <div class="workspace-outline-ai-panel__summary">
+                        <strong>已确认 {{ outlineAiInterviewHistory.length }} 轮</strong>
+                        <span class="muted">AI 会根据你的回答决定下一问，不再走固定问卷。</span>
+                      </div>
+                      <div v-if="outlineAiInterviewHistory.length > 0" class="workspace-outline-ai-followup-history">
+                        <article v-for="(turn, index) in outlineAiInterviewHistory" :key="`${turn.label}-${index}`" class="workspace-outline-ai-followup-turn">
+                          <span class="workspace-outline-ai-followup-turn__index">已确认 {{ index + 1 }}</span>
+                          <strong>{{ turn.label }}</strong>
+                          <p>{{ turn.prompt }}</p>
+                          <div class="workspace-outline-ai-followup-turn__answer">{{ turn.answer }}</div>
+                        </article>
+                      </div>
+                      <p v-if="outlineAiDesignerRationale" class="workspace-outline-ai-brief">{{ outlineAiDesignerRationale }}</p>
+                      <article v-if="outlineAiCurrentQuestion" class="workspace-outline-ai-question workspace-outline-ai-question--followup">
+                        <div class="workspace-outline-ai-question__head">
+                          <strong>{{ outlineAiCurrentQuestion.label }}</strong>
+                          <span class="muted">第 {{ outlineAiInterviewHistory.length + 1 }} 轮</span>
+                        </div>
+                        <p class="workspace-outline-ai-followup-prompt">{{ outlineAiCurrentQuestion.prompt }}</p>
+                        <div class="workspace-outline-ai-question__options">
+                          <button
+                            v-for="option in outlineAiCurrentQuestion.options"
+                            :key="option"
+                            type="button"
+                            class="workspace-outline-ai-option"
+                            :class="{ 'workspace-outline-ai-option--active': outlineAiCurrentAnswer === option }"
+                            @click="outlineAiCurrentAnswer = option"
+                          >
+                            {{ option }}
+                          </button>
+                          <button
+                            type="button"
+                            class="workspace-outline-ai-option"
+                            :class="{ 'workspace-outline-ai-option--active': outlineAiCurrentAnswer === '__custom__' }"
+                            @click="outlineAiCurrentAnswer = '__custom__'"
+                          >
+                            自己输入
+                          </button>
+                        </div>
+                        <textarea
+                          v-model="outlineAiCurrentCustom"
+                          class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea"
+                          rows="4"
+                          maxlength="400"
+                          :placeholder="outlineAiCurrentQuestion.placeholder || '用一句到几句话回答这轮问题'"
+                        />
+                      </article>
+                    </section>
+                  </template>
+
+                  <template v-else-if="outlineAiDesignerStep === 'options'">
+                    <section class="workspace-outline-ai-panel">
+                      <p v-if="outlineAiDesignerBrief" class="workspace-outline-ai-brief">{{ outlineAiDesignerBrief }}</p>
+                      <div class="workspace-outline-ai-plan-list">
+                        <article
+                          v-for="option in outlineAiDesignerOptions"
+                          :key="option.id"
+                          class="workspace-outline-ai-plan"
+                          :class="{ 'workspace-outline-ai-plan--active': outlineAiDesignerSelectedOptionId === option.id }"
+                          @click="chooseOutlineAiOption(option.id)"
+                        >
+                          <div class="workspace-outline-ai-plan__head">
+                            <div>
+                              <h3>{{ option.title }}</h3>
+                              <p>{{ option.premise }}</p>
+                            </div>
+                            <span>{{ option.structure }}</span>
+                          </div>
+                          <div class="workspace-outline-ai-plan__section">
+                            <strong>亮点</strong>
+                            <ul>
+                              <li v-for="point in option.highlights" :key="point">{{ point }}</li>
+                            </ul>
+                          </div>
+                          <div class="workspace-outline-ai-plan__section">
+                            <strong>推进节拍</strong>
+                            <ol>
+                              <li v-for="beat in option.beats" :key="beat">{{ beat }}</li>
+                            </ol>
+                          </div>
+                          <p class="workspace-outline-ai-plan__ending">结局气质：{{ option.endingTone || '未注明' }}</p>
+                        </article>
+                      </div>
+                    </section>
+                  </template>
+
+                  <template v-else-if="outlineAiDesignerDraft">
+                    <section class="workspace-outline-ai-panel">
+                      <div class="workspace-outline-ai-preview-head">
+                        <div>
+                          <h3>{{ outlineAiDesignerDraft.title || selectedOutlineAiOption?.title || '未命名大纲' }}</h3>
+                          <p>{{ outlineAiDesignerDraft.summary || selectedOutlineAiOption?.premise || 'AI 已生成一份可写入的大纲草案。' }}</p>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>节点</dt>
+                            <dd>{{ outlineAiDesignerDraft.items.length }}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <div class="workspace-outline-ai-draft-list">
+                        <article v-for="item in outlineAiDesignerDraft.items" :key="item.tempId" class="workspace-outline-ai-draft-item">
+                          <div class="workspace-outline-ai-draft-item__head">
+                            <strong>{{ item.title }}</strong>
+                            <span>{{ item.level }}</span>
+                          </div>
+                          <p>{{ item.summary || '暂无摘要' }}</p>
+                          <div class="workspace-outline-ai-draft-item__meta">
+                            <span v-if="item.goal">目标：{{ item.goal }}</span>
+                            <span v-if="item.conflict">冲突：{{ item.conflict }}</span>
+                            <span v-if="item.suspense">悬念：{{ item.suspense }}</span>
+                          </div>
+                        </article>
+                      </div>
+                    </section>
+                  </template>
+
+                  <p v-if="outlineAiDesignerError" class="form-error workspace-outline-ai-dialog__error">{{ outlineAiDesignerError }}</p>
+                </div>
+
+                <div class="confirm-dialog__actions workspace-outline-dialog__actions workspace-outline-ai-dialog__actions">
+                  <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="closeOutlineAiDesigner">关闭</button>
+                  <button
+                    v-if="outlineAiDesignerStep === 'interview'"
+                    type="button"
+                    class="btn-secondary"
+                    :disabled="outlineAiDesignerLoading || outlineAiInterviewHistory.length === 0"
+                    @click="generateOutlineAiOptions"
+                  >
+                    {{ outlineAiDesignerLoading ? '生成中…' : '直接出方案' }}
+                  </button>
+                  <button
+                    v-if="outlineAiDesignerStep === 'interview'"
+                    type="button"
+                    class="btn-primary"
+                    :disabled="outlineAiDesignerLoading || !outlineAiResolvedAnswer || !outlineAiCurrentQuestion"
+                    @click="submitOutlineAiInterviewAnswer"
+                  >
+                    {{ outlineAiDesignerLoading ? '处理中…' : '回答这一轮' }}
+                  </button>
+                  <template v-else-if="outlineAiDesignerStep === 'options'">
+                    <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading" @click="backToOutlineAiInterview">返回继续访谈</button>
+                    <button type="button" class="btn-primary" :disabled="outlineAiDesignerLoading || !selectedOutlineAiOption" @click="generateOutlineAiDraft">
+                      {{ outlineAiDesignerLoading ? '展开中…' : '生成正式大纲' }}
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="backToOutlineAiOptions">返回方案</button>
+                    <button type="button" class="btn-primary" :disabled="outlineAiDesignerWriting" @click="applyOutlineAiDraft">
+                      {{ outlineAiDesignerWriting ? '写入中…' : '写入当前大纲' }}
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+
         <Transition name="confirm">
           <div v-if="outlineCreateOpen" class="confirm-overlay" role="presentation" @click.self="closeOutlineCreate">
             <div class="confirm-dialog workspace-outline-dialog workspace-outline-create-dialog" role="dialog" aria-modal="true">
@@ -283,22 +473,6 @@
                         {{ outlineAiLoadingById[activeOutlineDetailItem.id] ? '生成中…' : 'AI一键补全' }}
                       </button>
                     </div>
-                  </section>
-
-                  <section class="outline-dialog-section">
-                    <h3>故事线</h3>
-                    <div v-if="outlineStorylines.length > 0" class="outline-form-storylines">
-                      <button
-                        v-for="line in outlineStorylines"
-                        :key="`ol-line-${activeOutlineDetailItem.id}-${line.id}`"
-                        type="button"
-                        class="outline-card__bind-chip outline-card__bind-chip--storyline"
-                        :class="{ 'outline-card__bind-chip--active': isOutlineStorylineBound(activeOutlineDetailItem, line.id) }"
-                        :style="{ '--storyline-color': line.color }"
-                        @click="toggleOutlineStorylineBind(activeOutlineDetailItem.id, line.id)"
-                      >{{ line.name }}</button>
-                    </div>
-                    <p v-else class="muted">暂无故事线可关联。</p>
                   </section>
 
                   <section class="outline-dialog-section">
@@ -2347,6 +2521,7 @@ import {
   createItem,
   createOutlineItem,
   createTimelineEvent,
+  buildNovelWorkspacePayload,
   deleteCategory,
   deleteCharacter,
   deleteFaction,
@@ -2371,7 +2546,6 @@ import {
   getItemsByNovelId,
   getNovelById,
   getOutlineByNovelId,
-  getOutlineStorylinesByNovelId,
   getTimelineByNovelId,
   moveTimelineEvent,
   normalizeCategoryIds,
@@ -2387,7 +2561,9 @@ import {
   updateTimelineEvent,
 } from '../../lib/storage'
 import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
-import { expandOutlineItemByAi } from '../../lib/localAi'
+import { designOutlineInterviewTurnByAi, designOutlineOptionsByAi, expandOutlineDesignByAi, expandOutlineItemByAi } from '../../lib/localAi'
+import { syncAllNovelsWithCloud } from '../../lib/cloudSync'
+import { getCurrentSession } from '../../lib/auth'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
 import AiSettingsDialog from '../../components/AiSettingsDialog.vue'
 import type {
@@ -2408,7 +2584,6 @@ import type {
   OutlineNodeLevel,
   OutlinePlotStage,
   OutlineStatus,
-  OutlineStoryline,
   OutlineTension,
   TimelineEvent,
 } from '../../types'
@@ -2439,15 +2614,73 @@ type WorkspaceTab =
   | 'issues'
   | 'ai'
 
+type OutlineAiInterviewQuestion = {
+  label: string
+  prompt: string
+  options: string[]
+  placeholder: string
+}
+
+type OutlineAiOption = {
+  id: string
+  title: string
+  premise: string
+  structure: string
+  highlights: string[]
+  endingTone: string
+  beats: string[]
+}
+
+type OutlineAiFollowupTurn = {
+  label: string
+  prompt: string
+  answer: string
+}
+
+type OutlineAiDraft = {
+  title: string
+  summary: string
+  items: Array<{
+    tempId: string
+    parentTempId: string
+    title: string
+    summary: string
+    level: 'volume' | 'act' | 'chapter' | 'scene'
+    goal: string
+    conflict: string
+    twist: string
+    result: string
+    suspense: string
+    plotStage: 'idea' | 'drafted' | 'written' | 'resolved'
+    storylineNames: string[]
+    tension: 1 | 2 | 3 | 4 | 5
+    location: string
+    timeLabel: string
+  }>
+}
+
 const novelId = computed(() => String(route.params.id ?? ''))
 const novel = computed(() => getNovelById(novelId.value))
 const activeTab = ref<WorkspaceTab>('write')
 const lastTabBeforeCharacters = ref<Exclude<WorkspaceTab, 'characters'> | ''>('')
 const chapters = ref<Chapter[]>([])
 const outlineItems = ref<OutlineItem[]>([])
-const outlineStorylines = ref<OutlineStoryline[]>([])
 const expandedOutlineId = ref<string>('')
 const outlineCreateOpen = ref(false)
+const outlineAiDesignerOpen = ref(false)
+const outlineAiDesignerStep = ref<'interview' | 'options' | 'preview'>('interview')
+const outlineAiDesignerLoading = ref(false)
+const outlineAiDesignerWriting = ref(false)
+const outlineAiDesignerError = ref('')
+const outlineAiDesignerRationale = ref('')
+const outlineAiDesignerBrief = ref('')
+const outlineAiDesignerOptions = ref<OutlineAiOption[]>([])
+const outlineAiDesignerSelectedOptionId = ref('')
+const outlineAiDesignerDraft = ref<OutlineAiDraft | null>(null)
+const outlineAiInterviewHistory = ref<OutlineAiFollowupTurn[]>([])
+const outlineAiCurrentQuestion = ref<OutlineAiInterviewQuestion | null>(null)
+const outlineAiCurrentAnswer = ref('')
+const outlineAiCurrentCustom = ref('')
 const outlineDetailOpenId = ref('')
 const activeOutlineDetailItem = computed(() =>
   outlineItems.value.find((item) => item.id === outlineDetailOpenId.value) ?? null,
@@ -2595,7 +2828,6 @@ const filteredOutlineItems = computed(() => {
   return outlineItems.value.filter((item) => {
     if (outlineFilter.stage && (item.plotStage ?? 'idea') !== outlineFilter.stage) return false
     if (outlineFilter.level && (item.level ?? 'scene') !== outlineFilter.level) return false
-    if (outlineFilter.storylineId && !(item.storylineIds ?? []).includes(outlineFilter.storylineId)) return false
     if (!q) return true
     const text = [
       item.title,
@@ -2607,7 +2839,6 @@ const filteredOutlineItems = computed(() => {
       item.suspense ?? '',
       item.location ?? '',
       item.timeLabel ?? '',
-      outlineStorylineNames(item),
       outlinePovName(item),
     ]
       .join(' ')
@@ -2625,19 +2856,7 @@ const groupedOutlineItems = computed(() =>
     }))
     .filter((group) => group.items.length > 0),
 )
-const outlineStorylineGroups = computed<Array<{ id: string; label: string; storyline: OutlineStoryline | null; items: OutlineItem[] }>>(() => {
-  const groups = outlineStorylines.value.map((line) => ({
-    id: line.id,
-    label: line.name,
-    storyline: line,
-    items: filteredOutlineItems.value.filter((item) => (item.storylineIds ?? []).includes(line.id)),
-  }))
-  const unassigned = filteredOutlineItems.value.filter((item) => (item.storylineIds ?? []).length === 0)
-  if (unassigned.length > 0) {
-    groups.push({ id: '__unassigned__', label: '未归线', storyline: null, items: unassigned })
-  }
-  return groups.filter((group) => group.items.length > 0)
-})
+const outlineStorylineGroups = computed(() => [])
 const outlineRhythmItems = computed(() =>
   filteredOutlineItems.value.map((item) => ({
     item,
@@ -2662,6 +2881,18 @@ const outlineConsoleStats = computed(() => {
     todo: outlineItems.value.filter((i) => i.status === 'todo').length,
   }
 })
+const outlineAiInterviewTurnCount = computed(() =>
+  outlineAiInterviewHistory.value.length + (outlineAiCurrentQuestion.value ? 1 : 0),
+)
+const outlineAiResolvedAnswer = computed(() => {
+  if (outlineAiCurrentAnswer.value.trim() && outlineAiCurrentAnswer.value.trim() !== '__custom__') {
+    return outlineAiCurrentAnswer.value.trim()
+  }
+  return outlineAiCurrentCustom.value.trim()
+})
+const selectedOutlineAiOption = computed(() =>
+  outlineAiDesignerOptions.value.find((item) => item.id === outlineAiDesignerSelectedOptionId.value) ?? null,
+)
 
 const {
   linkedChapterCountByOutlineId,
@@ -3351,7 +3582,6 @@ watch(
   (id) => {
     chapters.value = getChaptersByNovelId(id)
     outlineItems.value = getOutlineByNovelId(id)
-    outlineStorylines.value = getOutlineStorylinesByNovelId(id)
     characters.value = getCharactersByNovelId(id)
     characterRelations.value = getCharacterRelationsByNovelId(id)
     graphFocusCharacterId.value = characters.value[0]?.id ?? ''
@@ -3487,6 +3717,210 @@ function openOutlineCreate(): void {
   outlineCreateOpen.value = true
 }
 
+function resetOutlineAiDesignerState(): void {
+  outlineAiDesignerStep.value = 'interview'
+  outlineAiDesignerLoading.value = false
+  outlineAiDesignerWriting.value = false
+  outlineAiDesignerError.value = ''
+  outlineAiDesignerRationale.value = ''
+  outlineAiDesignerBrief.value = ''
+  outlineAiDesignerOptions.value = []
+  outlineAiDesignerSelectedOptionId.value = ''
+  outlineAiDesignerDraft.value = null
+  outlineAiInterviewHistory.value = []
+  outlineAiCurrentQuestion.value = null
+  outlineAiCurrentAnswer.value = ''
+  outlineAiCurrentCustom.value = ''
+}
+
+async function openOutlineAiDesigner(): Promise<void> {
+  closeWorkspaceDropdowns()
+  resetOutlineAiDesignerState()
+  outlineAiDesignerOpen.value = true
+  const hasNext = await requestNextOutlineAiQuestion()
+  if (!hasNext && !outlineAiDesignerError.value) {
+    await generateOutlineAiOptions()
+  }
+}
+
+function closeOutlineAiDesigner(): void {
+  if (outlineAiDesignerLoading.value || outlineAiDesignerWriting.value) return
+  outlineAiDesignerOpen.value = false
+}
+
+function chooseOutlineAiOption(optionId: string): void {
+  outlineAiDesignerSelectedOptionId.value = optionId
+}
+
+function collectOutlineAiInterviewHistory(): Array<{ label: string; prompt: string; answer: string }> {
+  return outlineAiInterviewHistory.value.map((row) => ({
+    label: row.label,
+    prompt: row.prompt,
+    answer: row.answer,
+  }))
+}
+
+async function requestNextOutlineAiQuestion(): Promise<boolean> {
+  if (!novel.value) return false
+  outlineAiDesignerLoading.value = true
+  outlineAiDesignerError.value = ''
+  try {
+    const result = await designOutlineInterviewTurnByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      {
+        novelTitle: novel.value.title,
+        novelSummary: novel.value.summary,
+        history: collectOutlineAiInterviewHistory(),
+        remainingRounds: Math.max(0, 6 - outlineAiInterviewHistory.value.length),
+      },
+    )
+    outlineAiDesignerRationale.value = result.rationale
+    if (result.shouldAsk && result.question) {
+      outlineAiCurrentQuestion.value = result.question
+      outlineAiCurrentAnswer.value = ''
+      outlineAiCurrentCustom.value = ''
+      outlineAiDesignerStep.value = 'interview'
+      return true
+    }
+    outlineAiCurrentQuestion.value = null
+    return false
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 生成问题失败，请稍后重试。'
+    return true
+  } finally {
+    outlineAiDesignerLoading.value = false
+  }
+}
+
+async function generateOutlineAiOptions(): Promise<void> {
+  if (!novel.value) return
+  outlineAiDesignerBrief.value = ''
+  outlineAiDesignerOptions.value = []
+  outlineAiDesignerSelectedOptionId.value = ''
+  outlineAiDesignerDraft.value = null
+  outlineAiDesignerLoading.value = true
+  outlineAiDesignerError.value = ''
+  try {
+    const result = await designOutlineOptionsByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      {
+        novelTitle: novel.value.title,
+        novelSummary: novel.value.summary,
+        history: collectOutlineAiInterviewHistory(),
+      },
+    )
+    if (result.options.length === 0) throw new Error('AI 这次没有给出可用的大纲方案。')
+    outlineAiDesignerBrief.value = result.brief
+    outlineAiDesignerOptions.value = result.options
+    outlineAiDesignerSelectedOptionId.value = result.options[0]?.id ?? ''
+    outlineAiDesignerStep.value = 'options'
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 生成大纲方案失败，请稍后重试。'
+  } finally {
+    outlineAiDesignerLoading.value = false
+  }
+}
+
+async function submitOutlineAiInterviewAnswer(): Promise<void> {
+  const question = outlineAiCurrentQuestion.value
+  const answer = outlineAiResolvedAnswer.value
+  if (!question || !answer) return
+  outlineAiInterviewHistory.value = [
+    ...outlineAiInterviewHistory.value,
+    {
+      label: question.label,
+      prompt: question.prompt,
+      answer,
+    },
+  ]
+  outlineAiCurrentQuestion.value = null
+  outlineAiCurrentAnswer.value = ''
+  outlineAiCurrentCustom.value = ''
+  if (outlineAiInterviewHistory.value.length >= 6) {
+    await generateOutlineAiOptions()
+    return
+  }
+  const hasNext = await requestNextOutlineAiQuestion()
+  if (!hasNext && !outlineAiDesignerError.value) {
+    await generateOutlineAiOptions()
+  }
+}
+
+async function generateOutlineAiDraft(): Promise<void> {
+  if (!novel.value || !selectedOutlineAiOption.value) return
+  outlineAiDesignerLoading.value = true
+  outlineAiDesignerError.value = ''
+  outlineAiDesignerDraft.value = null
+  try {
+    const result = await expandOutlineDesignByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      {
+        novelTitle: novel.value.title,
+        novelSummary: novel.value.summary,
+        history: collectOutlineAiInterviewHistory(),
+        selectedOption: selectedOutlineAiOption.value,
+      },
+    )
+    if (result.items.length === 0) throw new Error('AI 这次没有展开出可用的大纲节点。')
+    outlineAiDesignerDraft.value = result
+    outlineAiDesignerStep.value = 'preview'
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 展开大纲失败，请稍后重试。'
+  } finally {
+    outlineAiDesignerLoading.value = false
+  }
+}
+
+function backToOutlineAiInterview(): void {
+  if (outlineAiDesignerLoading.value) return
+  outlineAiDesignerStep.value = 'interview'
+  if (!outlineAiCurrentQuestion.value) {
+    void requestNextOutlineAiQuestion()
+  }
+}
+
+function backToOutlineAiOptions(): void {
+  if (outlineAiDesignerLoading.value) return
+  outlineAiDesignerStep.value = 'options'
+}
+
+async function applyOutlineAiDraft(): Promise<void> {
+  if (!novel.value || !outlineAiDesignerDraft.value) return
+  outlineAiDesignerWriting.value = true
+  outlineAiDesignerError.value = ''
+  try {
+    const createdIdMap = new Map<string, string>()
+    for (const item of outlineAiDesignerDraft.value.items) {
+      const created = createOutlineItem({
+        novelId: novel.value.id,
+        title: item.title,
+        summary: item.summary,
+        level: item.level,
+        goal: item.goal,
+        conflict: item.conflict,
+        twist: item.twist,
+        result: item.result,
+        suspense: item.suspense,
+        plotStage: item.plotStage,
+        parentId: item.parentTempId ? (createdIdMap.get(item.parentTempId) ?? null) : null,
+        location: item.location,
+        timeLabel: item.timeLabel,
+        povCharacterId: null,
+        tension: item.tension,
+      })
+      createdIdMap.set(item.tempId, created.id)
+    }
+    outlineItems.value = getOutlineByNovelId(novel.value.id)
+    activeOutlineMapId.value = outlineItems.value[outlineItems.value.length - 1]?.id ?? ''
+    if (getCurrentSession()?.token) await syncAllNovelsWithCloud()
+    outlineAiDesignerOpen.value = false
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : '写入大纲失败，请稍后重试。'
+  } finally {
+    outlineAiDesignerWriting.value = false
+  }
+}
+
 function closeOutlineCreate(): void {
   outlineCreateOpen.value = false
 }
@@ -3564,17 +3998,6 @@ function resetOutlineCreateForm(): void {
   outlineTemplate.hook = ''
 }
 
-function outlineStorylineById(id: string): OutlineStoryline | null {
-  return outlineStorylines.value.find((line) => line.id === id) ?? null
-}
-
-function outlineStorylineNames(item: OutlineItem): string {
-  const names = (item.storylineIds ?? [])
-    .map((id) => outlineStorylineById(id)?.name ?? '')
-    .filter(Boolean)
-  return names.length ? names.join('、') : '未归线'
-}
-
 function outlinePovName(item: OutlineItem): string {
   if (!item.povCharacterId) return '未设置 POV'
   return characters.value.find((c) => c.id === item.povCharacterId)?.name ?? '未设置 POV'
@@ -3587,20 +4010,6 @@ function outlineTensionText(value?: OutlineTension): string {
   if (tension === 3) return '推进'
   if (tension === 4) return '紧张'
   return '爆点'
-}
-
-function toggleOutlineStorylineBind(outlineId: string, storylineId: string): void {
-  const item = outlineItems.value.find((i) => i.id === outlineId)
-  if (!item) return
-  const set = new Set(item.storylineIds ?? [])
-  if (set.has(storylineId)) set.delete(storylineId)
-  else set.add(storylineId)
-  updateOutlineItem({ id: outlineId, storylineIds: Array.from(set) })
-  outlineItems.value = getOutlineByNovelId(novelId.value)
-}
-
-function isOutlineStorylineBound(item: OutlineItem, storylineId: string): boolean {
-  return (item.storylineIds ?? []).includes(storylineId)
 }
 
 function onOutlineContextFieldChange(id: string, field: 'timeLabel' | 'location', event: Event): void {
@@ -6319,3 +6728,275 @@ onUnmounted(() => {
 })
 
 </script>
+
+<style scoped>
+.outline-map-empty-state__actions,
+.outline-map-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workspace-outline-ai-dialog {
+  width: min(980px, calc(100vw - 32px));
+}
+
+.workspace-outline-ai-dialog__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.workspace-outline-ai-dialog__progress {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary-soft) 34%, var(--color-surface));
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-outline-ai-dialog__scroll {
+  display: grid;
+  gap: 14px;
+}
+
+.workspace-outline-ai-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.workspace-outline-ai-panel__summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 24%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary-soft) 14%, var(--color-surface));
+}
+
+.workspace-outline-ai-question-list,
+.workspace-outline-ai-plan-list,
+.workspace-outline-ai-draft-list,
+.workspace-outline-ai-storylines,
+.workspace-outline-ai-followup-history {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-outline-ai-question,
+.workspace-outline-ai-plan,
+.workspace-outline-ai-draft-item,
+.workspace-outline-ai-storyline,
+.workspace-outline-ai-followup-turn {
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 22%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-surface-muted));
+}
+
+.workspace-outline-ai-question__head,
+.workspace-outline-ai-draft-item__head,
+.workspace-outline-ai-plan__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.workspace-outline-ai-question__head {
+  margin-bottom: 10px;
+}
+
+.workspace-outline-ai-question__head,
+.workspace-outline-ai-question__head span,
+.workspace-outline-ai-plan__head p,
+.workspace-outline-ai-preview-head p,
+.workspace-outline-ai-storyline p,
+.workspace-outline-ai-draft-item p {
+  margin: 0;
+}
+
+.workspace-outline-ai-question__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-outline-ai-option {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 26%, transparent);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.workspace-outline-ai-option--active {
+  border-color: color-mix(in srgb, var(--color-primary) 52%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 28%, var(--color-surface));
+  color: color-mix(in srgb, var(--color-primary) 74%, var(--color-text) 26%);
+}
+
+.workspace-outline-ai-question__input {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.workspace-outline-ai-question__textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.workspace-outline-ai-question--followup {
+  background: color-mix(in srgb, var(--color-primary-soft) 12%, var(--color-surface));
+}
+
+.workspace-outline-ai-followup-prompt {
+  margin: 0 0 12px;
+}
+
+.workspace-outline-ai-followup-turn {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-outline-ai-followup-turn p {
+  margin: 0;
+}
+
+.workspace-outline-ai-followup-turn__index {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-outline-ai-followup-turn__answer {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary-soft) 18%, var(--color-surface));
+  color: var(--color-text);
+}
+
+.workspace-outline-ai-brief {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 40%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary-soft) 18%, var(--color-surface));
+}
+
+.workspace-outline-ai-plan {
+  cursor: pointer;
+}
+
+.workspace-outline-ai-plan--active {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.workspace-outline-ai-plan__head h3,
+.workspace-outline-ai-preview-head h3 {
+  margin: 0 0 4px;
+}
+
+.workspace-outline-ai-plan__head span,
+.workspace-outline-ai-draft-item__head span,
+.workspace-outline-ai-storyline span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary-soft) 22%, var(--color-surface));
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-outline-ai-plan__section {
+  margin-top: 12px;
+}
+
+.workspace-outline-ai-plan__section strong,
+.workspace-outline-ai-plan__ending {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.workspace-outline-ai-plan__section ul,
+.workspace-outline-ai-plan__section ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.workspace-outline-ai-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary-soft) 18%, var(--color-surface));
+}
+
+.workspace-outline-ai-preview-head dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.workspace-outline-ai-preview-head dt,
+.workspace-outline-ai-preview-head dd {
+  margin: 0;
+}
+
+.workspace-outline-ai-preview-head dd {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.workspace-outline-ai-storyline strong,
+.workspace-outline-ai-draft-item strong {
+  display: block;
+}
+
+.workspace-outline-ai-storyline {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-outline-ai-draft-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.workspace-outline-ai-draft-item__meta span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.workspace-outline-ai-dialog__error {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .workspace-outline-ai-dialog__head,
+  .workspace-outline-ai-preview-head,
+  .workspace-outline-ai-panel__summary,
+  .workspace-outline-ai-question__head,
+  .workspace-outline-ai-plan__head,
+  .workspace-outline-ai-draft-item__head {
+    grid-auto-flow: row;
+    display: grid;
+  }
+}
+</style>

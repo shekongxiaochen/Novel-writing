@@ -20,7 +20,6 @@ from app.models import (
     NovelChapter,
     NovelSnapshot,
     OutlineItemRecord,
-    OutlineStorylineRecord,
     TimelineEventRecord,
     User,
 )
@@ -59,9 +58,6 @@ from app.schemas import (
     OutlineItemCreateIn,
     OutlineItemOut,
     OutlineItemUpdateIn,
-    OutlineStorylineCreateIn,
-    OutlineStorylineOut,
-    OutlineStorylineUpdateIn,
     SnapshotOut,
     SnapshotPutIn,
     TimelineEventCreateIn,
@@ -204,20 +200,6 @@ def _membership_out(row: CharacterFactionMembershipRecord) -> CharacterFactionMe
     )
 
 
-def _outline_storyline_out(row: OutlineStorylineRecord) -> OutlineStorylineOut:
-    return OutlineStorylineOut(
-        id=row.id,
-        novel_id=row.novel_id,
-        name=row.name,
-        type=row.type,
-        color=row.color,
-        description=row.description,
-        order=row.display_order,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-    )
-
-
 def _outline_item_out(row: OutlineItemRecord) -> OutlineItemOut:
     return OutlineItemOut(
         id=row.id,
@@ -233,7 +215,6 @@ def _outline_item_out(row: OutlineItemRecord) -> OutlineItemOut:
         result=row.result,
         suspense=row.suspense,
         plot_stage=row.plot_stage or None,
-        storyline_ids=row.storyline_ids or [],
         parent_id=row.parent_id,
         location=row.location,
         time_label=row.time_label,
@@ -362,16 +343,6 @@ def _membership_or_404(db: Session, novel_id: str, membership_id: str) -> Charac
     ).first()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色势力归属不存在")
-    return row
-
-
-def _outline_storyline_or_404(db: Session, novel_id: str, storyline_id: str) -> OutlineStorylineRecord:
-    row = db.query(OutlineStorylineRecord).filter(
-        OutlineStorylineRecord.novel_id == novel_id,
-        OutlineStorylineRecord.id == storyline_id,
-    ).first()
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="剧情线不存在")
     return row
 
 
@@ -1107,97 +1078,6 @@ def delete_character_faction_membership(
     return MessageOut(message="角色势力归属已删除")
 
 
-@router.get("/{novel_id}/outline-storylines", response_model=list[OutlineStorylineOut])
-def list_outline_storylines(
-    novel_id: str,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> list[OutlineStorylineOut]:
-    novel = _owned_novel_or_404(db, user, novel_id)
-    rows = (
-        db.query(OutlineStorylineRecord)
-        .filter(OutlineStorylineRecord.novel_id == novel.id)
-        .order_by(OutlineStorylineRecord.display_order.asc(), OutlineStorylineRecord.created_at.asc())
-        .all()
-    )
-    return [_outline_storyline_out(row) for row in rows]
-
-
-@router.post("/{novel_id}/outline-storylines", response_model=OutlineStorylineOut, status_code=status.HTTP_201_CREATED)
-def create_outline_storyline(
-    novel_id: str,
-    payload: OutlineStorylineCreateIn,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> OutlineStorylineOut:
-    novel = _owned_novel_or_404(db, user, novel_id)
-    existed = db.query(OutlineStorylineRecord).filter(
-        OutlineStorylineRecord.novel_id == novel.id,
-        OutlineStorylineRecord.id == payload.id,
-    ).first()
-    if existed is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="剧情线 id 已存在")
-    row = OutlineStorylineRecord(
-        id=payload.id.strip(),
-        novel_id=novel.id,
-        name=payload.name.strip(),
-        type=payload.type.strip() or "custom",
-        color=payload.color.strip(),
-        description=payload.description,
-        display_order=payload.order,
-    )
-    db.add(row)
-    _touch_snapshot(db, novel)
-    db.commit()
-    db.refresh(row)
-    return _outline_storyline_out(row)
-
-
-@router.put("/{novel_id}/outline-storylines/{storyline_id}", response_model=OutlineStorylineOut)
-def update_outline_storyline(
-    novel_id: str,
-    storyline_id: str,
-    payload: OutlineStorylineUpdateIn,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> OutlineStorylineOut:
-    novel = _owned_novel_or_404(db, user, novel_id)
-    row = _outline_storyline_or_404(db, novel.id, storyline_id)
-    data = payload.model_dump(exclude_unset=True)
-    for key, value in data.items():
-        if key == "name" and value is not None:
-            row.name = value.strip()
-        elif key == "type" and value is not None:
-            row.type = value.strip() or row.type
-        elif key == "color" and value is not None:
-            row.color = value.strip()
-        elif key == "order" and value is not None:
-            row.display_order = value
-        else:
-            setattr(row, key, value)
-    row.updated_at = datetime.utcnow()
-    db.add(row)
-    _touch_snapshot(db, novel)
-    db.commit()
-    db.refresh(row)
-    return _outline_storyline_out(row)
-
-
-@router.delete("/{novel_id}/outline-storylines/{storyline_id}", response_model=MessageOut)
-def delete_outline_storyline(
-    novel_id: str,
-    storyline_id: str,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> MessageOut:
-    novel = _owned_novel_or_404(db, user, novel_id)
-    row = _outline_storyline_or_404(db, novel.id, storyline_id)
-    db.delete(row)
-    _touch_snapshot(db, novel)
-    db.commit()
-    return MessageOut(message="剧情线已删除")
-
-
 @router.get("/{novel_id}/outline", response_model=list[OutlineItemOut])
 def list_outline_items(
     novel_id: str,
@@ -1242,7 +1122,6 @@ def create_outline_item(
         result=payload.result,
         suspense=payload.suspense,
         plot_stage=(payload.plot_stage or "").strip(),
-        storyline_ids=payload.storyline_ids,
         parent_id=payload.parent_id,
         location=payload.location,
         time_label=payload.time_label,

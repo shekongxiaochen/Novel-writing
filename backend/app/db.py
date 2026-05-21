@@ -44,12 +44,43 @@ def ping_db() -> None:
         conn.execute(text("SELECT 1"))
 
 
+def remove_legacy_outline_storyline_schema() -> None:
+    engine = get_engine()
+    with engine.begin() as conn:
+        has_storyline_table = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name = 'outline_storylines'
+                """
+            )
+        ).scalar()
+        if has_storyline_table:
+            conn.execute(text("DROP TABLE outline_storylines"))
+
+        has_storyline_column = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'outline_items'
+                  AND column_name = 'storyline_ids'
+                """
+            )
+        ).scalar()
+        if has_storyline_column:
+            conn.execute(text("ALTER TABLE outline_items DROP COLUMN storyline_ids"))
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  # 确保模型被注册
     from app.services.novel_sync import backfill_all_novels_from_snapshots
 
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
+    remove_legacy_outline_storyline_schema()
 
     with SessionLocal() as db:
         backfill_all_novels_from_snapshots(db)

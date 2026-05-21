@@ -19,35 +19,37 @@
       @pointerleave="cancelPointer"
       @keydown="onViewportKeydown"
     >
-      <div class="outline-map-canvas__scene" :style="sceneStyle">
-        <svg class="outline-map-canvas__edges" :width="sceneWidth" :height="sceneHeight" :viewBox="`0 0 ${sceneWidth} ${sceneHeight}`" aria-hidden="true">
-          <path
-            v-for="edge in edges"
-            :key="edge.id"
-            class="outline-map-canvas__edge"
-            :class="{
-              'is-active': edge.toId === activeOutlineId || edge.fromId === activeOutlineId,
-              'is-linked': linkedOutlineIdSet.has(edge.toId),
-            }"
-            :d="edge.path"
-          />
-        </svg>
+      <div class="outline-map-canvas__stage" :style="sceneStageStyle">
+        <div class="outline-map-canvas__scene" :style="sceneStyle">
+          <svg class="outline-map-canvas__edges" :width="sceneWidth" :height="sceneHeight" :viewBox="`0 0 ${sceneWidth} ${sceneHeight}`" aria-hidden="true">
+            <path
+              v-for="edge in edges"
+              :key="edge.id"
+              class="outline-map-canvas__edge"
+              :class="{
+                'is-active': edge.toId === activeOutlineId || edge.fromId === activeOutlineId,
+                'is-linked': linkedOutlineIdSet.has(edge.toId),
+              }"
+              :d="edge.path"
+            />
+          </svg>
 
-        <div
-          v-for="node in nodes"
-          :key="node.id"
-          class="outline-map-canvas__node"
-          :style="{ transform: `translate(${node.x}px, ${node.y}px)` }"
-        >
-          <OutlineMindMapNode
-            :node="node"
-            :active="node.id === activeOutlineId"
-            :linked-to-active-chapter="linkedOutlineIdSet.has(node.id)"
-            :mode="mode"
-            @select="onSelectNode"
-            @create-child="onCreateChild"
-            @toggle-link="onToggleLink"
-          />
+          <div
+            v-for="node in nodes"
+            :key="node.id"
+            class="outline-map-canvas__node"
+            :style="{ transform: `translate(${node.x}px, ${node.y}px)` }"
+          >
+            <OutlineMindMapNode
+              :node="node"
+              :active="node.id === activeOutlineId"
+              :linked-to-active-chapter="linkedOutlineIdSet.has(node.id)"
+              :mode="mode"
+              @select="onSelectNode"
+              @create-child="onCreateChild"
+              @toggle-link="onToggleLink"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -55,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import OutlineMindMapNode from './OutlineMindMapNode.vue'
 import type { OutlineMindMapEdgeView, OutlineMindMapNodeView } from '../../../../features/outline-map/composables/useOutlineMindMapLayout'
 
@@ -93,9 +95,14 @@ const isDragging = ref(false)
 
 const linkedOutlineIdSet = computed(() => new Set(props.linkedOutlineIds))
 
-const sceneStyle = computed(() => ({
+const sceneStageStyle = computed(() => ({
   width: `${props.sceneWidth * zoom.value}px`,
   height: `${props.sceneHeight * zoom.value}px`,
+}))
+
+const sceneStyle = computed(() => ({
+  width: `${props.sceneWidth}px`,
+  height: `${props.sceneHeight}px`,
   transform: `scale(${zoom.value})`,
 }))
 
@@ -104,11 +111,11 @@ function clampZoom(next: number): number {
 }
 
 function zoomIn(): void {
-  zoom.value = clampZoom(zoom.value + 0.1)
+  zoomViewportAtCenter(0.1)
 }
 
 function zoomOut(): void {
-  zoom.value = clampZoom(zoom.value - 0.1)
+  zoomViewportAtCenter(-0.1)
 }
 
 function resetView(): void {
@@ -122,7 +129,40 @@ function resetView(): void {
 function onWheel(event: WheelEvent): void {
   event.preventDefault()
   const delta = event.deltaY < 0 ? 0.08 : -0.08
-  zoom.value = clampZoom(zoom.value + delta)
+  void zoomAtClientPoint(delta, event.clientX, event.clientY)
+}
+
+async function zoomAtClientPoint(delta: number, clientX: number, clientY: number): Promise<void> {
+  const viewport = viewportRef.value
+  const previousZoom = zoom.value
+  const nextZoom = clampZoom(previousZoom + delta)
+  if (!viewport || nextZoom === previousZoom) return
+
+  const rect = viewport.getBoundingClientRect()
+  const offsetX = clientX - rect.left
+  const offsetY = clientY - rect.top
+  const worldX = (viewport.scrollLeft + offsetX) / previousZoom
+  const worldY = (viewport.scrollTop + offsetY) / previousZoom
+
+  zoom.value = nextZoom
+  await nextTick()
+  viewport.scrollLeft = worldX * nextZoom - offsetX
+  viewport.scrollTop = worldY * nextZoom - offsetY
+}
+
+function zoomViewportAtCenter(delta: number): void {
+  const viewport = viewportRef.value
+  if (!viewport) {
+    zoom.value = clampZoom(zoom.value + delta)
+    return
+  }
+
+  const rect = viewport.getBoundingClientRect()
+  void zoomAtClientPoint(
+    delta,
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2,
+  )
 }
 
 function onSelectNode(outlineId: string): void {
