@@ -9,6 +9,7 @@ import type {
   NovelEntityExtractResult,
   NovelForeshadowAnalysisResult,
   OutlineItem,
+  OutlineStorylineType,
 } from '../types'
 import type { AiToolResult } from '../types'
 import { getAiSettings } from './aiSettings'
@@ -85,6 +86,52 @@ const CHAPTER_SUMMARY_SYSTEM_PROMPT = [
   '段落数量通常为 3 到 6 段；如果章节内容更集中，也可以少于 3 段，但不要硬拆。',
   '不要写“第一部分”“第二部分”“总结如下”等套话，不要输出项目符号。',
   '语言清楚、完整，适合作为作者回顾章节时直接保存的章总结草稿。',
+].join('\n')
+
+const OUTLINE_DESIGN_OPTIONS_SYSTEM_PROMPT = [
+  '你是中文小说大纲策划助手，擅长把作者的回答整理成可选择的故事方案。',
+  '你会先通过多轮对话收集信息，再基于整段访谈记录提出 3 个差异明显、但都可写的方案。',
+  '不要写空泛鸡汤，不要输出套话，重点是让作者能在几种结构方向之间做选择。',
+  '输出必须是单个 JSON 对象，顶层只包含：brief, options。',
+  'brief 是 1 到 2 句中文，总结你理解到的创作方向。',
+  'options 是长度 3 的数组；每项字段仅包含：id, title, premise, structure, highlights, endingTone, beats。',
+  'title 是方案名，简短中文。',
+  'premise 是一句话故事概念。',
+  'structure 是这个方案的推进方式，例如“成长升级流”“悬疑揭秘流”“双线交叉流”。',
+  'highlights 是 2 到 4 条字符串数组，写这个方案最有写头的点。',
+  'endingTone 是结局气质，例如“圆满收束”“苦涩反转”“开放余波”。',
+  'beats 是 4 到 6 条字符串数组，概括这一方案的大致推进节拍。',
+].join('\n')
+
+const OUTLINE_DESIGN_FOLLOWUP_SYSTEM_PROMPT = [
+  '你是中文小说大纲策划助手，正在像编辑一样和作者做一轮大纲访谈。',
+  '你要从第一问开始，按当前信息判断是否还需要再问 1 个关键问题。',
+  '如果信息已经足够生成大纲方案，就不要硬问。',
+  '输出必须是单个 JSON 对象，顶层只包含：shouldAsk, rationale, question。',
+  'shouldAsk 是布尔值。',
+  'rationale 是 1 句中文，说明为什么要问，或为什么信息已够。',
+  '如果 shouldAsk 为 true，question 必须是对象，且只包含：label, prompt, options, placeholder。',
+  'label 是问题标题，prompt 是你真正想问作者的话，options 是 2 到 5 个简短中文建议选项数组。',
+  'placeholder 是输入框提示语，要鼓励作者直接自由回答。',
+  '问题必须具体，且要能明显影响大纲结构，比如主角代价、反派优势、感情线强度、世界规则约束、主线节奏选择等。',
+  '不要重复已经问过的问题，不要问空泛价值观，不要问需要长篇设定论文的问题。',
+].join('\n')
+
+const OUTLINE_DESIGN_EXPAND_SYSTEM_PROMPT = [
+  '你是中文小说大纲策划助手，擅长把故事方案展开成作者可直接继续编辑的大纲。',
+  '你必须把内容写得具体、可写、可拆章节，但不能编造成百科设定。',
+  '输出必须是单个 JSON 对象，顶层只包含：title, summary, storylines, items。',
+  'storylines 是数组，每项字段仅包含：name, type, description, colorHint。',
+  'type 只能是：main, subplot, character, romance, antagonist, world, custom。',
+  'items 是数组，顺序必须保证父节点在前、子节点在后。',
+  'items 每项字段仅包含：tempId, parentTempId, title, summary, level, goal, conflict, twist, result, suspense, plotStage, storylineNames, tension, location, timeLabel。',
+  'level 只能是：volume, act, chapter, scene。',
+  'plotStage 只能是：idea, drafted, written, resolved。',
+  'storylineNames 是字符串数组，填写该节点关联的故事线名称。',
+  'tension 用 1 到 5 的整数。',
+  'tempId 必须唯一；根节点的 parentTempId 为空字符串。',
+  '大纲通常包含 1 个 volume、3 到 5 个 act，以及每个 act 下 2 到 4 个 chapter 或 scene 节点。',
+  'summary、goal、conflict、twist、result、suspense 都要尽量短而具体，适合作者后续继续改写。',
 ].join('\n')
 
 const QA_SYSTEM_PROMPT = [
@@ -1491,5 +1538,237 @@ export async function expandOutlineItemByAi(
     conflict: s(raw.conflict),
     twist: s(raw.twist),
     suspense: s(raw.suspense),
+  }
+}
+
+export async function designOutlineOptionsByAi(
+  payload: WorkspaceSnapshotPayload,
+  input: {
+    novelTitle: string
+    novelSummary?: string
+    history: Array<{ label: string; prompt: string; answer: string }>
+  },
+): Promise<{
+  brief: string
+  options: Array<{
+    id: string
+    title: string
+    premise: string
+    structure: string
+    highlights: string[]
+    endingTone: string
+    beats: string[]
+  }>
+}> {
+  const prompt = [
+    `作品名：${s(input.novelTitle) || '未命名作品'}`,
+    `现有简介：${s(input.novelSummary) || '暂无'}`,
+    `访谈记录：${stableStringify(input.history.map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
+    `已有大纲节点：${stableStringify((payload.outline ?? []).map((item) => ({
+      title: item.title,
+      summary: item.summary,
+      level: item.level,
+      goal: item.goal,
+      conflict: item.conflict,
+      twist: item.twist,
+      result: item.result,
+      suspense: item.suspense,
+    })))}`,
+    `已有故事线：${stableStringify((payload.outlineStorylines ?? []).map((item) => ({
+      name: item.name,
+      type: item.type,
+      description: item.description,
+    })))}`,
+    '请给出 3 套风格有区别、但都适合当前回答的大纲方向。',
+  ].join('\n')
+
+  const parsed = await callAiJson(prompt, OUTLINE_DESIGN_OPTIONS_SYSTEM_PROMPT)
+  return {
+    brief: s(parsed.brief),
+    options: Array.isArray(parsed.options)
+      ? parsed.options.slice(0, 3).map((item: JsonRecord, index: number) => ({
+          id: s(item.id) || `option-${index + 1}`,
+          title: s(item.title) || `方案 ${index + 1}`,
+          premise: s(item.premise),
+          structure: s(item.structure),
+          highlights: stringList(item.highlights).slice(0, 4),
+          endingTone: s(item.endingTone),
+          beats: stringList(item.beats).slice(0, 6),
+        }))
+      : [],
+  }
+}
+
+export async function designOutlineInterviewTurnByAi(
+  payload: WorkspaceSnapshotPayload,
+  input: {
+    novelTitle: string
+    novelSummary?: string
+    history?: Array<{ label: string; prompt: string; answer: string }>
+    remainingRounds: number
+  },
+): Promise<{
+  shouldAsk: boolean
+  rationale: string
+  question: {
+    label: string
+    prompt: string
+    options: string[]
+    placeholder: string
+  } | null
+}> {
+  const prompt = [
+    `作品名：${s(input.novelTitle) || '未命名作品'}`,
+    `现有简介：${s(input.novelSummary) || '暂无'}`,
+    `已确认的访谈记录：${stableStringify((input.history ?? []).map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
+    `剩余追问轮次：${Math.max(0, i(input.remainingRounds) ?? 0)}`,
+    `已有大纲节点：${stableStringify((payload.outline ?? []).map((item) => ({
+      title: item.title,
+      summary: item.summary,
+      level: item.level,
+      goal: item.goal,
+      conflict: item.conflict,
+      twist: item.twist,
+      result: item.result,
+      suspense: item.suspense,
+    })))}`,
+    `已有故事线：${stableStringify((payload.outlineStorylines ?? []).map((item) => ({
+      name: item.name,
+      type: item.type,
+      description: item.description,
+    })))}`,
+    '如果还有一个最该补的关键信息，就提出 1 个问题；如果已经足够，就明确结束追问。',
+  ].join('\n')
+
+  const parsed = await callAiJson(prompt, OUTLINE_DESIGN_FOLLOWUP_SYSTEM_PROMPT)
+  const shouldAsk = Boolean(parsed.shouldAsk) && (input.remainingRounds > 0)
+  const question = shouldAsk && parsed.question && typeof parsed.question === 'object'
+    ? {
+        label: s((parsed.question as JsonRecord).label) || '补充问题',
+        prompt: s((parsed.question as JsonRecord).prompt) || '还有一个关键点想确认。',
+        options: stringList((parsed.question as JsonRecord).options).slice(0, 5),
+        placeholder: s((parsed.question as JsonRecord).placeholder) || '直接用一句到几句话回答这个问题',
+      }
+    : null
+  return {
+    shouldAsk: Boolean(question),
+    rationale: s(parsed.rationale),
+    question,
+  }
+}
+
+export async function expandOutlineDesignByAi(
+  payload: WorkspaceSnapshotPayload,
+  input: {
+    novelTitle: string
+    novelSummary?: string
+    history: Array<{ label: string; prompt: string; answer: string }>
+    selectedOption: {
+      title: string
+      premise: string
+      structure: string
+      highlights: string[]
+      endingTone: string
+      beats: string[]
+    }
+  },
+): Promise<{
+  title: string
+  summary: string
+  storylines: Array<{
+    name: string
+    type: OutlineStorylineType
+    description: string
+    colorHint: string
+  }>
+  items: Array<{
+    tempId: string
+    parentTempId: string
+    title: string
+    summary: string
+    level: 'volume' | 'act' | 'chapter' | 'scene'
+    goal: string
+    conflict: string
+    twist: string
+    result: string
+    suspense: string
+    plotStage: 'idea' | 'drafted' | 'written' | 'resolved'
+    storylineNames: string[]
+    tension: 1 | 2 | 3 | 4 | 5
+    location: string
+    timeLabel: string
+  }>
+}> {
+  const prompt = [
+    `作品名：${s(input.novelTitle) || '未命名作品'}`,
+    `现有简介：${s(input.novelSummary) || '暂无'}`,
+    `访谈记录：${stableStringify(input.history.map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
+    `作者选中的方案：${stableStringify({
+      title: s(input.selectedOption.title),
+      premise: s(input.selectedOption.premise),
+      structure: s(input.selectedOption.structure),
+      highlights: input.selectedOption.highlights ?? [],
+      endingTone: s(input.selectedOption.endingTone),
+      beats: input.selectedOption.beats ?? [],
+    })}`,
+    `已有故事线：${stableStringify((payload.outlineStorylines ?? []).map((item) => ({
+      name: item.name,
+      type: item.type,
+      description: item.description,
+    })))}`,
+    '请把这一方案展开成一个可直接写入写作工具的大纲结构。',
+  ].join('\n')
+
+  const parsed = await callAiJson(prompt, OUTLINE_DESIGN_EXPAND_SYSTEM_PROMPT)
+  const storylineTypeSet = new Set<OutlineStorylineType>(['main', 'subplot', 'character', 'romance', 'antagonist', 'world', 'custom'])
+  const levelSet = new Set(['volume', 'act', 'chapter', 'scene'])
+  const plotStageSet = new Set(['idea', 'drafted', 'written', 'resolved'])
+  const normalizeTension = (value: unknown): 1 | 2 | 3 | 4 | 5 => {
+    const raw = i(value)
+    if (raw === 1 || raw === 2 || raw === 3 || raw === 4 || raw === 5) return raw
+    return 3
+  }
+
+  return {
+    title: s(parsed.title),
+    summary: s(parsed.summary),
+    storylines: Array.isArray(parsed.storylines)
+      ? parsed.storylines
+          .map((item: JsonRecord) => {
+            const rawType = s(item.type) as OutlineStorylineType
+            return {
+              name: s(item.name),
+              type: storylineTypeSet.has(rawType) ? rawType : 'custom',
+              description: s(item.description),
+              colorHint: s(item.colorHint),
+            }
+          })
+          .filter((item) => item.name)
+      : [],
+    items: Array.isArray(parsed.items)
+      ? parsed.items
+          .map((item: JsonRecord, index: number) => {
+            const rawLevel = s(item.level)
+            const rawPlotStage = s(item.plotStage)
+            return {
+              tempId: s(item.tempId) || `node-${index + 1}`,
+              parentTempId: s(item.parentTempId),
+              title: s(item.title) || `节点 ${index + 1}`,
+              summary: s(item.summary),
+              level: (levelSet.has(rawLevel) ? rawLevel : 'scene') as 'volume' | 'act' | 'chapter' | 'scene',
+              goal: s(item.goal),
+              conflict: s(item.conflict),
+              twist: s(item.twist),
+              result: s(item.result),
+              suspense: s(item.suspense),
+              plotStage: (plotStageSet.has(rawPlotStage) ? rawPlotStage : 'idea') as 'idea' | 'drafted' | 'written' | 'resolved',
+              storylineNames: stringList(item.storylineNames),
+              tension: normalizeTension(item.tension),
+              location: s(item.location),
+              timeLabel: s(item.timeLabel),
+            }
+          })
+          .filter((item) => item.title)
+      : [],
   }
 }

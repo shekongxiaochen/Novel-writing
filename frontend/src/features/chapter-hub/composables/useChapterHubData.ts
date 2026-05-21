@@ -85,6 +85,11 @@ export function useChapterHubData() {
     () => String(route.query.chapterId ?? '').trim(),
     (id) => {
       if (!id) return
+      if (chapters.value.some((c) => c.id === id)) {
+        selectedChapterId.value = id
+        return
+      }
+      reload()
       if (chapters.value.some((c) => c.id === id)) selectedChapterId.value = id
     }
   )

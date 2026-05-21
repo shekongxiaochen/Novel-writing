@@ -12098,6 +12098,10 @@ button[type='submit'],
   transition: transform 0.12s ease;
 }
 
+.outline-map-canvas__stage {
+  position: relative;
+}
+
 .outline-map-canvas__edges {
   position: absolute;
   left: 0;

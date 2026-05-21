@@ -28,7 +28,6 @@ from app.models import (
     NovelChapter,
     NovelSnapshot,
     OutlineItemRecord,
-    OutlineStorylineRecord,
     TimelineEventRecord,
     User,
     PaymentOrder,
@@ -231,15 +230,6 @@ class ChapterAdmin(SecureModelView, model=NovelChapter):
     column_sortable_list = [NovelChapter.chapter_no, NovelChapter.created_at, NovelChapter.updated_at]
 
 
-class OutlineStorylineAdmin(SecureModelView, model=OutlineStorylineRecord):
-    name = "剧情线"
-    name_plural = "剧情线"
-    icon = "fa-solid fa-diagram-project"
-    column_list = [OutlineStorylineRecord.id, OutlineStorylineRecord.novel_id, OutlineStorylineRecord.name, OutlineStorylineRecord.type, OutlineStorylineRecord.display_order]
-    column_searchable_list = [OutlineStorylineRecord.name, OutlineStorylineRecord.description]
-    column_sortable_list = [OutlineStorylineRecord.display_order, OutlineStorylineRecord.updated_at]
-
-
 class OutlineItemAdmin(SecureModelView, model=OutlineItemRecord):
     name = "大纲节点"
     name_plural = "大纲节点"
@@ -395,7 +385,6 @@ def init_admin(app) -> Admin:
             NovelAdmin,
             NovelSnapshotAdmin,
             ChapterAdmin,
-            OutlineStorylineAdmin,
             OutlineItemAdmin,
             CategoryAdmin,
             CharacterAdmin,
