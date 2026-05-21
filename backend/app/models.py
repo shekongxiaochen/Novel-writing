@@ -158,10 +158,6 @@ class Novel(Base):
         uselist=False,
     )
     chapters: Mapped[list["NovelChapter"]] = relationship(back_populates="novel", cascade="all, delete-orphan")
-    outline_storylines: Mapped[list["OutlineStorylineRecord"]] = relationship(
-        back_populates="novel",
-        cascade="all, delete-orphan",
-    )
     outline_items: Mapped[list["OutlineItemRecord"]] = relationship(back_populates="novel", cascade="all, delete-orphan")
     categories: Mapped[list["CategoryRecord"]] = relationship(back_populates="novel", cascade="all, delete-orphan")
     characters: Mapped[list["CharacterRecord"]] = relationship(back_populates="novel", cascade="all, delete-orphan")
@@ -218,26 +214,6 @@ class NovelChapter(Base):
 
     novel: Mapped["Novel"] = relationship(back_populates="chapters")
 
-
-class OutlineStorylineRecord(Base):
-    __tablename__ = "outline_storylines"
-    __table_args__ = (
-        Index("ix_outline_storylines_novel_order", "novel_id", "display_order"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    novel_id: Mapped[str] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), index=True)
-    name: Mapped[str] = mapped_column(String(120), default="")
-    type: Mapped[str] = mapped_column(String(32), default="custom")
-    color: Mapped[str] = mapped_column(String(32), default="")
-    description: Mapped[str] = mapped_column(Text, default="")
-    display_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
-
-    novel: Mapped["Novel"] = relationship(back_populates="outline_storylines")
-
-
 class OutlineItemRecord(Base):
     __tablename__ = "outline_items"
     __table_args__ = (
@@ -257,7 +233,6 @@ class OutlineItemRecord(Base):
     result: Mapped[str] = mapped_column(Text, default="")
     suspense: Mapped[str] = mapped_column(Text, default="")
     plot_stage: Mapped[str] = mapped_column(String(32), default="")
-    storyline_ids: Mapped[list] = mapped_column(JSON, default=list)
     parent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     location: Mapped[str] = mapped_column(String(255), default="")
     time_label: Mapped[str] = mapped_column(String(120), default="")

@@ -292,33 +292,6 @@ class CharacterFactionMembershipOut(CharacterFactionMembershipBase):
     updated_at: datetime
 
 
-class OutlineStorylineBase(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    type: str = Field(default="custom", max_length=32)
-    color: str = Field(default="", max_length=32)
-    description: str = ""
-    order: int = Field(default=0, ge=0)
-
-
-class OutlineStorylineCreateIn(OutlineStorylineBase):
-    id: str = Field(min_length=1, max_length=64)
-
-
-class OutlineStorylineUpdateIn(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    type: str | None = Field(default=None, max_length=32)
-    color: str | None = Field(default=None, max_length=32)
-    description: str | None = None
-    order: int | None = Field(default=None, ge=0)
-
-
-class OutlineStorylineOut(OutlineStorylineBase):
-    id: str
-    novel_id: str
-    created_at: datetime
-    updated_at: datetime
-
-
 class OutlineItemBase(BaseModel):
     order: int = Field(default=0, ge=0)
     title: str = Field(min_length=1, max_length=160)
@@ -331,7 +304,6 @@ class OutlineItemBase(BaseModel):
     result: str = ""
     suspense: str = ""
     plot_stage: str | None = Field(default=None, max_length=32)
-    storyline_ids: list[str] = Field(default_factory=list)
     parent_id: str | None = Field(default=None, max_length=64)
     location: str = Field(default="", max_length=255)
     time_label: str = Field(default="", max_length=120)
@@ -359,7 +331,6 @@ class OutlineItemUpdateIn(BaseModel):
     result: str | None = None
     suspense: str | None = None
     plot_stage: str | None = Field(default=None, max_length=32)
-    storyline_ids: list[str] | None = None
     parent_id: str | None = Field(default=None, max_length=64)
     location: str | None = Field(default=None, max_length=255)
     time_label: str | None = Field(default=None, max_length=120)
