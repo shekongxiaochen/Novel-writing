@@ -1,19 +1,24 @@
 # Novel Writing Assistant
 
-当前版本是纯本地工作流：
-- 前端：Vue + Vite
-- 数据：浏览器本地存储
-- AI：用户手动填写 `API Key / Base URL / Model`，前端直接调用模型
+- 前端：Vue + Vite（`frontend/`）
+- 后端：Rust + Axum（`backend/`，端口 `8080`）
+- 写作数据：本地存储 + 可选云同步（对接 Rust API）
+- AI：用户自行配置 `API Key / Base URL / Model`
 
 ## 启动
 
+详见 [启动说明.md](启动说明.md)。
+
 ```powershell
+# Redis → Rust 后端 → 前端
+D:\novel-dev\start-redis.ps1
+D:\novel-dev\start-rust-backend.ps1
 cd "D:\Novel writing\frontend"
 npm run dev
 ```
 
-默认地址：
-- `http://localhost:5174`
+- 前端：`http://127.0.0.1:5174`
+- 后端健康检查：`http://127.0.0.1:8080/health`
 
 ## AI 使用方式
 

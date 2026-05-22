@@ -1,0 +1,197 @@
+{% extends "layout.html" %}
+{% block title %}{{ entity_label }} — {{ admin_title }}{% endblock %}
+{% block content %}
+<div x-data="{ selected: [], allIds: [], filtersOpen: {{ active_filters | length > 0 | lower }}, exportOpen: false }"
+     x-init="
+       const el = document.querySelector('[data-page-ids]');
+       if (el) allIds = JSON.parse(el.dataset.pageIds);
+     ">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between mb-4">
+    <!-- Left: search + bulk actions -->
+    <div class="flex items-center gap-3">
+      <div class="relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-xs"></i>
+        <input name="search" type="search" placeholder="搜索…"
+               value="{{ search }}"
+               class="pl-8 pr-4 py-2 bg-zinc-100 border-none rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-black w-56"
+               hx-trigger="keyup changed delay:400ms, search"
+               hx-get="/admin/{{ entity_name }}/"
+               hx-target="#list-table"
+               hx-include="[data-filter-input]" />
+      </div>
+
+      <div x-show="selected.length > 0" x-cloak class="flex items-center gap-2">
+        <span class="text-xs text-zinc-500 font-medium" x-text="selected.length + ' 项已选'"></span>
+        {% if bulk_delete and can_delete %}
+        <button
+          hx-post="/admin/{{ entity_name }}/action/__bulk_delete__"
+          hx-include="[name='selected_ids']"
+          hx-target="#flash"
+          hx-confirm="确定删除所选记录？"
+          class="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-medium hover:bg-red-100 transition-colors">
+          <i class="fa-solid fa-trash text-[10px]"></i>
+          删除所选
+        </button>
+        {% endif %}
+        {% if bulk_export %}
+        <button @click="exportOpen = true"
+          class="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 text-zinc-900 rounded-md text-xs font-medium hover:bg-zinc-200 transition-colors">
+          <i class="fa-solid fa-download text-[10px]"></i>
+          导出
+        </button>
+        {% endif %}
+        {% for action in actions %}
+        {% if action.target == "list" %}
+        <button
+          hx-post="/admin/{{ entity_name }}/action/{{ action.name }}"
+          hx-include="[name='selected_ids']"
+          hx-target="#flash"
+          {% if action.confirm %}hx-confirm="{{ action.confirm }}"{% endif %}
+          class="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors {{ action.class | default('bg-zinc-100 text-zinc-900 hover:bg-zinc-200') }}">
+          {% if action.icon %}<i class="{{ action.icon }} text-[10px]"></i>{% endif %}
+          {{ action.label }}
+        </button>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Right: filters, add -->
+    <div class="flex items-center gap-3">
+      {% if filter_fields %}
+      <button @click="filtersOpen = !filtersOpen"
+              class="flex items-center gap-2 px-4 py-2 bg-zinc-100 text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-200 transition-colors"
+              :class="filtersOpen ? 'ring-1 ring-black' : ''">
+        <i class="fa-solid fa-sliders text-xs"></i>
+        筛选
+        {% set active_count = active_filters | length %}
+        {% if active_count > 0 %}
+        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-black text-white text-[10px] font-bold">{{ active_count }}</span>
+        {% endif %}
+      </button>
+      {% endif %}
+
+      {% if can_create %}
+      <a href="/admin/{{ entity_name }}/new"
+         class="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-md text-sm font-semibold hover:bg-zinc-800 transition-colors">
+        <i class="fa-solid fa-plus text-xs"></i>
+        新增{{ entity_label }}
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Filter panel -->
+  {% if filter_fields %}
+  <div x-show="filtersOpen"
+       x-transition:enter="transition ease-out duration-150"
+       x-transition:enter-start="opacity-0 -translate-y-1"
+       x-transition:enter-end="opacity-100 translate-y-0"
+       class="mb-4 p-4 bg-zinc-50 border border-zinc-200 rounded-md flex flex-wrap items-end gap-4">
+    {% for field in filter_fields %}
+    <div class="flex flex-col gap-1 min-w-[160px]">
+      <label class="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{{ field.label }}</label>
+      {% if field.field_type == "Select" %}
+      <select name="filter[{{ field.name }}]"
+              data-filter-input
+              hx-get="/admin/{{ entity_name }}/"
+              hx-target="#list-table"
+              hx-trigger="change"
+              hx-include="[data-filter-input], [name='search']"
+              class="px-3 py-1.5 bg-white border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-black">
+        <option value="">全部</option>
+        {% for value, label in field.options %}
+        <option value="{{ value }}" {% if active_filters[field.name] == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      {% elif field.field_type == "Boolean" %}
+      <select name="filter[{{ field.name }}]"
+              data-filter-input
+              hx-get="/admin/{{ entity_name }}/"
+              hx-target="#list-table"
+              hx-trigger="change"
+              hx-include="[data-filter-input], [name='search']"
+              class="px-3 py-1.5 bg-white border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-black">
+        <option value="">全部</option>
+        <option value="true" {% if active_filters[field.name] == "true" %}selected{% endif %}>是</option>
+        <option value="false" {% if active_filters[field.name] == "false" %}selected{% endif %}>否</option>
+      </select>
+      {% else %}
+      <input type="text"
+             name="filter[{{ field.name }}]"
+             data-filter-input
+             value="{{ active_filters[field.name] | default('') }}"
+             placeholder="筛选 {{ field.label }}…"
+             hx-get="/admin/{{ entity_name }}/"
+             hx-target="#list-table"
+             hx-trigger="keyup changed delay:400ms"
+             hx-include="[data-filter-input], [name='search']"
+             class="px-3 py-1.5 bg-white border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-black" />
+      {% endif %}
+    </div>
+    {% endfor %}
+    <a href="/admin/{{ entity_name }}/"
+       class="px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-900 transition-colors">
+      清除
+    </a>
+  </div>
+  {% endif %}
+
+  <div id="flash"></div>
+
+  <div id="list-table"
+       @htmx:after-swap="
+         const el = $el.querySelector('[data-page-ids]');
+         if (el) {
+           allIds = JSON.parse(el.dataset.pageIds);
+           selected = [];
+         }
+       ">
+    {% include "list_table.html" %}
+  </div>
+
+  <!-- Export modal -->
+  {% if bulk_export %}
+  <div x-show="exportOpen" x-cloak
+       class="fixed inset-0 z-50 flex items-center justify-center"
+       @keydown.escape.window="exportOpen = false">
+    <div class="absolute inset-0 bg-black/40" @click="exportOpen = false"></div>
+    <div class="relative bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
+      <h2 class="text-base font-semibold text-zinc-900 mb-1">导出 CSV</h2>
+      <p class="text-xs text-zinc-500 mb-4">选择要导出的字段。</p>
+
+      <form method="post" action="/admin/{{ entity_name }}/action/__bulk_export__">
+        <!-- carry selected row ids -->
+        <template x-for="id in selected" :key="id">
+          <input type="hidden" name="selected_ids" :value="id" />
+        </template>
+
+        <div class="space-y-2 mb-5 max-h-60 overflow-y-auto pl-2">
+          {% for name, label in export_columns %}
+          <label class="flex items-center gap-2 text-sm text-zinc-700 cursor-pointer">
+            <input type="checkbox" name="export_fields" value="{{ name }}" checked
+                   class="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black" />
+            {{ label }}
+          </label>
+          {% endfor %}
+        </div>
+
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" @click="exportOpen = false"
+                  class="px-4 py-2 text-sm text-zinc-600 hover:text-zinc-900 transition-colors">
+            取消
+          </button>
+          <button type="submit" @click="exportOpen = false"
+                  class="px-4 py-2 bg-black text-white rounded-md text-sm font-semibold hover:bg-zinc-800 transition-colors">
+            <i class="fa-solid fa-download text-xs mr-1"></i>
+            下载
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
