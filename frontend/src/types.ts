@@ -2,6 +2,8 @@ export type Novel = {
   id: string
   title: string
   summary: string
+  /** 全书连续性摘要（长篇续写用，作者可一键生成后保存） */
+  continuityBrief: string
   genre: string
   perspective: string
   tone: string
@@ -356,6 +358,63 @@ export type NewTimelineEventInput = {
 
 export type AiAnalysisKind = 'entities' | 'foreshadows' | 'classification'
 export type AiExtractMode = 'current' | 'recent' | 'all'
+export type AiDeskMode = 'ask' | 'write'
+export type AiContinuePosition = 'cursor' | 'end'
+export type AiContinueTargetChars = 800 | 1500 | 3000
+export type AiContinuePrevSummaryCount = 2 | 3 | 5
+
+export type ContinueRagSnippetHit = {
+  chapterId: string
+  chapterNo: number
+  chapterTitle: string
+  excerpt: string
+  matchedTerms: string[]
+  source: 'character' | 'foreshadow' | 'location'
+}
+
+export type AiChapterSummaryDraft = {
+  chapterId: string
+  text: string
+  loading: boolean
+  status: 'idle' | 'ready' | 'applied' | 'ignored'
+}
+
+export type AiContinueDraft = {
+  text: string
+  loading: boolean
+  status: 'idle' | 'ready' | 'applied' | 'ignored'
+  position: AiContinuePosition
+  targetChars: AiContinueTargetChars
+  prevSummaryCount: AiContinuePrevSummaryCount
+  afterAdoptSummary: boolean
+  afterAdoptExtract: boolean
+  enableRag: boolean
+  /** 生成时记录的光标插入点（光标续写） */
+  insertOffset: number | null
+  warnings: string[]
+  droppedLayers: string[]
+  usedLayers: string[]
+  usedChars: number
+  ragHits: ContinueRagSnippetHit[]
+}
+
+export type AiAskContextMeta = {
+  warnings: string[]
+  droppedLayers: string[]
+  usedLayers: string[]
+  usedChars: number
+  ragHits: ContinueRagSnippetHit[]
+}
+
+export type ContinueChapterResult = {
+  text: string
+  warnings: string[]
+  droppedLayers: string[]
+  usedLayers: string[]
+  usedChars: number
+  ragHits: ContinueRagSnippetHit[]
+}
+
 export type AiChatRole = 'user' | 'assistant'
 
 export type AiDeskChatMessage = {
@@ -420,6 +479,9 @@ export type AiSuggestionUiState = {
   editorTargetId?: string | null
 }
 
+/** AI 整理时对该条角色身份的确信度 */
+export type ExtractedIdentityStatus = 'certain' | 'uncertain' | 'possible_same_person'
+
 export type ExtractedCharacter = {
   name: string
   aliases: string[]
@@ -427,8 +489,11 @@ export type ExtractedCharacter = {
   age: string
   goal: string
   secret: string
+  arc: string
   notes: string
   attributes: CharacterAttribute[]
+  /** certain=明确独立人物；uncertain=身份未明；possible_same_person=疑似与档案中某人为同一人 */
+  identityStatus: ExtractedIdentityStatus
   firstAppearanceChapterNo?: number | null
   confidence: number
   match: EntityMatch
@@ -441,6 +506,8 @@ export type ExtractedFaction = {
   name: string
   leader: string
   notes: string
+  attributes: CharacterAttribute[]
+  categoryNames: string[]
   confidence: number
   match: EntityMatch
   evidences: EntityEvidence[]

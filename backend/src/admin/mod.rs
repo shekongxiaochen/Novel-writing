@@ -9,14 +9,16 @@ use sea_orm::{
 };
 use sea_orm_migration::MigratorTrait;
 
+mod ai_config;
 mod labels;
+mod user_ops;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
-use crate::entities::{NovelEntity, PaymentOrderEntity, UserEntity};
-use labels::{apply_field_labels, NOVEL_FIELDS, PAYMENT_ORDER_FIELDS, USER_FIELDS};
+use crate::entities::AiWalletLedgerEntity;
+use crate::services::{SettingsService, WalletService};
+use labels::{apply_field_labels, AI_WALLET_LEDGER_FIELDS};
 
-/// 业务库曾用 `auth_sessions` 存 App 登录态，与 axum-admin 要求的表结构冲突，需改名为 `user_sessions`。
 async fn separate_app_session_table(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
     let row = db
         .query_one(Statement::from_string(
@@ -65,7 +67,6 @@ async fn separate_app_session_table(db: &DatabaseConnection) -> Result<(), sea_o
     Ok(())
 }
 
-/// 旧库曾用同名 `auth_sessions` 存 App 会话，迁移记录已写入但表结构不对或表已被 rename 走。
 async fn ensure_admin_auth_sessions_table(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
     let has_admin_schema = db
         .query_one(Statement::from_string(
@@ -98,7 +99,6 @@ async fn ensure_admin_auth_sessions_table(db: &DatabaseConnection) -> Result<(),
     Ok(())
 }
 
-/// MySQL：axum-admin 迁移使用 TIMESTAMP，SeaORM 1 读取 auth 表时期望 DATETIME。
 async fn fix_admin_timestamp_columns(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
     db.execute(Statement::from_string(
         DbBackend::MySql,
@@ -143,7 +143,6 @@ fn hash_admin_password(password: &str) -> Result<String, Box<dyn std::error::Err
     Ok(hash)
 }
 
-/// 确保 `.env` 中的管理员存在；可选在每次启动时同步密码（修复「库内密码与配置不一致」）。
 async fn ensure_admin_user(
     auth: &axum_admin::SeaOrmAdminAuth,
     username: &str,
@@ -179,12 +178,13 @@ async fn ensure_admin_user(
     Ok(())
 }
 
-/// 挂载 Django 风格管理后台（axum-admin），路径前缀 `/admin`。
 pub async fn build_router(
     database_url: &str,
     admin_username: &str,
     admin_password: &str,
     admin_sync_password: bool,
+    env_deepseek_api_key: &str,
+    env_deepseek_base_url: &str,
 ) -> Result<Router, Box<dyn std::error::Error>> {
     let db = Database::connect(database_url).await?;
 
@@ -201,74 +201,68 @@ pub async fn build_router(
         admin_username
     );
 
-    let users_admin = apply_field_labels(
-        EntityAdmin::from_entity::<UserEntity>("app_users")
-            .label("应用用户")
-            .icon("fa-solid fa-users")
-            .search_fields(vec!["email".to_string(), "display_name".to_string()])
+    let ledger_admin = apply_field_labels(
+        EntityAdmin::from_entity::<AiWalletLedgerEntity>("ai_wallet_ledger")
+            .label("余额流水")
+            .icon("fa-solid fa-list")
+            .search_fields(vec!["user_id".to_string(), "reason".to_string()])
             .list_display(vec![
-                "email".to_string(),
-                "display_name".to_string(),
-                "is_active".to_string(),
-                "email_verified".to_string(),
+                "user_id".to_string(),
+                "delta".to_string(),
+                "reason".to_string(),
+                "ref_id".to_string(),
                 "created_at".to_string(),
             ]),
-        USER_FIELDS,
+        AI_WALLET_LEDGER_FIELDS,
     )
-    .field(Field::password("password_hash").label("密码哈希").hidden())
-    .adapter(Box::new(SeaOrmAdapter::<UserEntity>::new(db.clone())));
-
-    let novels_admin = apply_field_labels(
-        EntityAdmin::from_entity::<NovelEntity>("novels")
-            .label("小说")
-            .icon("fa-solid fa-book")
-            .search_fields(vec!["title".to_string(), "user_id".to_string()])
-            .list_display(vec![
-                "title".to_string(),
-                "user_id".to_string(),
-                "genre".to_string(),
-                "updated_at".to_string(),
-            ]),
-        NOVEL_FIELDS,
-    )
-    .adapter(Box::new(SeaOrmAdapter::<NovelEntity>::new(db.clone())));
-
-    let orders_admin = apply_field_labels(
-        EntityAdmin::from_entity::<PaymentOrderEntity>("payment_orders")
-            .label("支付订单")
-            .icon("fa-solid fa-receipt")
-            .search_fields(vec![
-                "user_id".to_string(),
-                "status".to_string(),
-                "provider_trade_no".to_string(),
-            ])
-            .list_display(vec![
-                "user_id".to_string(),
-                "plan_code".to_string(),
-                "status".to_string(),
-                "amount_cents".to_string(),
-                "created_at".to_string(),
-            ]),
-        PAYMENT_ORDER_FIELDS,
-    )
-    .adapter(Box::new(SeaOrmAdapter::<PaymentOrderEntity>::new(db.clone())));
+    .field(Field::text("id").label("ID").readonly())
+    .field(Field::text("user_id").label("用户 ID").readonly())
+    .field(Field::number("delta").label("变动数额").readonly())
+    .field(Field::text("reason").label("类型").readonly())
+    .field(Field::text("ref_id").label("备注/关联").readonly())
+    .field(Field::datetime("created_at").label("时间").readonly())
+    .adapter(Box::new(SeaOrmAdapter::<AiWalletLedgerEntity>::new(db.clone())));
 
     let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("admin-templates");
+    let home_template = std::fs::read_to_string(template_dir.join("home.html"))
+        .unwrap_or_else(|_| include_str!("../../admin-templates/home.html").to_string());
+
+    let sqlx_pool = sqlx::mysql::MySqlPoolOptions::new()
+        .max_connections(5)
+        .connect(database_url)
+        .await?;
+    let settings_service = SettingsService::new(sqlx_pool.clone());
+    let wallet_service = WalletService::new(sqlx_pool.clone());
+    let auth_for_admin: Arc<dyn axum_admin::auth::AdminAuth> =
+        Arc::new(axum_admin::SeaOrmAdminAuth::new(db.clone()).await?);
 
     let router = axum_admin::AdminApp::new()
         .title("Novel 管理后台")
         .icon("fa-solid fa-pen-nib")
         .prefix("/admin")
         .template_dir(&template_dir)
+        .template("home.html", &home_template)
         .seaorm_auth(auth)
         .register(
-            EntityGroupAdmin::new("业务数据")
-                .register(users_admin)
-                .register(novels_admin)
-                .register(orders_admin),
+            EntityGroupAdmin::new("运营")
+                .register(ledger_admin),
         )
         .into_router()
-        .await;
+        .await
+        .merge(user_ops::routes(user_ops::UserOpsState {
+            db: sqlx_pool.clone(),
+            wallet: wallet_service,
+            auth: auth_for_admin.clone(),
+        }))
+        .merge(ai_config::routes(ai_config::AiConfigState {
+            settings: settings_service,
+            auth: auth_for_admin,
+            env_api_key: env_deepseek_api_key.to_string(),
+            env_base_url: env_deepseek_base_url.to_string(),
+        }));
+
+    tracing::info!("Admin user ops: http://127.0.0.1:8080/admin/user-ops");
+    tracing::info!("Admin AI config: http://127.0.0.1:8080/admin/ai-config");
 
     Ok(router)
 }

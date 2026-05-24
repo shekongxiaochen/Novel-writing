@@ -67,6 +67,11 @@
     </a>
 
     <nav class="flex-1 space-y-1">
+      <a href="/admin/ai-config"
+         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100">
+        <i class="fa-solid fa-sliders text-xs w-4"></i>
+        AI 计费配置
+      </a>
       {% for item in nav %}
         {% if item.type == "entity" %}
         <a href="/admin/{{ item.name }}/"

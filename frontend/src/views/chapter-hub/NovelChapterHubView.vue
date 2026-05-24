@@ -106,14 +106,34 @@
             :has-run="aiExtractHasRun"
             :chat-messages="aiChatMessages"
             :selection-quote="aiSelectionQuote"
+            :desk-mode="aiDeskMode"
+            :continue-draft="aiContinueDraft"
+            :continuity-brief="novel?.continuityBrief ?? ''"
+            :continuity-brief-loading="aiContinuityBriefLoading"
+            :chapter-summary-draft="aiChapterSummaryDraft"
+            :ask-context-meta="aiAskContextMeta"
             @run="runCurrentAiExtract"
+            @toggle-desk-mode="toggleAiDeskMode"
             @ask="askAiReadingDesk"
+            @continue-run="runAiContinue"
+            @continue-stop="stopAiContinue"
+            @continue-adopt="applyContinueDraft"
+            @continue-ignore="ignoreContinueDraft"
+            @update-continue-position="(value) => (aiContinueDraft.position = value)"
+            @update-continue-target-chars="(value) => (aiContinueDraft.targetChars = value)"
+            @update-continue-prev-summary-count="onUpdateContinuePrevSummaryCount"
+            @update-continue-after-adopt-summary="onUpdateContinueAfterAdoptSummary"
+            @update-continue-after-adopt-extract="onUpdateContinueAfterAdoptExtract"
+            @update-continue-enable-rag="onUpdateContinueEnableRag"
+            @generate-continuity-brief="generateContinuityBrief"
+            @chapter-summary-adopt="applyChapterSummaryDraft"
+            @chapter-summary-ignore="ignoreChapterSummaryDraft"
+            @chapter-summary-stop="stopChapterSummaryDraft"
             @stop-ask="stopAiReadingDesk"
             @new-chat="startNewAiChat"
             @switch-chat="switchAiChatSession"
             @close-chat="closeAiChatSession"
             @delete-chat="deleteAiChatSession"
-            @open-settings="openAiWorkspaceSettings"
             @collapse="toggleAiStudio"
             @clear-selection-quote="clearAiSelectionQuote"
             @apply="applyAiSuggestion"
@@ -256,11 +276,18 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useAiSubscription } from '../../composables/useAiSubscription'
+import { requestAiAccess } from '../../composables/useAiAccess'
 import { focusMode } from '../../composables/useFocusMode'
 import type {
   AiDeskChatMessage,
   AiAnalysisKind,
+  AiContinueDraft,
+  AiContinuePosition,
+  AiAskContextMeta,
+  AiChapterSummaryDraft,
+  AiContinuePrevSummaryCount,
+  AiContinueTargetChars,
+  AiDeskMode,
   AiExtractMode,
   AiMessage,
   Character,
@@ -293,6 +320,7 @@ import {
   type CharacterChangeEvent,
   type FactionChangeEvent,
   removeForeshadowFulfillment,
+  upsertNovelRecord,
   updateChapter,
   updateCharacter,
   updateCharacterFactionMembership,
@@ -307,8 +335,13 @@ import {
   askAiAboutWorkspace,
   askAiWithToolsStream,
   classifyNovelChapterFromWorkspace,
+  continueChapterFromWorkspaceStream,
   extractNovelEntitiesFromWorkspace,
+  summarizeNovelChapterFromWorkspaceStream,
+  summarizeNovelContinuityBriefFromWorkspaceStream,
 } from '../../lib/localAi'
+import { formatChapterSummaryText } from '../../lib/chapterSummary'
+import { fetchWalletBalance } from '../../lib/backendAi'
 import { normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
 import { useChapterHubChapterMutations } from '../../features/chapter-hub/composables/useChapterHubChapterMutations'
 import { useChapterHubCtxMenu } from '../../features/chapter-hub/composables/useChapterHubCtxMenu'
@@ -351,8 +384,6 @@ const props = withDefaults(defineProps<ChapterHubShellProps>(), {
 
 const route = useRoute()
 const router = useRouter()
-const { isAiSubscriptionActive, requestAiSidebarAccess, refreshAiSubscriptionState } = useAiSubscription()
-
 const emptyAiExtractResult = (): NovelEntityExtractResult => ({
   characters: [],
   factions: [],
@@ -415,6 +446,7 @@ type AiDeskChatSession = {
   title: string
   updatedAt: string
   lastQuestionAt: string
+  kind: AiDeskMode
   messages: AiDeskChatMessage[]
   history: AiMessage[]
   extractState?: {
@@ -432,10 +464,94 @@ type AiDeskChatSession = {
   }
 }
 const aiChatSessions = ref<AiDeskChatSession[]>([])
+const aiDeskMode = ref<AiDeskMode>('ask')
 const activeAiChatSessionId = ref('')
+const activeAskSessionId = ref('')
+const activeWriteSessionId = ref('')
 const openAiChatSessionIds = ref<string[]>([])
 const aiSelectionQuote = ref('')
 let aiChatAbortController: AbortController | null = null
+let aiContinueAbortController: AbortController | null = null
+
+const AI_CONTINUE_PREFS_KEY = 'novel-writing.ai-continue-prefs'
+
+type AiContinuePrefs = {
+  prevSummaryCount: AiContinuePrevSummaryCount
+  afterAdoptSummary: boolean
+  afterAdoptExtract: boolean
+  enableRag: boolean
+}
+
+function readAiContinuePrefs(): AiContinuePrefs {
+  if (typeof window === 'undefined') {
+    return { prevSummaryCount: 3, afterAdoptSummary: false, afterAdoptExtract: false, enableRag: true }
+  }
+  try {
+    const raw = localStorage.getItem(AI_CONTINUE_PREFS_KEY)
+    if (!raw) return { prevSummaryCount: 3, afterAdoptSummary: false, afterAdoptExtract: false, enableRag: true }
+    const parsed = JSON.parse(raw) as Partial<AiContinuePrefs>
+    const count = Number(parsed.prevSummaryCount)
+    const prevSummaryCount: AiContinuePrevSummaryCount =
+      count === 2 || count === 5 ? count : 3
+    return {
+      prevSummaryCount,
+      afterAdoptSummary: Boolean(parsed.afterAdoptSummary),
+      afterAdoptExtract: Boolean(parsed.afterAdoptExtract),
+      enableRag: parsed.enableRag !== false,
+    }
+  } catch {
+    return { prevSummaryCount: 3, afterAdoptSummary: false, afterAdoptExtract: false, enableRag: true }
+  }
+}
+
+function persistAiContinuePrefs(prefs: AiContinuePrefs): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(AI_CONTINUE_PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    /* ignore */
+  }
+}
+
+const aiContinuePrefs = ref<AiContinuePrefs>(readAiContinuePrefs())
+
+function emptyAiContinueDraft(): AiContinueDraft {
+  const prefs = aiContinuePrefs.value
+  return {
+    text: '',
+    loading: false,
+    status: 'idle',
+    position: 'end',
+    targetChars: 1500,
+    prevSummaryCount: prefs.prevSummaryCount,
+    afterAdoptSummary: prefs.afterAdoptSummary,
+    afterAdoptExtract: prefs.afterAdoptExtract,
+    enableRag: prefs.enableRag,
+    insertOffset: null,
+    warnings: [],
+    droppedLayers: [],
+    usedLayers: [],
+    usedChars: 0,
+    ragHits: [],
+  }
+}
+
+const aiContinueDraft = ref<AiContinueDraft>(emptyAiContinueDraft())
+const aiContinuityBriefLoading = ref(false)
+let aiContinuityBriefAbortController: AbortController | null = null
+
+function emptyChapterSummaryDraft(): AiChapterSummaryDraft {
+  return { chapterId: '', text: '', loading: false, status: 'idle' }
+}
+
+const aiChapterSummaryDraft = ref<AiChapterSummaryDraft>(emptyChapterSummaryDraft())
+let aiChapterSummaryAbortController: AbortController | null = null
+
+function emptyAiAskContextMeta(): AiAskContextMeta {
+  return { warnings: [], droppedLayers: [], usedLayers: [], usedChars: 0, ragHits: [] }
+}
+
+const aiAskContextMeta = ref<AiAskContextMeta>(emptyAiAskContextMeta())
 const AI_STUDIO_STORAGE_KEY = 'novel-writing.ai-studio-open'
 const AI_TOGGLE_TOP_STORAGE_KEY = 'novel-writing.ai-toggle-top'
 const AI_STUDIO_WIDTH_STORAGE_KEY = 'novel-writing.ai-studio-width'
@@ -549,7 +665,7 @@ function persistAiStudioOpen(open: boolean): void {
 
 function onSetAiStudioOpenEvent(event: Event): void {
   const open = Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open)
-  if (open && !requestAiSidebarAccess('chapter-hub')) {
+  if (open && !requestAiAccess()) {
     aiStudioOpen.value = false
     return
   }
@@ -633,16 +749,42 @@ function aiDeskStateStorageKey(id: string): string {
   return `${AI_DESK_STATE_STORAGE_KEY_PREFIX}${id}`
 }
 
-function createAiChatSession(title = '新聊天'): AiDeskChatSession {
+function createAiChatSession(title = '新聊天', kind: AiDeskMode = 'ask'): AiDeskChatSession {
   const now = new Date().toISOString()
   return {
     id: `chat-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     title,
     updatedAt: now,
     lastQuestionAt: '',
+    kind,
     messages: [],
     history: [],
   }
+}
+
+function defaultAiChatSessionTitle(kind: AiDeskMode): string {
+  if (selectedChapter.value) {
+    return kind === 'write' ? `第${selectedChapter.value.chapterNo}章写作` : `第${selectedChapter.value.chapterNo}章提问`
+  }
+  return kind === 'write' ? '新写作' : '新提问'
+}
+
+function sessionsForDeskMode(kind: AiDeskMode): AiDeskChatSession[] {
+  return aiChatSessions.value.filter((session) => session.kind === kind)
+}
+
+function rememberActiveSessionForMode(mode: AiDeskMode, sessionId: string): void {
+  if (!sessionId) return
+  if (mode === 'write') activeWriteSessionId.value = sessionId
+  else activeAskSessionId.value = sessionId
+}
+
+function resolveActiveSessionIdForMode(mode: AiDeskMode): string {
+  const preferred = mode === 'write' ? activeWriteSessionId.value : activeAskSessionId.value
+  if (preferred && aiChatSessions.value.some((session) => session.id === preferred && session.kind === mode)) {
+    return preferred
+  }
+  return sessionsForDeskMode(mode)[0]?.id ?? ''
 }
 
 function deriveAiChatSessionTitle(messages: AiDeskChatMessage[], fallback = '新聊天'): string {
@@ -698,17 +840,30 @@ function normalizeOpenAiChatSessionIds(ids: string[], sessions: AiDeskChatSessio
   return next.slice(0, 12)
 }
 
-function loadAiDeskState(novelId: string): { activeSessionId: string; openSessionIds: string[] } | null {
+function loadAiDeskState(
+  novelId: string,
+): {
+  deskMode: AiDeskMode
+  activeSessionId: string
+  activeAskSessionId: string
+  activeWriteSessionId: string
+  openSessionIds: string[]
+} | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = localStorage.getItem(aiDeskStateStorageKey(novelId))
     if (!raw) return null
     const parsed = JSON.parse(raw)
+    const deskMode: AiDeskMode = parsed?.deskMode === 'write' ? 'write' : 'ask'
     const activeSessionId = String(parsed?.activeSessionId ?? '').trim()
+    const activeAskSessionId = String(parsed?.activeAskSessionId ?? '').trim()
+    const activeWriteSessionId = String(parsed?.activeWriteSessionId ?? '').trim()
     const openSessionIds = Array.isArray(parsed?.openSessionIds)
       ? parsed.openSessionIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
       : []
-    return activeSessionId || openSessionIds.length > 0 ? { activeSessionId, openSessionIds } : null
+    return activeSessionId || activeAskSessionId || activeWriteSessionId || openSessionIds.length > 0
+      ? { deskMode, activeSessionId, activeAskSessionId, activeWriteSessionId, openSessionIds }
+      : null
   } catch {
     return null
   }
@@ -717,7 +872,16 @@ function loadAiDeskState(novelId: string): { activeSessionId: string; openSessio
 function persistAiDeskState(novelId: string, activeSessionId: string, openSessionIds: string[]): void {
   if (typeof window === 'undefined') return
   try {
-    localStorage.setItem(aiDeskStateStorageKey(novelId), JSON.stringify({ activeSessionId, openSessionIds: openSessionIds.slice(0, 12) }))
+    localStorage.setItem(
+      aiDeskStateStorageKey(novelId),
+      JSON.stringify({
+        deskMode: aiDeskMode.value,
+        activeSessionId,
+        activeAskSessionId: activeAskSessionId.value,
+        activeWriteSessionId: activeWriteSessionId.value,
+        openSessionIds: openSessionIds.slice(0, 12),
+      }),
+    )
   } catch {
     /* ignore */
   }
@@ -736,6 +900,7 @@ function loadAiChatSessions(novelId: string): AiDeskChatSession[] {
             title: String(item?.title ?? '新聊天').trim() || '新聊天',
             updatedAt: String(item?.updatedAt ?? new Date().toISOString()),
             lastQuestionAt: String(item?.lastQuestionAt ?? '').trim(),
+            kind: item?.kind === 'write' ? 'write' : 'ask',
             messages: Array.isArray(item?.messages) ? item.messages : [],
             history: normalizeAiHistory(item?.history),
             extractState: item?.extractState ? normalizeAiExtractState(item.extractState) : undefined,
@@ -759,7 +924,7 @@ function loadAiChatSessions(novelId: string): AiDeskChatSession[] {
             lastQuestionAt: item.lastQuestionAt || lastQuestionAtFromMessages(item.messages),
           }))
           .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-        if (sessions.length > 0) return sessions.slice(0, 12)
+        if (sessions.length > 0) return ensureDeskModeSessions(sessions.slice(0, 24))
       }
     }
   } catch {
@@ -774,18 +939,26 @@ function loadAiChatSessions(novelId: string): AiDeskChatSession[] {
         title: deriveAiChatSessionTitle(legacyMessages, '最近聊天'),
         updatedAt: legacyMessages[legacyMessages.length - 1]?.createdAt || new Date().toISOString(),
         lastQuestionAt: lastQuestionAtFromMessages(legacyMessages),
+        kind: 'ask',
         messages: legacyMessages,
         history: [],
       },
     ]
   }
-  return [createAiChatSession()]
+  return [createAiChatSession('新提问', 'ask'), createAiChatSession('新写作', 'write')]
+}
+
+function ensureDeskModeSessions(sessions: AiDeskChatSession[]): AiDeskChatSession[] {
+  const next = [...sessions]
+  if (!next.some((session) => session.kind === 'ask')) next.unshift(createAiChatSession('新提问', 'ask'))
+  if (!next.some((session) => session.kind === 'write')) next.unshift(createAiChatSession('新写作', 'write'))
+  return next.slice(0, 24)
 }
 
 function persistAiChatSessions(novelId: string, sessions: AiDeskChatSession[]): void {
   if (typeof window === 'undefined') return
   try {
-    localStorage.setItem(aiChatSessionsStorageKey(novelId), JSON.stringify(sessions.slice(0, 12)))
+    localStorage.setItem(aiChatSessionsStorageKey(novelId), JSON.stringify(sessions.slice(0, 24)))
   } catch {
     /* ignore */
   }
@@ -813,6 +986,7 @@ function persistAiChatMessages(novelId: string, messages: AiDeskChatMessage[]): 
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
   persistAiChatSessions(novelId, aiChatSessions.value)
   openAiChatSessionIds.value = normalizeOpenAiChatSessionIds(openAiChatSessionIds.value, aiChatSessions.value, activeId)
+  rememberActiveSessionForMode(aiDeskMode.value, activeId)
   persistAiDeskState(novelId, activeId, openAiChatSessionIds.value)
 }
 
@@ -821,28 +995,197 @@ function toggleAiStudio(): void {
     suppressAiToggleClick.value = false
     return
   }
-  if (!aiStudioOpen.value && !requestAiSidebarAccess('chapter-hub')) return
+  if (!aiStudioOpen.value && !requestAiAccess()) return
   aiStudioOpen.value = !aiStudioOpen.value
+}
+
+function onUpdateContinuePrevSummaryCount(value: AiContinuePrevSummaryCount): void {
+  aiContinueDraft.value.prevSummaryCount = value
+  aiContinuePrefs.value = { ...aiContinuePrefs.value, prevSummaryCount: value }
+  persistAiContinuePrefs(aiContinuePrefs.value)
+}
+
+function onUpdateContinueAfterAdoptSummary(value: boolean): void {
+  aiContinueDraft.value.afterAdoptSummary = value
+  aiContinuePrefs.value = { ...aiContinuePrefs.value, afterAdoptSummary: value }
+  persistAiContinuePrefs(aiContinuePrefs.value)
+}
+
+function onUpdateContinueAfterAdoptExtract(value: boolean): void {
+  aiContinueDraft.value.afterAdoptExtract = value
+  aiContinuePrefs.value = { ...aiContinuePrefs.value, afterAdoptExtract: value }
+  persistAiContinuePrefs(aiContinuePrefs.value)
+}
+
+function onUpdateContinueEnableRag(value: boolean): void {
+  aiContinueDraft.value.enableRag = value
+  aiContinuePrefs.value = { ...aiContinuePrefs.value, enableRag: value }
+  persistAiContinuePrefs(aiContinuePrefs.value)
+}
+
+async function generateContinuityBrief(): Promise<void> {
+  const id = novelId.value
+  const currentNovel = novel.value
+  if (!id || !currentNovel) return
+  if (!requestAiAccess()) return
+
+  aiContinuityBriefAbortController?.abort()
+  aiContinuityBriefAbortController = new AbortController()
+  aiContinuityBriefLoading.value = true
+  aiExtractError.value = ''
+  appendAiSystemNote('正在生成全书连续性摘要…')
+
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const text = await summarizeNovelContinuityBriefFromWorkspaceStream(
+      snapshot,
+      {
+        novel: {
+          title: currentNovel.title,
+          summary: currentNovel.summary,
+          continuityBrief: currentNovel.continuityBrief,
+        },
+      },
+      {
+        onChunk: () => {
+          /* 全书摘要一次性展示，无需流式 UI */
+        },
+        onError: (err: Error) => {
+          if (err.name === 'AbortError') return
+          aiExtractError.value = err.message || '生成全书摘要失败'
+        },
+      },
+      aiContinuityBriefAbortController.signal,
+    )
+    const brief = String(text ?? '').trim()
+    if (!brief) return
+    upsertNovelRecord({
+      ...currentNovel,
+      continuityBrief: brief,
+      updatedAt: new Date().toISOString(),
+    })
+    appendAiSystemNote(`全书连续性摘要已更新（约 ${brief.length} 字），后续续写将优先引用。`)
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AbortError') return
+    aiExtractError.value = e instanceof Error ? e.message : '生成全书摘要失败'
+  } finally {
+    aiContinuityBriefLoading.value = false
+    aiContinuityBriefAbortController = null
+    void fetchWalletBalance().catch(() => {
+      /* ignore */
+    })
+  }
+}
+
+function stopChapterSummaryDraft(): void {
+  aiChapterSummaryAbortController?.abort()
+}
+
+function ignoreChapterSummaryDraft(): void {
+  stopChapterSummaryDraft()
+  aiChapterSummaryDraft.value = { ...aiChapterSummaryDraft.value, text: '', loading: false, status: 'ignored' }
+  appendAiSystemNote('已忽略章总结草稿')
+  window.setTimeout(() => {
+    if (aiChapterSummaryDraft.value.status === 'ignored') {
+      aiChapterSummaryDraft.value = emptyChapterSummaryDraft()
+    }
+  }, 800)
+}
+
+function applyChapterSummaryDraft(): void {
+  const draft = aiChapterSummaryDraft.value
+  const summary = formatChapterSummaryText(draft.text).trim()
+  if (!draft.chapterId || !summary) return
+  updateChapter({ id: draft.chapterId, annotation: summary })
+  reload()
+  triggerChapterHubSaveToast()
+  aiChapterSummaryDraft.value = { ...draft, status: 'applied' }
+  appendAiSystemNote('章总结已写入本章「总结」字段')
+}
+
+async function runChapterSummaryAfterContinue(chapterId: string): Promise<void> {
+  const id = novelId.value
+  if (!id || !requestAiAccess()) return
+
+  aiChapterSummaryAbortController?.abort()
+  aiChapterSummaryAbortController = new AbortController()
+  aiChapterSummaryDraft.value = {
+    chapterId,
+    text: '',
+    loading: true,
+    status: 'idle',
+  }
+  appendAiSystemNote('正在生成本章总结草稿，完成后可预览并采用…')
+
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const text = await summarizeNovelChapterFromWorkspaceStream(
+      snapshot,
+      { mode: 'current', chapterIds: [chapterId] },
+      {
+        onChunk: (chunk: string) => {
+          aiChapterSummaryDraft.value = {
+            ...aiChapterSummaryDraft.value,
+            text: formatChapterSummaryText(aiChapterSummaryDraft.value.text + chunk),
+          }
+        },
+        onError: (err: Error) => {
+          if (err.name === 'AbortError') return
+          aiExtractError.value = err.message || '章总结生成失败'
+        },
+      },
+      aiChapterSummaryAbortController.signal,
+    )
+    const summary = formatChapterSummaryText(text || aiChapterSummaryDraft.value.text).trim()
+    if (!summary) {
+      aiChapterSummaryDraft.value = emptyChapterSummaryDraft()
+      appendAiSystemNote('章总结生成结果为空。')
+      return
+    }
+    aiChapterSummaryDraft.value = {
+      chapterId,
+      text: summary,
+      loading: false,
+      status: 'ready',
+    }
+    appendAiSystemNote('章总结草稿已就绪，请在下方预览后采用或忽略。')
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      aiChapterSummaryDraft.value = {
+        ...aiChapterSummaryDraft.value,
+        loading: false,
+        status: aiChapterSummaryDraft.value.text.trim() ? 'ready' : 'idle',
+      }
+    } else {
+      aiExtractError.value = e instanceof Error ? e.message : '章总结生成失败'
+      aiChapterSummaryDraft.value = emptyChapterSummaryDraft()
+    }
+  } finally {
+    aiChapterSummaryAbortController = null
+    void fetchWalletBalance().catch(() => {
+      /* ignore */
+    })
+  }
 }
 
 const aiChatSessionSummaries = computed(() =>
   openAiChatSessionIds.value
     .map((id) => aiChatSessions.value.find((session) => session.id === id))
-    .filter((session): session is AiDeskChatSession => !!session)
+    .filter((session): session is AiDeskChatSession => !!session && session.kind === aiDeskMode.value)
     .map((session) => ({
       id: session.id,
-      title: session.title || '新聊天',
+      title: session.title || (session.kind === 'write' ? '新写作' : '新提问'),
       updatedAt: session.updatedAt,
     })),
 )
 
 const aiChatHistorySummaries = computed(() =>
-  aiChatSessions.value
+  sessionsForDeskMode(aiDeskMode.value)
     .slice()
     .sort((a, b) => String(b.lastQuestionAt || b.updatedAt).localeCompare(String(a.lastQuestionAt || a.updatedAt)))
     .map((session) => ({
       id: session.id,
-      title: session.title || '新聊天',
+      title: session.title || (session.kind === 'write' ? '新写作' : '新提问'),
       updatedAt: session.updatedAt,
       lastQuestionAt: session.lastQuestionAt || lastQuestionAtFromMessages(session.messages),
     })),
@@ -851,19 +1194,21 @@ const aiChatHistorySummaries = computed(() =>
 function switchAiChatSession(sessionId: string): void {
   const target = aiChatSessions.value.find((session) => session.id === sessionId)
   if (!target) return
+  aiDeskMode.value = target.kind
   activeAiChatSessionId.value = target.id
   openAiChatSessionIds.value = normalizeOpenAiChatSessionIds([target.id, ...openAiChatSessionIds.value], aiChatSessions.value, target.id)
   aiChatMessages.value = target.messages.slice(-200)
   conversationHistory.value = target.history.slice(-60)
   restoreAiExtractStateFromSession(target)
+  rememberActiveSessionForMode(target.kind, target.id)
   if (novelId.value) persistAiDeskState(novelId.value, target.id, openAiChatSessionIds.value)
 }
 
 function startNewAiChat(): void {
-  const session = createAiChatSession(selectedChapter.value ? `第${selectedChapter.value.chapterNo}章新聊天` : '新聊天')
-  aiChatSessions.value = [session, ...aiChatSessions.value].slice(0, 12)
-  activeAiChatSessionId.value = session.id
-  openAiChatSessionIds.value = normalizeOpenAiChatSessionIds([session.id, ...openAiChatSessionIds.value], aiChatSessions.value, session.id)
+  const kind = aiDeskMode.value
+  const session = createAiChatSession(defaultAiChatSessionTitle(kind), kind)
+  aiChatSessions.value = [session, ...aiChatSessions.value].slice(0, 24)
+  switchAiChatSession(session.id)
   aiChatMessages.value = []
   conversationHistory.value = []
   clearAiSelectionQuote()
@@ -872,6 +1217,26 @@ function startNewAiChat(): void {
     persistAiChatSessions(novelId.value, aiChatSessions.value)
     persistAiDeskState(novelId.value, session.id, openAiChatSessionIds.value)
   }
+}
+
+function switchToAiDeskMode(nextMode: AiDeskMode): void {
+  if (aiDeskMode.value === nextMode) return
+  rememberActiveSessionForMode(aiDeskMode.value, activeAiChatSessionId.value)
+  aiDeskMode.value = nextMode
+  const targetId = resolveActiveSessionIdForMode(nextMode)
+  if (targetId) {
+    switchAiChatSession(targetId)
+    return
+  }
+  const session = createAiChatSession(defaultAiChatSessionTitle(nextMode), nextMode)
+  aiChatSessions.value = [session, ...aiChatSessions.value].slice(0, 24)
+  switchAiChatSession(session.id)
+  if (novelId.value) persistAiChatSessions(novelId.value, aiChatSessions.value)
+}
+
+function toggleAiDeskMode(): void {
+  const nextMode: AiDeskMode = aiDeskMode.value === 'ask' ? 'write' : 'ask'
+  switchToAiDeskMode(nextMode)
 }
 
 function closeAiChatSession(sessionId: string): void {
@@ -894,8 +1259,14 @@ function deleteAiChatSession(sessionId: string): void {
   if (!target) return
 
   const remaining = currentSessions.filter((session) => session.id !== sessionId)
-  const nextSessions = remaining.length > 0 ? remaining : [createAiChatSession()]
-  aiChatSessions.value = nextSessions.slice(0, 12)
+  let nextSessions = [...remaining]
+  if (!nextSessions.some((session) => session.kind === 'ask')) {
+    nextSessions = [createAiChatSession('新提问', 'ask'), ...nextSessions]
+  }
+  if (!nextSessions.some((session) => session.kind === 'write')) {
+    nextSessions = [createAiChatSession('新写作', 'write'), ...nextSessions]
+  }
+  aiChatSessions.value = nextSessions.slice(0, 24)
   openAiChatSessionIds.value = normalizeOpenAiChatSessionIds(openAiChatSessionIds.value.filter((id) => id !== sessionId), aiChatSessions.value)
 
   if (activeAiChatSessionId.value === sessionId) {
@@ -1278,7 +1649,7 @@ function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'i
       gender: item.gender,
       goal: item.goal,
       secret: item.secret,
-      arc: '',
+      arc: item.arc,
       notes: item.notes,
       attributes: item.attributes,
       aliases: item.aliases,
@@ -1299,6 +1670,7 @@ function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'i
       gender: preferExisting(current.gender, item.gender),
       goal: preferExisting(current.goal, item.goal),
       secret: preferExisting(current.secret, item.secret),
+      arc: preferExisting(current.arc, item.arc),
       notes: preferExisting(current.notes, item.notes),
       attributes: mergeCharacterAttributes(current.attributes, item.attributes),
       aliases: mergeAliases(current.aliases, [item.name, ...item.aliases]),
@@ -1324,6 +1696,7 @@ function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ign
       name: item.name,
       leader: item.leader,
       notes: item.notes,
+      attributes: item.attributes ?? [],
     })
     nextFactionId = created.id
     appendAiSystemNote(`已确认添加势力：${item.name}`)
@@ -1337,6 +1710,7 @@ function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ign
       id: targetId,
       leader: preferExisting(current.leader, item.leader),
       notes: preferExisting(current.notes, item.notes),
+      attributes: mergeCharacterAttributes(current.attributes, item.attributes ?? []),
     })
     appendAiSystemNote(`已确认合并势力：${item.name} -> ${current.name}`)
   }
@@ -1528,8 +1902,29 @@ function applyClassificationSuggestion(action: 'merge' | 'ignore'): void {
   setAiClassificationState('applied', 'merge')
 }
 
-function applyAiSuggestion(payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' }): void {
+function reopenAiSuggestion(
+  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification',
+  index: number,
+): void {
+  if (section === 'foreshadows') {
+    const item = aiForeshadowResult.value.newPlants[index]
+    if (!item) return
+    setAiForeshadowSuggestionState(index, 'pending', null)
+    return
+  }
+  if (section === 'classification') {
+    setAiClassificationState('pending', null)
+    return
+  }
+  setAiSuggestionState(section, index, 'pending', null)
+}
+
+function applyAiSuggestion(payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' | 'reopen' }): void {
   aiExtractError.value = ''
+  if (payload.action === 'reopen') {
+    reopenAiSuggestion(payload.section, payload.index)
+    return
+  }
   if (payload.section === 'characters') return applyCharacterSuggestion(payload.index, payload.action)
   if (payload.section === 'factions') return applyFactionSuggestion(payload.index, payload.action)
   if (payload.section === 'items') return applyItemSuggestion(payload.index, payload.action)
@@ -1680,11 +2075,6 @@ function resetAiExtractState(): void {
   persistActiveAiSessionState()
 }
 
-function openAiWorkspaceSettings(): void {
-  if (!novelId.value) return
-  void router.push({ name: 'novel-workspace', params: { id: novelId.value }, query: { tab: 'ai' } })
-}
-
 async function runAiExtract(mode: AiExtractMode): Promise<void> {
   const id = novelId.value
   if (!id) return
@@ -1741,23 +2131,194 @@ function runCurrentAiExtract(): void {
 
 function stopAiReadingDesk(): void {
   aiChatAbortController?.abort()
+  aiChatThinking.value = false
+  aiChatLoading.value = false
 }
 
-async function askAiReadingDesk(payload: { question: string }): Promise<void> {
+function resolveContinueCursorOffset(): number {
+  const chapter = selectedChapter.value
+  const ta = chapterTextareaRef.value
+  if (!chapter) return 0
+  const content = chapter.content ?? ''
+  if (!ta) return content.length
+  const start = ta.selectionStart ?? content.length
+  return Math.max(0, Math.min(content.length, start))
+}
+
+function stopAiContinue(): void {
+  aiContinueAbortController?.abort()
+  if (aiContinueDraft.value.loading) {
+    aiContinueDraft.value = {
+      ...aiContinueDraft.value,
+      loading: false,
+      status: aiContinueDraft.value.text.trim() ? 'ready' : 'idle',
+    }
+  }
+}
+
+async function runAiContinue(payload: { direction: string }): Promise<void> {
+  const id = novelId.value
+  const chapter = selectedChapter.value
+  if (!id || !chapter) return
+  if (!requestAiAccess()) return
+
+  const direction = String(payload.direction ?? '').trim()
+  const position: AiContinuePosition = aiContinueDraft.value.position
+  const cursorOffset = position === 'cursor' ? resolveContinueCursorOffset() : chapter.content?.length ?? 0
+
+  if (direction) {
+    appendAiChatMessage('user', direction, 'current')
+  }
+
+  aiContinueAbortController?.abort()
+  aiContinueAbortController = new AbortController()
+  aiExtractError.value = ''
+  aiContinueDraft.value = {
+    ...aiContinueDraft.value,
+    text: '',
+    loading: true,
+    status: 'idle',
+    insertOffset: position === 'cursor' ? cursorOffset : null,
+    warnings: [],
+    droppedLayers: [],
+    usedLayers: [],
+    usedChars: 0,
+    ragHits: [],
+  }
+
+  if (!aiStudioOpen.value) aiStudioOpen.value = true
+  switchToAiDeskMode('write')
+
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const result = await continueChapterFromWorkspaceStream(
+      snapshot,
+      {
+        chapterId: chapter.id,
+        position,
+        cursorOffset,
+        targetChars: aiContinueDraft.value.targetChars,
+        direction,
+        selectionQuote: aiSelectionQuote.value.trim() || undefined,
+        prevSummaryCount: aiContinueDraft.value.prevSummaryCount,
+        enableRag: aiContinueDraft.value.enableRag,
+        novel: novel.value
+          ? {
+              title: novel.value.title,
+              summary: novel.value.summary,
+              continuityBrief: novel.value.continuityBrief,
+              genre: novel.value.genre,
+              perspective: novel.value.perspective,
+              tone: novel.value.tone,
+            }
+          : undefined,
+      },
+      {
+        onChunk: (text: string) => {
+          aiContinueDraft.value = {
+            ...aiContinueDraft.value,
+            text: aiContinueDraft.value.text + text,
+          }
+        },
+        onError: (err: Error) => {
+          if (err.name === 'AbortError') return
+          aiExtractError.value = err.message || '续写失败'
+        },
+      },
+      aiContinueAbortController.signal,
+    )
+
+    aiContinueDraft.value = {
+      ...aiContinueDraft.value,
+      loading: false,
+      text: result.text || aiContinueDraft.value.text,
+      status: 'ready',
+      warnings: result.warnings,
+      droppedLayers: result.droppedLayers,
+      usedLayers: result.usedLayers,
+      usedChars: result.usedChars,
+      ragHits: result.ragHits,
+    }
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      aiContinueDraft.value = {
+        ...aiContinueDraft.value,
+        loading: false,
+        status: aiContinueDraft.value.text.trim() ? 'ready' : 'idle',
+      }
+    } else {
+      aiExtractError.value = e instanceof Error ? e.message : '续写失败，请稍后重试'
+      aiContinueDraft.value = { ...aiContinueDraft.value, loading: false, status: 'idle' }
+    }
+  } finally {
+    aiContinueAbortController = null
+    if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+    void fetchWalletBalance().catch(() => {
+      /* ignore */
+    })
+  }
+}
+
+async function applyContinueDraft(): Promise<void> {
+  const chapter = selectedChapter.value
+  const text = aiContinueDraft.value.text.trim()
+  if (!chapter || !text) return
+
+  const content = chapter.content ?? ''
+  let nextContent = content
+  if (aiContinueDraft.value.position === 'end') {
+    const gap = content.length > 0 && !content.endsWith('\n') ? '\n\n' : ''
+    nextContent = `${content}${gap}${text}`
+  } else {
+    const offset =
+      aiContinueDraft.value.insertOffset ?? resolveContinueCursorOffset()
+    nextContent = `${content.slice(0, offset)}${text}${content.slice(offset)}`
+  }
+
+  const runSummary = aiContinueDraft.value.afterAdoptSummary
+  const runExtract = aiContinueDraft.value.afterAdoptExtract
+
+  updateChapter({ id: chapter.id, content: nextContent })
+  chapters.value = chapters.value.map((item) => (item.id === chapter.id ? { ...item, content: nextContent } : item))
+  triggerChapterHubSaveToast()
+  aiContinueDraft.value = { ...aiContinueDraft.value, status: 'applied' }
+  appendAiSystemNote(`已采用续写内容（约 ${text.length} 字）写入正文`)
+  appendAiChatMessage('assistant', `【已采用续写】${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`, 'current')
+  if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+
+  if (runSummary) {
+    void runChapterSummaryAfterContinue(chapter.id)
+  }
+  if (runExtract) {
+    switchToAiDeskMode('ask')
+    void runAiExtract('current')
+  }
+}
+
+function ignoreContinueDraft(): void {
+  aiContinueDraft.value = { ...aiContinueDraft.value, status: 'ignored', text: '' }
+  appendAiSystemNote('已忽略本次续写草稿')
+}
+
+async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }): Promise<void> {
   const id = novelId.value
   if (!id) return
   if (!selectedChapter.value) {
-    aiExtractError.value = '???????????? AI?'
+    aiExtractError.value = '请先选择章节后再使用 AI。'
     return
   }
+  const deskMode = payload.mode ?? aiDeskMode.value
   const question = String(payload.question ?? '').trim()
-  const quoted = aiSelectionQuote.value.trim()
-  const composedQuestion = quoted ? `??????????????
-?${quoted}?
+  if (deskMode === 'write') {
+    await runAiContinue({ direction: question })
+    return
+  }
 
-???${question}` : question
-  appendAiChatMessage('user', quoted ? `???${quoted}
-${question}` : question, 'current')
+  const quoted = aiSelectionQuote.value.trim()
+  const composedQuestion = quoted
+    ? `请结合以下引用片段回答：\n「${quoted}」\n\n作者问题：${question}`
+    : question
+  appendAiChatMessage('user', quoted ? `引用：${quoted}\n${question}` : question, 'current')
   aiChatLoading.value = true
   aiChatThinking.value = true
   aiExtractError.value = ''
@@ -1774,28 +2335,49 @@ ${question}` : question, 'current')
   aiChatMessages.value = [...aiChatMessages.value, msg]
   try {
     const snapshot = buildNovelWorkspacePayload(id)
-    const { history } = await askAiWithToolsStream(
+    const streamCallbacks = {
+      onChunk: (text: string) => {
+        if (aiChatThinking.value) aiChatThinking.value = false
+        msg.content += text
+      },
+      onError: (err: Error) => {
+        if (err.name === 'AbortError') return
+        aiExtractError.value = err.message || 'AI 请求失败'
+      },
+    }
+    const { history, contextMeta } = await askAiWithToolsStream(
       snapshot,
       {
         mode: 'current',
         question: composedQuestion,
         chapterIds: selectedChapter.value ? [selectedChapter.value.id] : [],
         novelId: id,
+        selectionQuote: quoted || undefined,
+        prevSummaryCount: aiContinuePrefs.value.prevSummaryCount,
+        enableRag: aiContinuePrefs.value.enableRag,
+        novel: novel.value
+          ? {
+              title: novel.value.title,
+              summary: novel.value.summary,
+              continuityBrief: novel.value.continuityBrief,
+              genre: novel.value.genre,
+              perspective: novel.value.perspective,
+              tone: novel.value.tone,
+            }
+          : undefined,
       },
-      {
-        onChunk: (text: string) => {
-          if (aiChatThinking.value) aiChatThinking.value = false
-          msg.content += text
-        },
-        onError: (err: Error) => {
-          if (err.name === 'AbortError') return
-          aiExtractError.value = err.message || 'AI ??????'
-        },
-      },
+      streamCallbacks,
       conversationHistory.value.length > 0 ? conversationHistory.value : undefined,
       aiChatAbortController.signal,
     )
     conversationHistory.value = history
+    aiAskContextMeta.value = {
+      warnings: contextMeta.warnings,
+      droppedLayers: contextMeta.droppedLayers,
+      usedLayers: contextMeta.usedLayers,
+      usedChars: contextMeta.usedChars,
+      ragHits: contextMeta.ragHits,
+    }
     if (!msg.content.trim()) {
       msg.content = '已回答完毕，但这次没有生成可显示的内容。'
     }
@@ -1804,13 +2386,16 @@ ${question}` : question, 'current')
       if (!msg.content.trim()) msg.content = '已停止回答。'
     } else if (!msg.content.trim()) {
       aiChatMessages.value = aiChatMessages.value.filter((m) => m.id !== msgId)
-      aiExtractError.value = e instanceof Error ? e.message : 'AI ??????????'
+      aiExtractError.value = e instanceof Error ? e.message : 'AI 请求失败，请稍后重试'
     }
   } finally {
     aiChatLoading.value = false
     aiChatThinking.value = false
     aiChatAbortController = null
     if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+    void fetchWalletBalance().catch(() => {
+      /* ignore */
+    })
   }
 }
 
@@ -2000,7 +2585,7 @@ function syncAiSelectionQuoteFromTextarea(): void {
   }
   aiSelectionQuote.value = excerptForAiQuote((chapter.content ?? '').slice(start, end))
   if (aiSelectionQuote.value && !focusMode.value) {
-    if (!requestAiSidebarAccess('selection-quote')) return
+    if (!requestAiAccess()) return
     aiStudioOpen.value = true
   }
 }
@@ -2714,7 +3299,7 @@ watch(selectedChapterId, () => {
 })
 
 watch(aiStudioOpen, (open) => {
-  if (open && !isAiSubscriptionActive.value) {
+  if (open && !requestAiAccess()) {
     aiStudioOpen.value = false
     return
   }
@@ -2722,28 +3307,33 @@ watch(aiStudioOpen, (open) => {
 })
 
 watch(
-  () => route.fullPath,
-  () => {
-    refreshAiSubscriptionState()
-    if (aiStudioOpen.value && !isAiSubscriptionActive.value) aiStudioOpen.value = false
-  },
-  { immediate: true },
-)
-
-watch(
   novelId,
   (id) => {
-    const sessions = id ? loadAiChatSessions(id) : [createAiChatSession()]
+    const sessions = ensureDeskModeSessions(
+      id ? loadAiChatSessions(id) : [createAiChatSession('新提问', 'ask'), createAiChatSession('新写作', 'write')],
+    )
     aiChatSessions.value = sessions
     const savedState = id ? loadAiDeskState(id) : null
-    const activeId = savedState?.activeSessionId && sessions.some((session) => session.id === savedState.activeSessionId)
-      ? savedState.activeSessionId
-      : sessions[0]?.id ?? ''
-    openAiChatSessionIds.value = normalizeOpenAiChatSessionIds(savedState?.openSessionIds ?? sessions.slice(0, 4).map((session) => session.id), sessions, activeId)
+    aiDeskMode.value = savedState?.deskMode === 'write' ? 'write' : 'ask'
+    activeAskSessionId.value = savedState?.activeAskSessionId ?? ''
+    activeWriteSessionId.value = savedState?.activeWriteSessionId ?? ''
+    let activeId =
+      savedState?.activeSessionId && sessions.some((session) => session.id === savedState.activeSessionId)
+        ? savedState.activeSessionId
+        : ''
+    if (!activeId || !sessions.some((session) => session.id === activeId && session.kind === aiDeskMode.value)) {
+      activeId = resolveActiveSessionIdForMode(aiDeskMode.value) || sessions.find((session) => session.kind === aiDeskMode.value)?.id || ''
+    }
+    openAiChatSessionIds.value = normalizeOpenAiChatSessionIds(
+      savedState?.openSessionIds ?? sessions.filter((session) => session.kind === aiDeskMode.value).slice(0, 4).map((session) => session.id),
+      sessions,
+      activeId,
+    )
     activeAiChatSessionId.value = activeId
     const activeSession = sessions.find((session) => session.id === activeId) ?? sessions[0]
     aiChatMessages.value = activeSession?.messages.slice(-200) ?? []
     conversationHistory.value = activeSession?.history.slice(-60) ?? []
+    rememberActiveSessionForMode(activeSession?.kind ?? aiDeskMode.value, activeId)
     clearAiSelectionQuote()
     restoreAiExtractStateFromSession(activeSession)
   },
