@@ -15,9 +15,12 @@ use axum::{
     Router,
 };
 use config::Config;
-use handlers::{auth, health, novels};
+use handlers::{ai, auth, billing, health, novels};
 use middleware::{auth_middleware, cors_layer};
-use services::{AppState, AuthService, CacheService, NovelService};
+use services::{
+    AiService, AppState, AuthService, CacheService, CardKeyService, NovelService, SettingsService,
+    WalletService,
+};
 use std::sync::Arc;
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -32,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    tracing::info!("🚀 Starting Novel Backend (Rust)...");
+    tracing::info!("Starting Novel Backend (Rust)...");
 
     let config = Config::from_env()?;
     tracing::info!("Configuration loaded");
@@ -48,13 +51,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let redis_client = db::create_redis_client(&config.redis_url).await?;
 
     let cache_service = CacheService::new(redis_client);
+    let settings = Arc::new(SettingsService::new(db.clone()));
+    settings.ensure_defaults().await?;
+    settings
+        .sync_deepseek_from_env_if_empty(
+            &config.deepseek_api_key,
+            &config.deepseek_base_url,
+        )
+        .await?;
+    let wallet = Arc::new(WalletService::new(db.clone()));
+    let card_keys = Arc::new(CardKeyService::new(db.clone(), (*wallet).clone()));
     let state = Arc::new(AppState {
         auth: Arc::new(AuthService::new(
             db.clone(),
             cache_service.clone(),
             config.clone(),
+            (*wallet).clone(),
         )),
         novels: Arc::new(NovelService::new(db.clone(), cache_service)),
+        settings: settings.clone(),
+        wallet: wallet.clone(),
+        card_keys,
+        ai: Arc::new(AiService::new(
+            config.clone(),
+            (*settings).clone(),
+            (*wallet).clone(),
+        )),
     });
 
     tracing::info!("Services initialized");
@@ -62,13 +84,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let public_routes = Router::new()
         .route("/", get(health::root))
         .route("/health", get(health::health_check))
-        .route("/auth/register", post(auth::register))
-        .route("/auth/login", post(auth::login))
-        .route("/auth/send-code", post(auth::send_code));
+        .route("/auth/device-status", get(auth::device_status))
+        .route("/auth/register-by-device", post(auth::register_by_device))
+        .route("/auth/login", post(auth::login));
 
     let authed_routes = Router::new()
         .route("/auth/me", get(auth::get_current_user))
         .route("/auth/logout", post(auth::logout))
+        .route("/billing/wallet", get(billing::get_wallet))
+        .route("/billing/ledger", get(billing::get_ledger))
+        .route("/billing/redeem", post(billing::redeem_card_key))
+        .route("/ai/chat", post(ai::chat))
         .route("/novels", get(novels::list_novels).post(novels::create_novel))
         .route(
             "/novels/:id",
@@ -98,6 +124,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &config.admin_username,
             &config.admin_password,
             config.admin_sync_password,
+            &config.deepseek_api_key,
+            &config.deepseek_base_url,
         )
         .await?;
         app = app.merge(admin_router);
@@ -109,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let addr = format!("{}:{}", config.host, config.port);
-    tracing::info!("🚀 Server listening on {}", addr);
+    tracing::info!("Server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

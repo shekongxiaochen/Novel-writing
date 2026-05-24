@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>用户与余额 — {{ admin_title }}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="/admin/_static/admin.css" />
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased font-sans min-h-screen">
+  <header class="border-b border-zinc-200 bg-white">
+    <div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="/admin/" class="text-zinc-500 hover:text-zinc-900 text-sm"><i class="fa-solid fa-arrow-left mr-1"></i>控制台</a>
+        <span class="text-zinc-300">/</span>
+        <span class="text-sm font-semibold">用户与余额</span>
+      </div>
+      <span class="text-xs text-zinc-500">{{ admin_title }}</span>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-8">
+    {% if ok %}
+    <div class="px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
+      <i class="fa-solid fa-circle-check mr-1"></i> 充值成功，流水已记录。
+    </div>
+    {% endif %}
+    {% if error %}
+    <div class="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{{ error }}</div>
+    {% endif %}
+
+    <section class="bg-white rounded-lg border border-zinc-200 shadow-sm p-6">
+      <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+        <i class="fa-solid fa-coins text-zinc-400"></i> 为用户充值
+      </h2>
+      <form method="post" action="/admin/user-ops" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <label class="block space-y-1 md:col-span-2">
+          <span class="text-sm font-medium">选择用户</span>
+          <select name="user_id" required class="w-full rounded-md border-zinc-200 text-sm">
+            <option value="">— 请选择 —</option>
+            {% for u in users %}
+            <option value="{{ u.id }}" {% if recharge_user_id == u.id %}selected{% endif %}>
+              {{ u.username }}（{{ u.display_name }}）— 余额 {{ u.balance_fmt }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">充值金额（元）</span>
+          <input name="amount" type="number" min="1" step="1" required placeholder="如 5"
+                 class="w-full rounded-md border-zinc-200 text-sm" />
+        </label>
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">备注（可选）</span>
+          <input name="note" type="text" maxlength="120" placeholder="如：活动赠送"
+                 class="w-full rounded-md border-zinc-200 text-sm" />
+        </label>
+        <div class="md:col-span-4">
+          <button type="submit" class="bg-zinc-900 text-white rounded-md px-5 py-2.5 text-sm font-semibold hover:bg-zinc-800">
+            确认充值
+          </button>
+        </div>
+      </form>
+      <p class="text-xs text-zinc-500 mt-3">充值金额直接入账为账户余额（元）；AI 消费按「真实 API 成本 × 消耗倍率」扣减。时间戳自动生成。</p>
+    </section>
+
+    <section class="bg-white rounded-lg border border-zinc-200 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-zinc-100">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <i class="fa-solid fa-users text-zinc-400"></i> 全部用户与余额
+        </h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-zinc-50 text-zinc-600">
+            <tr>
+              <th class="px-4 py-3 font-medium">账号</th>
+              <th class="px-4 py-3 font-medium">昵称</th>
+              <th class="px-4 py-3 font-medium">余额</th>
+              <th class="px-4 py-3 font-medium">状态</th>
+              <th class="px-4 py-3 font-medium">注册时间</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-100">
+            {% for u in users %}
+            <tr class="hover:bg-zinc-50/80">
+              <td class="px-4 py-3 font-medium">{{ u.username }}</td>
+              <td class="px-4 py-3">{{ u.display_name }}</td>
+              <td class="px-4 py-3 tabular-nums">{{ u.balance_fmt }}</td>
+              <td class="px-4 py-3">{% if u.is_active %}<span class="text-emerald-700">正常</span>{% else %}<span class="text-zinc-400">停用</span>{% endif %}</td>
+              <td class="px-4 py-3 text-zinc-500">{{ u.created_at }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="px-4 py-8 text-center text-zinc-400">暂无用户</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="bg-white rounded-lg border border-zinc-200 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-zinc-100">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <i class="fa-solid fa-receipt text-zinc-400"></i> 最近流水
+        </h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-zinc-50 text-zinc-600">
+            <tr>
+              <th class="px-4 py-3 font-medium">时间</th>
+              <th class="px-4 py-3 font-medium">用户</th>
+              <th class="px-4 py-3 font-medium">类型</th>
+              <th class="px-4 py-3 font-medium">变动</th>
+              <th class="px-4 py-3 font-medium">备注</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-100">
+            {% for row in ledger %}
+            <tr>
+              <td class="px-4 py-3 text-zinc-500 whitespace-nowrap">{{ row.created_at }}</td>
+              <td class="px-4 py-3">{{ row.username }}</td>
+              <td class="px-4 py-3">{{ row.reason }}</td>
+              <td class="px-4 py-3 tabular-nums font-medium">{{ row.delta_fmt }}</td>
+              <td class="px-4 py-3 text-zinc-500">{{ row.note }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="px-4 py-8 text-center text-zinc-400">暂无流水</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

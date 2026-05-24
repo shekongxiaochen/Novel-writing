@@ -40,6 +40,36 @@ pub fn generate_verification_code() -> String {
     format!("{:06}", rng.gen_range(0..1000000))
 }
 
+/// 设备 ID 哈希（注册绑定，不落库明文）
+pub fn hash_device_id(device_id: &str) -> String {
+    hash_verification_code(device_id.trim())
+}
+
+/// 生成系统分配的用户名
+pub fn generate_username() -> String {
+    const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    let suffix: String = (0..8)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARS.len());
+            CHARS[idx] as char
+        })
+        .collect();
+    format!("nw{suffix}")
+}
+
+/// 生成随机密码（注册时一次性展示）
+pub fn generate_password() -> String {
+    const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    let mut rng = rand::thread_rng();
+    (0..12)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARS.len());
+            CHARS[idx] as char
+        })
+        .collect()
+}
+
 /// 哈希验证码 (用于存储)
 pub fn hash_verification_code(code: &str) -> String {
     use sha2::Digest;

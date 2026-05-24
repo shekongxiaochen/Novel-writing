@@ -1,37 +1,54 @@
+import { getOrCreateDeviceId } from './device'
+
 export type AuthUser = {
   id: string
-  email: string
+  username: string
   displayName: string
+  balanceYuan: number
   createdAt: string
 }
 
 export type AuthSession = {
   token: string
-  expiresAt: string
   user: AuthUser
 }
 
-export type SendCodeResult = {
-  message: string
-  debugCode?: string
+export type DeviceStatus = {
+  hasAccount: boolean
+  username?: string
+}
+
+export type RegisterByDeviceResult = {
+  username: string
+  password: string
+  token: string
+  user: AuthUser
 }
 
 type AuthApiUser = {
   id: string
-  email: string
+  username: string
   display_name: string
+  balance_yuan: number
+  balance_tokens?: number
   created_at: string
 }
 
 type AuthApiSession = {
   token: string
-  expires_at: string
   user: AuthApiUser
 }
 
-type SendCodeApiResult = {
-  message: string
-  debug_code?: string
+type DeviceStatusApi = {
+  has_account: boolean
+  username?: string
+}
+
+type RegisterByDeviceApi = {
+  username: string
+  password: string
+  token: string
+  user: AuthApiUser
 }
 
 const SESSION_KEY = 'novel-writing.auth.session'
@@ -42,26 +59,17 @@ function emitAuthSessionChanged(): void {
   window.dispatchEvent(new Event('novel-writing:changed'))
 }
 
-function normalizeEmail(input: string): string {
-  return String(input ?? '')
-    .trim()
-    .toLowerCase()
+function deviceHeaders(): Record<string, string> {
+  return { 'X-Device-Id': getOrCreateDeviceId() }
 }
 
 function mapUser(user: AuthApiUser): AuthUser {
   return {
     id: String(user.id),
-    email: String(user.email),
+    username: String(user.username),
     displayName: String(user.display_name ?? ''),
+    balanceYuan: Number(user.balance_yuan ?? user.balance_tokens ?? 0),
     createdAt: String(user.created_at ?? ''),
-  }
-}
-
-function mapSession(session: AuthApiSession): AuthSession {
-  return {
-    token: String(session.token),
-    expiresAt: String(session.expires_at),
-    user: mapUser(session.user),
   }
 }
 
@@ -73,11 +81,11 @@ function readSession(): AuthSession | null {
     if (!parsed?.token || !parsed?.user?.id) return null
     return {
       token: String(parsed.token),
-      expiresAt: String(parsed.expiresAt ?? ''),
       user: {
         id: String(parsed.user.id),
-        email: String(parsed.user.email ?? ''),
+        username: String(parsed.user.username ?? ''),
         displayName: String(parsed.user.displayName ?? ''),
+        balanceYuan: Number(parsed.user.balanceYuan ?? parsed.user.balanceTokens ?? 0),
         createdAt: String(parsed.user.createdAt ?? ''),
       },
     }
@@ -101,17 +109,25 @@ function clearSession(): void {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(init?.headers ?? {}),
-    },
-  })
+  let resp: Response
+  try {
+    resp = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        ...deviceHeaders(),
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch {
+    throw new Error(
+      `无法连接后端（${API_BASE_URL}）。请确认 Rust 后端已启动、迁移已执行，且前端地址在 CORS_ORIGINS 中。`,
+    )
+  }
 
   const text = await resp.text()
-  const payload = text ? JSON.parse(text) as unknown : null
+  const payload = text ? (JSON.parse(text) as unknown) : null
 
   if (!resp.ok) {
     const detail =
@@ -132,80 +148,48 @@ export function getCurrentUser(): AuthUser | null {
   return readSession()?.user ?? null
 }
 
-export async function sendRegisterCode(input: { email: string }): Promise<SendCodeResult> {
-  return sendCode({ email: input.email, purpose: 'register' })
-}
-
-export async function sendResetPasswordCode(input: { email: string }): Promise<SendCodeResult> {
-  return sendCode({ email: input.email, purpose: 'reset_password' })
-}
-
-async function sendCode(input: { email: string; purpose: 'register' | 'reset_password' }): Promise<SendCodeResult> {
-  const email = normalizeEmail(input.email)
-  if (!email) throw new Error('请输入邮箱')
-
-  const result = await request<SendCodeApiResult>('/auth/send-code', {
-    method: 'POST',
-    body: JSON.stringify({
-      email,
-      purpose: input.purpose,
-    }),
-  })
-
+export async function fetchDeviceStatus(): Promise<DeviceStatus> {
+  const data = await request<DeviceStatusApi>('/auth/device-status')
   return {
-    message: String(result.message ?? ''),
-    debugCode: result.debug_code ? String(result.debug_code) : undefined,
+    hasAccount: Boolean(data.has_account),
+    username: data.username ? String(data.username) : undefined,
   }
 }
 
-export async function register(input: {
-  email: string
-  password: string
-  code: string
-  displayName?: string
-}): Promise<AuthSession> {
-  const session = await request<AuthApiSession>('/auth/register', {
+export async function registerByDevice(): Promise<RegisterByDeviceResult> {
+  const data = await request<RegisterByDeviceApi>('/auth/register-by-device', {
     method: 'POST',
-    body: JSON.stringify({
-      email: normalizeEmail(input.email),
-      password: String(input.password ?? ''),
-      code: String(input.code ?? '').trim(),
-      display_name: String(input.displayName ?? '').trim(),
-    }),
   })
 
-  const mapped = mapSession(session)
-  writeSession(mapped)
-  return mapped
+  const session: AuthSession = {
+    token: data.token,
+    user: mapUser(data.user),
+  }
+  writeSession(session)
+
+  return {
+    username: data.username,
+    password: data.password,
+    token: data.token,
+    user: session.user,
+  }
 }
 
-export async function resetPassword(input: {
-  email: string
-  code: string
-  newPassword: string
-}): Promise<{ message: string }> {
-  return request<{ message: string }>('/auth/reset-password', {
+export async function login(input: { username: string; password: string }): Promise<AuthSession> {
+  const data = await request<AuthApiSession>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({
-      email: normalizeEmail(input.email),
-      code: String(input.code ?? '').trim(),
-      new_password: String(input.newPassword ?? ''),
-    }),
-  })
-}
-
-export async function login(input: { email: string; password: string }): Promise<AuthSession> {
-  const session = await request<AuthApiSession>('/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({
-      email: normalizeEmail(input.email),
+      username: String(input.username ?? '').trim(),
       password: String(input.password ?? ''),
     }),
   })
 
-  const mapped = mapSession(session)
-  writeSession(mapped)
-  return mapped
+  const session: AuthSession = {
+    token: data.token,
+    user: mapUser(data.user),
+  }
+  writeSession(session)
+  return session
 }
 
 export async function fetchCurrentUser(): Promise<AuthUser> {

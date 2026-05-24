@@ -56,14 +56,6 @@
           >
             伏笔
           </button>
-          <button
-            type="button"
-            class="tab"
-            :class="{ active: activeTab === 'ai' }"
-            @click="switchTab('ai')"
-          >
-            模型控制室
-          </button>
         </nav>
       </div>
     </header>
@@ -108,6 +100,9 @@
           <button type="button" class="btn-secondary" @click="openOutlineAiDesigner">AI设计大纲</button>
           <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
         </div>
+        <Transition name="chapter-hub-save-toast">
+          <div v-if="outlineAiWriteToast" class="workspace-faction-edit-save-toast" role="status">{{ outlineAiWriteToast }}</div>
+        </Transition>
       </header>
 
       <div v-if="outlineItems.length === 0" class="outline-map-empty-state">
@@ -227,8 +222,9 @@
                           class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea"
                           rows="4"
                           maxlength="400"
-                          :placeholder="outlineAiCurrentQuestion.placeholder || '用一句到几句话回答这轮问题'"
+                          :placeholder="outlineAiInterviewCustomPlaceholder"
                         />
+                        <p class="muted workspace-outline-ai-question__hint">选中上方任一选项后，仍可在输入框补充想法，会一并交给 AI。</p>
                       </article>
                     </section>
                   </template>
@@ -264,8 +260,23 @@
                             </ol>
                           </div>
                           <p class="workspace-outline-ai-plan__ending">结局气质：{{ option.endingTone || '未注明' }}</p>
+                          <label class="workspace-outline-ai-plan__note" @click.stop>
+                            <span>调整意见</span>
+                            <textarea
+                              :value="outlineAiOptionNotes[option.id] ?? ''"
+                              class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea workspace-outline-ai-plan__note-input"
+                              rows="3"
+                              maxlength="500"
+                              placeholder="选中此方案后，写下想改的方向（如加强感情线、换结局气质…），再点下方「AI 调整方案」"
+                              @click.stop
+                              @input="setOutlineAiOptionNote(option.id, ($event.target as HTMLTextAreaElement).value)"
+                            />
+                          </label>
                         </article>
                       </div>
+                      <p v-if="outlineAiOptionRevisionHistory.length > 0" class="muted workspace-outline-ai-plan-revision-hint">
+                        已根据你的意见调整 {{ outlineAiOptionRevisionHistory.length }} 轮；可继续修改直到满意，再生成正式大纲。
+                      </p>
                     </section>
                   </template>
 
@@ -300,8 +311,9 @@
                     </section>
                   </template>
 
-                  <p v-if="outlineAiDesignerError" class="form-error workspace-outline-ai-dialog__error">{{ outlineAiDesignerError }}</p>
                 </div>
+
+                <p v-if="outlineAiDesignerError" class="form-error workspace-outline-ai-dialog__error workspace-outline-ai-dialog__error--actions">{{ outlineAiDesignerError }}</p>
 
                 <div class="confirm-dialog__actions workspace-outline-dialog__actions workspace-outline-ai-dialog__actions">
                   <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="closeOutlineAiDesigner">关闭</button>
@@ -318,20 +330,33 @@
                     v-if="outlineAiDesignerStep === 'interview'"
                     type="button"
                     class="btn-primary"
-                    :disabled="outlineAiDesignerLoading || !outlineAiResolvedAnswer || !outlineAiCurrentQuestion"
+                    :disabled="outlineAiDesignerLoading || !outlineAiCanSubmitInterview || !outlineAiCurrentQuestion"
                     @click="submitOutlineAiInterviewAnswer"
                   >
                     {{ outlineAiDesignerLoading ? '处理中…' : '回答这一轮' }}
                   </button>
                   <template v-else-if="outlineAiDesignerStep === 'options'">
                     <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading" @click="backToOutlineAiInterview">返回继续访谈</button>
+                    <button
+                      type="button"
+                      class="btn-secondary"
+                      :disabled="outlineAiDesignerLoading || !selectedOutlineAiOption || !outlineAiSelectedOptionNote"
+                      @click="refineOutlineAiOptions"
+                    >
+                      {{ outlineAiDesignerLoading ? '调整中…' : 'AI 调整方案' }}
+                    </button>
                     <button type="button" class="btn-primary" :disabled="outlineAiDesignerLoading || !selectedOutlineAiOption" @click="generateOutlineAiDraft">
                       {{ outlineAiDesignerLoading ? '展开中…' : '生成正式大纲' }}
                     </button>
                   </template>
-                  <template v-else>
+                  <template v-else-if="outlineAiDesignerStep === 'preview'">
                     <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="backToOutlineAiOptions">返回方案</button>
-                    <button type="button" class="btn-primary" :disabled="outlineAiDesignerWriting" @click="applyOutlineAiDraft">
+                    <button
+                      type="button"
+                      class="btn-primary"
+                      :disabled="outlineAiDesignerWriting || !outlineAiDesignerDraft?.items?.length"
+                      @click="applyOutlineAiDraft"
+                    >
                       {{ outlineAiDesignerWriting ? '写入中…' : '写入当前大纲' }}
                     </button>
                   </template>
@@ -2466,40 +2491,6 @@
     </Teleport>
     </section>
 
-    <section class="card ai-settings-page" v-if="activeTab === 'ai'">
-      <div class="ai-settings-page__grid">
-        <div class="ai-settings-page__hero">
-          <div>
-            <p class="ai-settings-page__eyebrow">Model Control Room</p>
-            <h2>模型控制室</h2>
-            <p class="muted">这里配置一次，当前设备的前端 AI 功能会复用到大纲补全、章节分析、档案整理。</p>
-          </div>
-          <div class="ai-settings-page__chips">
-            <span>DeepSeek</span>
-            <span>DashScope</span>
-            <span>OpenAI Compatible</span>
-          </div>
-          <div class="ai-settings-page__notes">
-            <article>
-              <strong>1. 选服务</strong>
-              <p class="muted">可以直接用预设按钮填好 Base URL，再改成你的模型名。</p>
-            </article>
-            <article>
-              <strong>2. 测连接</strong>
-              <p class="muted">保存前先测试，确认 Key、地址和模型都能真正返回结果。</p>
-            </article>
-            <article>
-              <strong>3. 全局复用</strong>
-              <p class="muted">写作助手、AI 阅读台和档案整理会读取这里保存的本地配置。</p>
-            </article>
-          </div>
-        </div>
-
-        <div class="ai-settings-page__panel">
-          <AiSettingsDialog inline />
-        </div>
-      </div>
-    </section>
   </section>
 
   <section v-else class="page-block">
@@ -2549,6 +2540,7 @@ import {
   getTimelineByNovelId,
   moveTimelineEvent,
   normalizeCategoryIds,
+  upsertNovelRecord,
   recordCharacterChangeWithContext,
   recordFactionChangeFields,
   type CharacterChangeEvent,
@@ -2561,11 +2553,10 @@ import {
   updateTimelineEvent,
 } from '../../lib/storage'
 import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
-import { designOutlineInterviewTurnByAi, designOutlineOptionsByAi, expandOutlineDesignByAi, expandOutlineItemByAi } from '../../lib/localAi'
+import { designOutlineInterviewTurnByAi, designOutlineOptionsByAi, expandOutlineDesignByAi, expandOutlineItemByAi, refineOutlineOptionsByAi } from '../../lib/localAi'
 import { syncAllNovelsWithCloud } from '../../lib/cloudSync'
 import { getCurrentSession } from '../../lib/auth'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
-import AiSettingsDialog from '../../components/AiSettingsDialog.vue'
 import type {
   Category,
   Character,
@@ -2612,7 +2603,6 @@ type WorkspaceTab =
   | 'factions'
   | 'categories'
   | 'issues'
-  | 'ai'
 
 type OutlineAiInterviewQuestion = {
   label: string
@@ -2629,6 +2619,7 @@ type OutlineAiOption = {
   highlights: string[]
   endingTone: string
   beats: string[]
+  characterRoster?: Array<{ name: string; role: string; hook: string }>
 }
 
 type OutlineAiFollowupTurn = {
@@ -2640,6 +2631,15 @@ type OutlineAiFollowupTurn = {
 type OutlineAiDraft = {
   title: string
   summary: string
+  characterCast?: Array<{
+    name: string
+    role: string
+    voice: string
+    desire: string
+    fear: string
+    secret: string
+    arc: string
+  }>
   items: Array<{
     tempId: string
     parentTempId: string
@@ -2656,6 +2656,8 @@ type OutlineAiDraft = {
     tension: 1 | 2 | 3 | 4 | 5
     location: string
     timeLabel: string
+    characterNames?: string[]
+    povCharacterName?: string
   }>
 }
 
@@ -2677,10 +2679,14 @@ const outlineAiDesignerBrief = ref('')
 const outlineAiDesignerOptions = ref<OutlineAiOption[]>([])
 const outlineAiDesignerSelectedOptionId = ref('')
 const outlineAiDesignerDraft = ref<OutlineAiDraft | null>(null)
+const outlineAiWriteToast = ref('')
+let outlineAiWriteToastTimer: ReturnType<typeof setTimeout> | null = null
 const outlineAiInterviewHistory = ref<OutlineAiFollowupTurn[]>([])
 const outlineAiCurrentQuestion = ref<OutlineAiInterviewQuestion | null>(null)
 const outlineAiCurrentAnswer = ref('')
 const outlineAiCurrentCustom = ref('')
+const outlineAiOptionNotes = ref<Record<string, string>>({})
+const outlineAiOptionRevisionHistory = ref<Array<{ selectedOptionId: string; selectedTitle: string; note: string }>>([])
 const outlineDetailOpenId = ref('')
 const activeOutlineDetailItem = computed(() =>
   outlineItems.value.find((item) => item.id === outlineDetailOpenId.value) ?? null,
@@ -2885,10 +2891,31 @@ const outlineAiInterviewTurnCount = computed(() =>
   outlineAiInterviewHistory.value.length + (outlineAiCurrentQuestion.value ? 1 : 0),
 )
 const outlineAiResolvedAnswer = computed(() => {
-  if (outlineAiCurrentAnswer.value.trim() && outlineAiCurrentAnswer.value.trim() !== '__custom__') {
-    return outlineAiCurrentAnswer.value.trim()
+  const custom = outlineAiCurrentCustom.value.trim()
+  const selected = outlineAiCurrentAnswer.value.trim()
+  if (selected === '__custom__') return custom
+  if (selected && custom) return `${selected}（补充：${custom}）`
+  if (selected) return selected
+  return custom
+})
+const outlineAiCanSubmitInterview = computed(() => {
+  const custom = outlineAiCurrentCustom.value.trim()
+  const selected = outlineAiCurrentAnswer.value.trim()
+  if (selected && selected !== '__custom__') return true
+  return custom.length > 0
+})
+const outlineAiInterviewCustomPlaceholder = computed(() => {
+  const base = outlineAiCurrentQuestion.value?.placeholder || '用一句到几句话回答这轮问题'
+  const selected = outlineAiCurrentAnswer.value.trim()
+  if (selected && selected !== '__custom__') {
+    return `已选「${selected}」；可在此补充你的想法（会与选项一并提交）`
   }
-  return outlineAiCurrentCustom.value.trim()
+  return base
+})
+const outlineAiSelectedOptionNote = computed(() => {
+  const id = outlineAiDesignerSelectedOptionId.value
+  if (!id) return ''
+  return String(outlineAiOptionNotes.value[id] ?? '').trim()
 })
 const selectedOutlineAiOption = computed(() =>
   outlineAiDesignerOptions.value.find((item) => item.id === outlineAiDesignerSelectedOptionId.value) ?? null,
@@ -3731,6 +3758,12 @@ function resetOutlineAiDesignerState(): void {
   outlineAiCurrentQuestion.value = null
   outlineAiCurrentAnswer.value = ''
   outlineAiCurrentCustom.value = ''
+  outlineAiOptionNotes.value = {}
+  outlineAiOptionRevisionHistory.value = []
+}
+
+function setOutlineAiOptionNote(optionId: string, value: string): void {
+  outlineAiOptionNotes.value = { ...outlineAiOptionNotes.value, [optionId]: value }
 }
 
 async function openOutlineAiDesigner(): Promise<void> {
@@ -3798,6 +3831,8 @@ async function generateOutlineAiOptions(): Promise<void> {
   outlineAiDesignerOptions.value = []
   outlineAiDesignerSelectedOptionId.value = ''
   outlineAiDesignerDraft.value = null
+  outlineAiOptionNotes.value = {}
+  outlineAiOptionRevisionHistory.value = []
   outlineAiDesignerLoading.value = true
   outlineAiDesignerError.value = ''
   try {
@@ -3846,6 +3881,48 @@ async function submitOutlineAiInterviewAnswer(): Promise<void> {
   }
 }
 
+async function refineOutlineAiOptions(): Promise<void> {
+  if (!novel.value || !selectedOutlineAiOption.value) return
+  const refineNote = outlineAiSelectedOptionNote.value
+  if (!refineNote) {
+    outlineAiDesignerError.value = '请先在选中的方案下填写调整意见。'
+    return
+  }
+
+  outlineAiDesignerLoading.value = true
+  outlineAiDesignerError.value = ''
+  const selected = selectedOutlineAiOption.value
+  try {
+    const result = await refineOutlineOptionsByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      {
+        novelTitle: novel.value.title,
+        novelSummary: novel.value.summary,
+        history: collectOutlineAiInterviewHistory(),
+        currentOptions: outlineAiDesignerOptions.value,
+        selectedOptionId: selected.id,
+        refineNote,
+        allOptionNotes: outlineAiOptionNotes.value,
+        priorRevisions: outlineAiOptionRevisionHistory.value,
+      },
+    )
+    if (result.options.length === 0) throw new Error('AI 这次没有返回可用方案，请换个说法再试。')
+
+    outlineAiOptionRevisionHistory.value = [
+      ...outlineAiOptionRevisionHistory.value,
+      { selectedOptionId: selected.id, selectedTitle: selected.title, note: refineNote },
+    ]
+    outlineAiDesignerBrief.value = result.brief
+    outlineAiDesignerOptions.value = result.options
+    outlineAiDesignerSelectedOptionId.value = result.options[0]?.id ?? ''
+    outlineAiOptionNotes.value = {}
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 调整方案失败，请稍后重试。'
+  } finally {
+    outlineAiDesignerLoading.value = false
+  }
+}
+
 async function generateOutlineAiDraft(): Promise<void> {
   if (!novel.value || !selectedOutlineAiOption.value) return
   outlineAiDesignerLoading.value = true
@@ -3859,6 +3936,9 @@ async function generateOutlineAiDraft(): Promise<void> {
         novelSummary: novel.value.summary,
         history: collectOutlineAiInterviewHistory(),
         selectedOption: selectedOutlineAiOption.value,
+        selectedOptionId: outlineAiDesignerSelectedOptionId.value,
+        optionRefinement: outlineAiSelectedOptionNote.value,
+        optionRevisionHistory: outlineAiOptionRevisionHistory.value,
       },
     )
     if (result.items.length === 0) throw new Error('AI 这次没有展开出可用的大纲节点。')
@@ -3885,12 +3965,52 @@ function backToOutlineAiOptions(): void {
 }
 
 async function applyOutlineAiDraft(): Promise<void> {
-  if (!novel.value || !outlineAiDesignerDraft.value) return
+  if (!novel.value) {
+    outlineAiDesignerError.value = '作品不存在，无法写入大纲。'
+    return
+  }
+  if (!outlineAiDesignerDraft.value) {
+    outlineAiDesignerError.value = '没有可写入的大纲草案，请先生成正式大纲。'
+    return
+  }
+  if (outlineAiDesignerDraft.value.items.length === 0) {
+    outlineAiDesignerError.value = '大纲草案里没有节点，请返回重新生成。'
+    return
+  }
+
   outlineAiDesignerWriting.value = true
   outlineAiDesignerError.value = ''
+  const itemCount = outlineAiDesignerDraft.value.items.length
+  const castCount = outlineAiDesignerDraft.value.characterCast?.length ?? 0
+
   try {
+    const nameToId = new Map<string, string>()
+    for (const row of characters.value) {
+      const name = String(row.name ?? '').trim()
+      if (name) nameToId.set(name, row.id)
+    }
+    for (const cast of outlineAiDesignerDraft.value.characterCast ?? []) {
+      const name = String(cast.name ?? '').trim()
+      if (!name || nameToId.has(name)) continue
+      const created = createCharacter({
+        novelId: novel.value.id,
+        name,
+        age: '',
+        gender: '',
+        goal: cast.desire ?? '',
+        secret: cast.secret ?? '',
+        arc: cast.arc ?? '',
+        notes: [cast.role, cast.voice, cast.fear].filter(Boolean).join('；'),
+      })
+      nameToId.set(name, created.id)
+    }
+
     const createdIdMap = new Map<string, string>()
     for (const item of outlineAiDesignerDraft.value.items) {
+      const characterIds = (item.characterNames ?? [])
+        .map((name) => nameToId.get(String(name).trim()))
+        .filter((id): id is string => Boolean(id))
+      const povCharacterId = item.povCharacterName ? nameToId.get(String(item.povCharacterName).trim()) ?? null : null
       const created = createOutlineItem({
         novelId: novel.value.id,
         title: item.title,
@@ -3905,20 +4025,46 @@ async function applyOutlineAiDraft(): Promise<void> {
         parentId: item.parentTempId ? (createdIdMap.get(item.parentTempId) ?? null) : null,
         location: item.location,
         timeLabel: item.timeLabel,
-        povCharacterId: null,
+        povCharacterId,
         tension: item.tension,
+        characterIds,
       })
       createdIdMap.set(item.tempId, created.id)
     }
+
+    upsertNovelRecord({ ...novel.value, updatedAt: new Date().toISOString() })
+
+    if (getCurrentSession()?.token) {
+      try {
+        await syncAllNovelsWithCloud()
+      } catch (syncError: unknown) {
+        const syncMessage = syncError instanceof Error ? syncError.message : '云同步失败'
+        showOutlineAiWriteToast(`已写入 ${itemCount} 个节点，但云同步失败：${syncMessage}`)
+      }
+    }
+
+    characters.value = getCharactersByNovelId(novel.value.id)
     outlineItems.value = getOutlineByNovelId(novel.value.id)
     activeOutlineMapId.value = outlineItems.value[outlineItems.value.length - 1]?.id ?? ''
-    if (getCurrentSession()?.token) await syncAllNovelsWithCloud()
     outlineAiDesignerOpen.value = false
+
+    if (!outlineAiWriteToast.value) {
+      const castNote = castCount > 0 ? `，并创建 ${castCount} 个角色` : ''
+      showOutlineAiWriteToast(`已写入 ${itemCount} 个大纲节点${castNote}`)
+    }
   } catch (error: unknown) {
     outlineAiDesignerError.value = error instanceof Error ? error.message : '写入大纲失败，请稍后重试。'
   } finally {
     outlineAiDesignerWriting.value = false
   }
+}
+
+function showOutlineAiWriteToast(message: string): void {
+  outlineAiWriteToast.value = message
+  if (outlineAiWriteToastTimer) clearTimeout(outlineAiWriteToastTimer)
+  outlineAiWriteToastTimer = setTimeout(() => {
+    outlineAiWriteToast.value = ''
+  }, 3200)
 }
 
 function closeOutlineCreate(): void {
@@ -6533,10 +6679,13 @@ function applyRoutePrefill(): void {
     tab === 'items' ||
     tab === 'factions' ||
     tab === 'categories' ||
-    tab === 'issues' ||
-    tab === 'ai'
+    tab === 'issues'
   ) {
     activeTab.value = tab
+  }
+  if (routeTab === 'ai') {
+    activeTab.value = 'write'
+    void router.replace({ query: { ...route.query, tab: 'write' } })
   }
   if (routeTab === 'timeline') {
     const nextQuery = { ...route.query, tab: 'write' }
@@ -6933,6 +7082,31 @@ onUnmounted(() => {
 .workspace-outline-ai-plan__section ol {
   margin: 0;
   padding-left: 18px;
+}
+
+.workspace-outline-ai-plan__note {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed color-mix(in srgb, var(--color-border-strong) 22%, transparent);
+}
+
+.workspace-outline-ai-plan__note span {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.workspace-outline-ai-plan__note-input {
+  margin-top: 0;
+  min-height: 84px;
+}
+
+.workspace-outline-ai-plan-revision-hint,
+.workspace-outline-ai-question__hint {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
 }
 
 .workspace-outline-ai-preview-head {

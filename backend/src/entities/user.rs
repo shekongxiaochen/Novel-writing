@@ -6,7 +6,11 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     #[sea_orm(unique)]
-    pub email: String,
+    pub username: String,
+    #[sea_orm(unique)]
+    pub device_id_hash: Option<String>,
+    pub registration_ip: String,
+    pub email: Option<String>,
     pub password_hash: String,
     pub display_name: String,
     pub is_active: bool,

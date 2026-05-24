@@ -1,3 +1,4 @@
+pub mod billing;
 pub mod user;
 pub mod auth_session;
 pub mod novel;

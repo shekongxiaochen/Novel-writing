@@ -274,7 +274,12 @@ export function getNovels(): Novel[] {
 
   try {
     const parsed = JSON.parse(raw) as Novel[]
-    return parsed.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+    return parsed
+      .map((row) => ({
+        ...row,
+        continuityBrief: String((row as Novel).continuityBrief ?? '').trim(),
+      }))
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
   } catch {
     return []
   }
@@ -295,6 +300,7 @@ export function createNovel(input: NewNovelInput): Novel {
     id: uid(),
     title: input.title.trim(),
     summary: input.summary.trim(),
+    continuityBrief: '',
     genre: input.genre.trim(),
     perspective: input.perspective.trim(),
     tone: input.tone.trim(),
@@ -2288,12 +2294,12 @@ export function createCharacter(input: NewCharacterInput): Character {
     name: input.name.trim() || '未命名角色',
     createdInChapterId: input.createdInChapterId?.trim() || null,
     firstAppearanceChapterNo,
-    age: input.age.trim(),
-    gender: input.gender.trim(),
-    goal: input.goal.trim(),
-    secret: input.secret.trim(),
-    arc: input.arc.trim(),
-    notes: input.notes.trim(),
+    age: String(input.age ?? '').trim(),
+    gender: String(input.gender ?? '').trim(),
+    goal: String(input.goal ?? '').trim(),
+    secret: String(input.secret ?? '').trim(),
+    arc: String(input.arc ?? '').trim(),
+    notes: String(input.notes ?? '').trim(),
     attributes: attrsIn,
     aliases: normalizeCharacterAliases(input.aliases),
     categoryIds: normalizeCategoryIds(input.categoryIds),

@@ -497,17 +497,6 @@
     @close="closeThemePicker"
   />
 
-  <AiSubscriptionDialog
-    :open="paywallOpen"
-    :subscription="subscriptionState"
-    :source="paywallSource"
-    :price-label="aiSubscriptionPriceLabel"
-    @close="closeAiPaywall"
-    @refresh-order="createPendingOrder"
-    @activate-mock="activateMockSubscription"
-    @reset="resetAiSubscription"
-  />
-
   <ConfirmDialog
     v-model="chapterSummaryCloseConfirmOpen"
     title="关闭章总结"
@@ -563,14 +552,14 @@ import {
 } from './lib/storage'
 import type { Chapter, Novel } from './types'
 import type { CharacterChangeDetail } from './lib/storage'
+import { formatChapterSummaryText } from './lib/chapterSummary'
 import { summarizeNovelChapterFromWorkspaceStream } from './lib/localAi'
 import { currentThemeOption } from './composables/useTheme'
 import { useAuth } from './composables/useAuth'
-import { useAiSubscription } from './composables/useAiSubscription'
+import { requestAiAccess } from './composables/useAiAccess'
 import { useCloudSync } from './composables/useCloudSync'
 import { Teleport } from 'vue'
 import { menuPoems } from './data/menuPoems'
-import AiSubscriptionDialog from './components/AiSubscriptionDialog.vue'
 import AuthDialog from './components/AuthDialog.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import CreateNovelDialog from './components/CreateNovelDialog.vue'
@@ -582,19 +571,6 @@ const route = useRoute()
 const router = useRouter()
 const { user, isLoggedIn, displayName, logout } = useAuth()
 const { syncing, lastSummary, syncError, syncNow, clearSyncState } = useCloudSync()
-const {
-  paywallOpen,
-  paywallSource,
-  subscriptionState,
-  aiSubscriptionPriceLabel,
-  isAiSubscriptionActive,
-  refreshAiSubscriptionState,
-  closeAiPaywall,
-  createPendingOrder,
-  requestAiSidebarAccess,
-  activateMockSubscription,
-  resetAiSubscription,
-} = useAiSubscription()
 const currentNovel = ref<Novel | null>(null)
 const chapterList = ref<Chapter[]>([])
 const chapterMenuOpen = ref(false)
@@ -605,7 +581,7 @@ const chapterMenuTargetTitle = ref('')
 const themePickerReturnFocusEl = ref<HTMLElement | null>(null)
 const isThemePickerOpen = ref(false)
 const authDialogOpen = ref(false)
-const authDialogMode = ref<'login' | 'register' | 'reset-password'>('login')
+const authDialogMode = ref<'login' | 'register'>('login')
 const createNovelDialogOpen = ref(false)
 const novelShelfDialogOpen = ref(false)
 const novelRecords = ref(getNovels())
@@ -614,7 +590,7 @@ function handleThemePickerClick(event: MouseEvent): void {
   openThemePicker(event.currentTarget instanceof HTMLElement ? event.currentTarget : null)
 }
 
-function openAuthDialog(mode: 'login' | 'register' | 'reset-password'): void {
+function openAuthDialog(mode: 'login' | 'register'): void {
   authDialogMode.value = mode
   authDialogOpen.value = true
 }
@@ -761,14 +737,11 @@ watch(
   () => user.value?.id ?? '',
   (userId, prevUserId) => {
     refreshNovelRecords()
-    refreshAiSubscriptionState()
-    if (!isAiSubscriptionActive.value) {
+    if (!userId) {
       aiStudioShellOpen.value = false
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('novel-writing:set-ai-open', { detail: { open: false } }))
       }
-    }
-    if (!userId) {
       if (prevUserId) clearSyncState()
       return
     }
@@ -868,7 +841,7 @@ function onAiStudioOpenEvent(event: Event): void {
 function toggleHeaderAiStudio(): void {
   if (typeof window === 'undefined' || !isWritingRoute.value) return
   const open = !aiStudioShellOpen.value
-  if (open && !requestAiSidebarAccess('header')) return
+  if (open && !requestAiAccess()) return
   if (open) rightPanelOpen.value = false
   window.dispatchEvent(new CustomEvent('novel-writing:set-ai-open', { detail: { open } }))
   aiStudioShellOpen.value = open
@@ -1183,44 +1156,6 @@ function syncChapterSummaryDraftFromActive(force = false): void {
   chapterSummaryLoadedChapterId.value = chapterId
   chapterSummaryLoadedText.value = nextText
   chapterSummaryAiError.value = ''
-}
-
-function formatChapterSummaryText(text: string): string {
-  const normalized = String(text ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\u00a0/g, ' ')
-    .replace(/[ \t]*\n([，。！？；：、])/g, '$1')
-    .trim()
-  if (!normalized) return ''
-
-  const plotted = normalized
-    .replace(/\n*(情节[一二三四五六七八九十\d]+[：:])/g, '\n\n$1')
-    .replace(/(情节[一二三四五六七八九十\d]+[：:][^\n]*)\n?(?!\n)/g, '$1\n')
-    .replace(/[ \t]*\n([，。！？；：、])/g, '$1')
-    .trim()
-
-  if (/情节[一二三四五六七八九十\d]+[：:]/.test(plotted)) {
-    return plotted.replace(/\n{3,}/g, '\n\n')
-  }
-
-  const existingParagraphs = normalized
-    .split(/\n\s*\n+/)
-    .map((row) => row.replace(/[ \t]+\n/g, '\n').replace(/[ \t]*\n([，。！？；：、])/g, '$1').replace(/\n{3,}/g, '\n\n').trim())
-    .filter(Boolean)
-  if (existingParagraphs.length >= 2) return existingParagraphs.join('\n\n')
-
-  const sentenceGroups = normalized
-    .replace(/\n+/g, ' ')
-    .split(/(?<=[。！？!?；;])\s+/)
-    .map((row) => row.trim())
-    .filter(Boolean)
-  if (sentenceGroups.length <= 2) return sentenceGroups.join('\n\n')
-
-  const grouped: string[] = []
-  for (let index = 0; index < sentenceGroups.length; index += 2) {
-    grouped.push(sentenceGroups.slice(index, index + 2).join(' '))
-  }
-  return grouped.join('\n\n')
 }
 
 async function generateChapterSummaryWithAi(): Promise<void> {
@@ -1829,6 +1764,12 @@ try {
 
 onMounted(() => window.addEventListener('storage', onStorage))
 onMounted(() => window.addEventListener('novel-writing:changed', onNovelDataChanged))
+function onOpenAuthEvent(event: Event): void {
+  const mode = (event as CustomEvent<{ mode?: 'login' | 'register' }>).detail?.mode ?? 'login'
+  openAuthDialog(mode)
+}
+
+onMounted(() => window.addEventListener('novel-writing:open-auth', onOpenAuthEvent as EventListener))
 onMounted(() => window.addEventListener('novel-writing:ai-open', onAiStudioOpenEvent as EventListener))
 onMounted(() => window.addEventListener('novel-writing:ai-width', onAiStudioWidthEvent as EventListener))
 onMounted(() => window.addEventListener('pointerdown', closeChapterAreaMenu))
@@ -1859,6 +1800,7 @@ onMounted(() => {
 })
 onUnmounted(() => window.removeEventListener('storage', onStorage))
 onUnmounted(() => window.removeEventListener('novel-writing:changed', onNovelDataChanged))
+onUnmounted(() => window.removeEventListener('novel-writing:open-auth', onOpenAuthEvent as EventListener))
 onUnmounted(() => window.removeEventListener('novel-writing:ai-open', onAiStudioOpenEvent as EventListener))
 onUnmounted(() => window.removeEventListener('novel-writing:ai-width', onAiStudioWidthEvent as EventListener))
 onUnmounted(() => window.removeEventListener('pointerdown', closeChapterAreaMenu))

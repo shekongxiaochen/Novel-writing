@@ -31,9 +31,26 @@ ADMIN_PASSWORD=change-me-admin
 
 | 菜单 | 数据表 | 说明 |
 |------|--------|------|
-| 应用用户 | `users` | 注册邮箱、昵称、启用状态等（密码哈希默认隐藏） |
-| 小说 | `novels` | 作品元数据 |
-| 支付订单 | `payment_orders` | 订阅相关订单 |
+| 应用用户 | `users` | 设备账号、余额等 |
+| AI 钱包 / 钱包流水 | `ai_wallets` / `ai_wallet_ledger` | 用户 token 余额与扣费记录 |
+| **AI 计费配置**（推荐） | `/admin/ai-config` | 中文表单：密钥、模型、扣费单价、消耗倍率、充值预览 |
+| ~~AI / 计费配置（键值表）~~ | `system_settings` | 已隐藏，勿直接改键名 |
+| 小说 / 支付订单 | 已移出日常菜单 | 产品上不通过后台编辑 |
+
+### AI 配置（管理员）
+
+在 **运营 → AI / 计费配置** 中编辑各行 `setting_value`（列表页不显示密钥明文）：
+
+| setting_key | 说明 |
+|-------------|------|
+| `deepseek_api_key` | DeepSeek API 密钥（优先于 `.env`） |
+| `deepseek_base_url` | API 地址，默认 `https://api.deepseek.com` |
+| `deepseek_model` | 模型 ID |
+| `price_per_1m_input_tokens` / `price_per_1m_output_tokens` | 扣费单价 |
+| `consumption_multiplier` | 消耗倍率（仅影响扣余额速度） |
+| `tokens_per_yuan_base` | 充值折算 |
+
+`backend/.env` 里的 `DEEPSEEK_*` 仅作**首次导入**：库内为空时启动会写入 `system_settings`，之后以管理后台为准。`.env` 不会发给写作客户端用户。
 
 另含 axum-admin 自带的 **后台用户 / 角色**（`auth_users` 等），用于控制台登录与权限，不是 App 用户。
 

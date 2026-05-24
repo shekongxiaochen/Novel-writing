@@ -4,10 +4,13 @@ fn label_field(name: &str, label: &str) -> Field {
     let f = match name {
         "email" => Field::email(name),
         "is_active" | "email_verified" | "is_multi_line_narrative" => Field::boolean(name),
-        "created_at" | "updated_at" | "paid_at" | "expires_at" => Field::datetime(name),
+        "created_at" | "updated_at" | "paid_at" | "expires_at" => {
+            Field::datetime(name).label(label).readonly()
+        }
         "amount_cents" => Field::number(name),
         "summary" | "checkout_payload" => Field::textarea(name),
         "password_hash" => Field::password(name),
+        "setting_value" => Field::textarea(name),
         _ => Field::text(name),
     };
     f.label(label)
@@ -23,13 +26,33 @@ pub fn apply_field_labels(mut admin: EntityAdmin, labels: &[(&str, &str)]) -> En
 
 pub const USER_FIELDS: &[(&str, &str)] = &[
     ("id", "ID"),
-    ("email", "邮箱"),
+    ("username", "账号"),
+    ("device_id_hash", "设备哈希"),
+    ("registration_ip", "注册 IP"),
+    ("email", "邮箱（遗留）"),
     ("password_hash", "密码哈希"),
     ("display_name", "昵称"),
     ("is_active", "启用"),
     ("email_verified", "邮箱已验证"),
     ("created_at", "创建时间"),
     ("updated_at", "更新时间"),
+];
+
+pub const SYSTEM_SETTING_FIELDS: &[(&str, &str)] = &[
+    ("id", "ID"),
+    ("setting_key", "配置键（勿改键名，只改值）"),
+    ("setting_value", "配置值"),
+    ("updated_at", "更新时间"),
+];
+
+pub const AI_WALLET_LEDGER_FIELDS: &[(&str, &str)] = &[
+    ("id", "ID"),
+    ("user_id", "用户 ID"),
+    ("delta", "变动数额"),
+    ("reason", "类型"),
+    ("ref_id", "备注/关联"),
+    ("consumption_multiplier_applied", "消耗倍率（审计）"),
+    ("created_at", "时间"),
 ];
 
 pub const NOVEL_FIELDS: &[(&str, &str)] = &[

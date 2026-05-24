@@ -31,6 +31,9 @@ pub enum AppError {
     
     #[error("冲突: {0}")]
     Conflict(String),
+
+    #[error("额度不足")]
+    InsufficientBalance,
     
     #[error("内部错误: {0}")]
     Internal(String),
@@ -59,6 +62,10 @@ impl IntoResponse for AppError {
             }
             AppError::Validation(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            AppError::InsufficientBalance => (
+                StatusCode::PAYMENT_REQUIRED,
+                "AI 额度不足，请充值".to_string(),
+            ),
             AppError::Database(e) => {
                 tracing::error!("Database error: {:?}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "数据库错误".to_string())
