@@ -9,15 +9,17 @@
     <div class="ai-settings-dialog__body">
       <div class="ai-settings-dialog__head">
         <div>
-          <p class="ai-settings-dialog__eyebrow">Model Control Room</p>
-          <h3 class="confirm-dialog__title">模型控制室</h3>
-          <p class="muted ai-settings-dialog__sub">把 API Key、接口地址和模型名保存成当前设备浏览器里的统一写作配置。</p>
+          <p class="ai-settings-dialog__eyebrow">Server AI</p>
+          <h3 class="confirm-dialog__title">AI 服务说明</h3>
+          <p class="muted ai-settings-dialog__sub">
+            写作助手、AI 阅读台、档案整理等均通过服务端代理调用 DeepSeek，按实际用量扣减账户余额。
+          </p>
         </div>
         <button
           v-if="!inline"
           type="button"
           class="ai-settings-dialog__close"
-          aria-label="关闭 AI 设置"
+          aria-label="关闭"
           @click="$emit('close')"
         >
           ×
@@ -26,48 +28,26 @@
 
       <section class="ai-settings-dialog__preset-card">
         <div>
-          <strong>服务商预设</strong>
-          <p class="muted">先选择兼容接口，再确认模型名；保存后大纲补全、章节分析、档案整理都会复用。</p>
+          <strong>当前账户</strong>
+          <p class="muted">API 密钥与模型由管理后台配置，前端不再保存 Key。</p>
         </div>
-        <div class="ai-settings-dialog__preset-grid">
-          <button
-            v-for="preset in presets"
-            :key="preset.key"
-            type="button"
-            class="ai-settings-dialog__provider-card"
-            @click="applyPreset(preset.key)"
-          >
-            <span class="ai-settings-dialog__provider-kicker">{{ preset.kicker }}</span>
-            <strong>{{ preset.label }}</strong>
-            <small>{{ preset.baseUrl }}</small>
-            <span class="ai-settings-dialog__provider-model">默认模型：{{ preset.model }}</span>
-            <span class="ai-settings-dialog__provider-action">套用预设</span>
-          </button>
+        <div class="ai-settings-dialog__hint">
+          <p v-if="!account.loggedIn" class="ai-settings-dialog__status ai-settings-dialog__status--error">
+            未登录：请先在首页完成设备注册或账号登录。
+          </p>
+          <template v-else>
+            <p>
+              余额：<strong>{{ formattedBalance }}</strong>
+            </p>
+            <p class="muted">每次请求结束后余额会自动更新；不足时请联系管理员充值。</p>
+          </template>
         </div>
       </section>
 
       <div class="ai-settings-dialog__field-grid">
-        <label class="ai-settings-dialog__field ai-settings-dialog__field--wide">
-          <span class="ai-settings-dialog__label">API Key</span>
-          <input v-model="draft.apiKey" type="password" placeholder="输入你的 API Key" />
-          <small>只保存在本地浏览器，用于当前设备的 AI 功能调用。</small>
-        </label>
-
-        <label class="ai-settings-dialog__field ai-settings-dialog__field--wide">
-          <span class="ai-settings-dialog__label">Base URL</span>
-          <input v-model="draft.baseUrl" type="text" placeholder="例如：https://api.deepseek.com/chat/completions" />
-          <small>当前项目这里填写的是完整请求地址，不是服务根域名。</small>
-        </label>
-
-        <label class="ai-settings-dialog__field">
-          <span class="ai-settings-dialog__label">Model</span>
-          <input v-model="draft.model" type="text" placeholder="例如：deepseek-chat" />
-          <small>建议填你实际开通的模型名，测试连接会直接拿它验证。</small>
-        </label>
-
         <div class="ai-settings-dialog__hint">
           <span class="ai-settings-dialog__hint-kicker">复用范围</span>
-          <p>这里是前端本地配置：写作助手、AI 阅读台、档案整理会读取它；后端环境变量配置不在此处同步。</p>
+          <p>大纲补全、章节分析、档案整理、AI 阅读台、章总结等，均走同一后端接口。</p>
         </div>
       </div>
 
@@ -95,12 +75,11 @@
           <button
             type="button"
             class="confirm-dialog__btn confirm-dialog__btn--secondary"
-            :disabled="isTesting"
-            @click="handleTestConnection"
+            :disabled="isRefreshing || !account.loggedIn"
+            @click="handleRefresh"
           >
-            {{ isTesting ? '测试中...' : '测试连接' }}
+            {{ isRefreshing ? '刷新中...' : '刷新余额' }}
           </button>
-          <button type="button" class="btn-primary" @click="save">保存设置</button>
         </div>
       </div>
     </div>
@@ -108,42 +87,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
-import { getAiSettings, saveAiSettings, testAiConnection } from '../lib/aiSettings'
-
-type PresetKey = 'deepseek' | 'dashscope' | 'openai-compatible'
-
-type Preset = {
-  key: PresetKey
-  label: string
-  kicker: string
-  baseUrl: string
-  model: string
-}
-
-const presets: Preset[] = [
-  {
-    key: 'deepseek',
-    label: 'DeepSeek',
-    kicker: 'CN Compatible',
-    baseUrl: 'https://api.deepseek.com/chat/completions',
-    model: 'deepseek-chat',
-  },
-  {
-    key: 'dashscope',
-    label: 'DashScope',
-    kicker: 'Qwen Compatible',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-    model: 'qwen-plus',
-  },
-  {
-    key: 'openai-compatible',
-    label: 'OpenAI Compatible',
-    kicker: 'Generic Endpoint',
-    baseUrl: 'https://api.openai.com/v1/chat/completions',
-    model: 'gpt-4.1-mini',
-  },
-]
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { getAiAccountState, refreshAiAccount, type AiAccountState } from '../lib/aiSettings'
 
 const props = withDefaults(
   defineProps<{
@@ -156,33 +101,54 @@ const props = withDefaults(
   },
 )
 
-const emit = defineEmits<{ close: [] }>()
+defineEmits<{ close: [] }>()
 
-const draft = reactive(getAiSettings())
+const account = reactive<AiAccountState>(getAiAccountState())
 const statusNote = ref('')
 const statusKind = ref<'idle' | 'success' | 'error'>('idle')
-const isTesting = ref(false)
+const isRefreshing = ref(false)
 
-function loadDraft(): void {
-  Object.assign(draft, getAiSettings())
-  statusNote.value = ''
-  statusKind.value = 'idle'
+const formattedBalance = computed(() => {
+  const n = Number(account.balanceYuan ?? 0)
+  return Number.isFinite(n) ? `¥${n.toFixed(2)}` : '¥0.00'
+})
+
+function syncAccount(): void {
+  Object.assign(account, getAiAccountState())
 }
 
-function applyPreset(type: PresetKey): void {
-  const preset = presets.find((row) => row.key === type)
-  if (!preset) return
-  draft.baseUrl = preset.baseUrl
-  if (!draft.model.trim()) draft.model = preset.model
-  statusNote.value = `已套用 ${preset.label} 预设。`
-  statusKind.value = 'success'
+function onAccountChanged(): void {
+  syncAccount()
+}
+
+async function loadAccount(): Promise<void> {
+  syncAccount()
+  if (!account.loggedIn) return
+  await handleRefresh()
+}
+
+async function handleRefresh(): Promise<void> {
+  isRefreshing.value = true
+  statusNote.value = ''
+  statusKind.value = 'idle'
+  try {
+    const next = await refreshAiAccount()
+    Object.assign(account, next)
+    statusNote.value = '余额已更新。'
+    statusKind.value = 'success'
+  } catch (error: unknown) {
+    statusNote.value = error instanceof Error ? error.message : '刷新失败'
+    statusKind.value = 'error'
+  } finally {
+    isRefreshing.value = false
+  }
 }
 
 watch(
   () => props.open,
   (open) => {
     if (!open && !props.inline) return
-    loadDraft()
+    void loadAccount()
   },
 )
 
@@ -190,28 +156,18 @@ watch(
   () => props.inline,
   (inline) => {
     if (!inline) return
-    loadDraft()
+    void loadAccount()
   },
   { immediate: true },
 )
 
-function save(): void {
-  saveAiSettings(draft)
-  statusNote.value = '已保存。之后前端 AI 功能会直接使用这组设置。'
-  statusKind.value = 'success'
-  if (props.inline) return
-  window.setTimeout(() => {
-    emit('close')
-  }, 250)
-}
+onMounted(() => {
+  window.addEventListener('novel-writing:changed', onAccountChanged)
+  window.addEventListener('novel-writing:ai-account-changed', onAccountChanged)
+})
 
-async function handleTestConnection(): Promise<void> {
-  isTesting.value = true
-  statusNote.value = ''
-  statusKind.value = 'idle'
-  const result = await testAiConnection(draft)
-  statusNote.value = result.message
-  statusKind.value = result.ok ? 'success' : 'error'
-  isTesting.value = false
-}
+onUnmounted(() => {
+  window.removeEventListener('novel-writing:changed', onAccountChanged)
+  window.removeEventListener('novel-writing:ai-account-changed', onAccountChanged)
+})
 </script>

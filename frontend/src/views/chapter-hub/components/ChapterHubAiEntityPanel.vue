@@ -7,8 +7,8 @@
             <button
               type="button"
               class="chapter-hub-ai-panel__iconbtn"
-              :aria-label="historyOpen ? '收起历史聊天' : '打开历史聊天'"
-              :title="historyOpen ? '收起历史聊天' : '打开历史聊天'"
+              :aria-label="historyOpen ? historyToggleLabel.close : historyToggleLabel.open"
+              :title="historyOpen ? historyToggleLabel.close : historyToggleLabel.open"
               :aria-pressed="historyOpen ? 'true' : 'false'"
               @click="historyOpen = !historyOpen"
             >
@@ -24,8 +24,39 @@
               <span aria-hidden="true">＋</span>
             </button>
             <button type="button" class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--primary" :disabled="busy || !targetChapter" @click="$emit('run')">
-              {{ loading ? '整理中...' : '整理当前章' }}
+              {{ loading ? '整理中...' : '整理' }}
             </button>
+            <button
+              type="button"
+              class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--ghost"
+              :aria-pressed="deskMode === 'write' ? 'true' : 'false'"
+              @click="$emit('toggle-desk-mode')"
+            >
+              {{ deskMode === 'ask' ? '写作' : '提问' }}
+            </button>
+            <div class="chapter-hub-ai-panel__wallet" role="group" aria-label="钱包余额">
+              <button
+                type="button"
+                class="chapter-hub-ai-panel__wallet-main"
+                aria-label="钱包与卡密兑换"
+                title="钱包 · 卡密兑换"
+                @click="onWalletClick"
+              >
+                <span class="chapter-hub-ai-panel__wallet-icon" aria-hidden="true">◎</span>
+                <span class="chapter-hub-ai-panel__wallet-balance">{{ balanceLabel }}</span>
+              </button>
+              <button
+                type="button"
+                class="chapter-hub-ai-panel__wallet-refresh"
+                :class="{ 'is-spinning': balanceRefreshing }"
+                aria-label="刷新余额"
+                title="刷新余额"
+                :disabled="balanceRefreshing"
+                @click="refreshBalance"
+              >
+                <span aria-hidden="true">↻</span>
+              </button>
+            </div>
             <button type="button" class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--ghost" @click="$emit('collapse')">收起</button>
           </div>
         </div>
@@ -34,8 +65,8 @@
 
       <div v-if="historyOpen" class="chapter-hub-ai-panel__history scrollbar-paper">
         <div v-if="chatHistorySessions.length === 0" class="chapter-hub-ai-panel__history-empty">
-          <p>还没有历史对话</p>
-          <span>新建聊天后，这里会保留最近会话。</span>
+          <p>{{ deskMode === 'write' ? '还没有写作记录' : '还没有提问记录' }}</p>
+          <span>{{ deskMode === 'write' ? '新建写作后，这里会保留最近的续写会话。' : '新建聊天后，这里会保留最近的提问会话。' }}</span>
         </div>
         <div
           v-for="session in chatHistorySessions"
@@ -68,7 +99,7 @@
       </div>
 
       <div ref="scrollRef" class="chapter-hub-ai-panel__scroll scrollbar-paper">
-        <section v-if="extractRuns.length > 0" class="chapter-hub-ai-panel__results-rail">
+        <section v-if="deskMode === 'ask' && extractRuns.length > 0" class="chapter-hub-ai-panel__results-rail">
           <div class="chapter-hub-ai-panel__rail-title">最近整理</div>
           <div class="chapter-hub-ai-panel__rail-items">
             <button
@@ -85,16 +116,107 @@
           </div>
         </section>
 
-        <article v-if="chatMessages.length === 0 && !loading && !chatLoading && !error && !hasRun" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
+        <article
+          v-if="deskMode === 'ask' && chatMessages.length === 0 && !loading && !chatLoading && !error && !hasRun"
+          class="chapter-hub-ai-message chapter-hub-ai-message--assistant"
+        >
           <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--hint chapter-hub-ai-message__body--empty">
-            <p class="chapter-hub-ai-message__empty-title">从当前章节开始协作</p>
-            <p>提问人物关系、伏笔回收、信息冲突，或者先整理一遍当前章。</p>
+            <p class="chapter-hub-ai-message__empty-title">从当前章节开始提问</p>
+            <p>可询问人物关系、伏笔回收、信息冲突，或先点「整理」生成本章档案建议。</p>
             <p>选中正文后，引用内容会自动带到输入区上方。</p>
           </div>
         </article>
 
         <article
+          v-if="deskMode === 'write' && chatMessages.length === 0 && !loading && !chatLoading && !error && !hasRun && !continueDraft.loading && !continueDraft.text && continueDraft.status === 'idle'"
+          class="chapter-hub-ai-message chapter-hub-ai-message--assistant"
+        >
+          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--hint chapter-hub-ai-message__body--empty">
+            <p class="chapter-hub-ai-message__empty-title">AI 写作台</p>
+            <p>描述续写方向、场景与字数，AI 将基于当前章与档案生成正文草稿。</p>
+            <p>生成后可预览，确认后再写入稿纸。选中正文可作为引用上下文。</p>
+          </div>
+        </article>
+
+        <article
+          v-if="deskMode === 'write' && (continueDraft.loading || continueDraft.text || continueDraft.status !== 'idle')"
+          class="chapter-hub-ai-card chapter-hub-ai-card--continue"
+        >
+          <header class="chapter-hub-ai-card__head">
+            <div class="chapter-hub-ai-card__title-wrap">
+              <h4 class="chapter-hub-ai-card__title">续写草稿</h4>
+              <p class="chapter-hub-ai-card__subtitle">
+                {{ continueDraft.position === 'end' ? '章末续写' : '光标处续写' }} · 约 {{ continueDraft.targetChars }} 字
+              </p>
+            </div>
+            <span v-if="continueDraft.status === 'applied'" class="chapter-hub-ai-card__state">已采用</span>
+            <span v-else-if="continueDraft.status === 'ignored'" class="chapter-hub-ai-card__state">已忽略</span>
+          </header>
+          <div v-if="continueDraft.loading && !continueDraft.text" class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">正在生成续写草稿…</p>
+            </div>
+          </div>
+          <pre v-else class="chapter-hub-ai-continue__preview">{{ continueDraft.text }}</pre>
+          <p
+            v-if="continueDraft.usedLayers.length > 0 || continueDraft.droppedLayers.length > 0"
+            class="chapter-hub-ai-continue__context-meta"
+          >
+            <span v-if="continueDraft.usedChars > 0">上下文约 {{ continueDraft.usedChars }} 字</span>
+            <span v-if="continueDraft.usedLayers.length > 0"> · 已用：{{ formatContinueLayers(continueDraft.usedLayers) }}</span>
+            <span v-if="continueDraft.droppedLayers.length > 0"> · 已省略：{{ formatContinueLayers(continueDraft.droppedLayers) }}</span>
+          </p>
+          <details v-if="continueDraft.ragHits.length > 0" class="chapter-hub-ai-continue__rag">
+            <summary>旧章检索 {{ continueDraft.ragHits.length }} 段</summary>
+            <article v-for="hit in continueDraft.ragHits" :key="`${hit.chapterId}-${hit.excerpt.slice(0, 24)}`" class="chapter-hub-ai-continue__rag-item">
+              <p class="chapter-hub-ai-continue__rag-meta">
+                第 {{ hit.chapterNo }} 章 · {{ ragSourceLabel(hit.source) }} · {{ hit.matchedTerms.join('、') }}
+              </p>
+              <p class="chapter-hub-ai-continue__rag-excerpt">{{ hit.excerpt }}</p>
+            </article>
+          </details>
+          <p v-for="warning in continueDraft.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
+          <footer v-if="continueDraft.status === 'ready' && !continueDraft.loading" class="chapter-hub-ai-card__footer">
+            <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('continue-adopt')">采用</button>
+            <button type="button" class="chapter-hub-ai-action" @click="$emit('continue-ignore')">忽略</button>
+            <button type="button" class="chapter-hub-ai-action" @click="regenerateContinue">重新生成</button>
+          </footer>
+          <footer v-else-if="continueDraft.loading" class="chapter-hub-ai-card__footer">
+            <button type="button" class="chapter-hub-ai-action" @click="$emit('continue-stop')">终止</button>
+          </footer>
+        </article>
+
+        <article
+          v-if="chapterSummaryDraft.status !== 'idle' || chapterSummaryDraft.loading"
+          class="chapter-hub-ai-card chapter-hub-ai-card--summary"
+        >
+          <header class="chapter-hub-ai-card__head">
+            <div class="chapter-hub-ai-card__title-wrap">
+              <h4 class="chapter-hub-ai-card__title">章总结草稿</h4>
+              <p class="chapter-hub-ai-card__subtitle">采用后写入本章「总结」字段</p>
+            </div>
+            <span v-if="chapterSummaryDraft.status === 'applied'" class="chapter-hub-ai-card__state">已采用</span>
+            <span v-else-if="chapterSummaryDraft.status === 'ignored'" class="chapter-hub-ai-card__state">已忽略</span>
+          </header>
+          <div v-if="chapterSummaryDraft.loading && !chapterSummaryDraft.text" class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
+            <p class="chapter-hub-ai-streaming__title">正在生成章总结…</p>
+          </div>
+          <pre v-else class="chapter-hub-ai-continue__preview">{{ chapterSummaryDraft.text }}</pre>
+          <footer v-if="chapterSummaryDraft.status === 'ready' && !chapterSummaryDraft.loading" class="chapter-hub-ai-card__footer">
+            <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('chapter-summary-adopt')">写入总结</button>
+            <button type="button" class="chapter-hub-ai-action" @click="$emit('chapter-summary-ignore')">忽略</button>
+          </footer>
+          <footer v-else-if="chapterSummaryDraft.loading" class="chapter-hub-ai-card__footer">
+            <button type="button" class="chapter-hub-ai-action" @click="$emit('chapter-summary-stop')">终止</button>
+          </footer>
+        </article>
+
+        <article
           v-for="message in chatMessages"
+          v-show="deskMode === 'ask' || message.role === 'user' || message.content.length < 400"
           :key="message.id"
           class="chapter-hub-ai-message"
           :class="[
@@ -115,8 +237,10 @@
                 <span></span>
                 <span></span>
               </div>
-              <p class="chapter-hub-ai-streaming__title">正在回答你的问题...</p>
-              <p class="chapter-hub-ai-streaming__desc">我会结合当前章节、上下文和已整理信息来组织回答。</p>
+              <p class="chapter-hub-ai-streaming__title">{{ deskMode === 'write' ? '正在生成写作草稿...' : '正在回答你的问题...' }}</p>
+              <p class="chapter-hub-ai-streaming__desc">
+                {{ deskMode === 'write' ? '我会结合当前章节正文、章总结与档案信息续写。' : '我会结合当前章节、上下文和已整理信息来组织回答。' }}
+              </p>
               <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
                 <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
                 <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
@@ -134,7 +258,7 @@
           </div>
         </article>
 
-        <article v-if="loading" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
+        <article v-if="deskMode === 'ask' && loading" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
           <div class="chapter-hub-ai-message__meta">
             <span class="chapter-hub-ai-message__author">Assistant</span>
           </div>
@@ -145,7 +269,7 @@
                 <span></span>
                 <span></span>
               </div>
-              <p class="chapter-hub-ai-streaming__title">正在整理当前章...</p>
+              <p class="chapter-hub-ai-streaming__title">正在整理...</p>
               <p class="chapter-hub-ai-streaming__desc">人物、势力、物品、关系、伏笔和章节分类会整理到当前会话里。</p>
               <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
                 <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
@@ -156,7 +280,7 @@
           </div>
         </article>
 
-        <article v-if="chatThinking && !hasLiveAssistantMessage" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
+        <article v-if="deskMode === 'ask' && chatThinking && !hasLiveAssistantMessage" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
           <div class="chapter-hub-ai-message__meta">
             <span class="chapter-hub-ai-message__author">Assistant</span>
           </div>
@@ -191,7 +315,7 @@
         <article
           v-for="(run, runIdx) in extractRuns"
           :key="run.id"
-          v-show="hasRun && !loading"
+          v-show="deskMode === 'ask' && hasRun && !loading"
           class="chapter-hub-ai-message chapter-hub-ai-message--assistant"
         >
           <div class="chapter-hub-ai-message__meta">
@@ -327,7 +451,7 @@
 
               <div v-if="run.appliedActions.length > 0" class="chapter-hub-ai-result__applied">
                 <div class="chapter-hub-ai-result__applied-head">
-                  <span>已处理</span>
+                  <span>已采用 / 已忽略</span>
                   <span>{{ run.appliedActions.length }}</span>
                 </div>
                 <p
@@ -356,39 +480,67 @@
                 <span class="chapter-hub-ai-section__count">{{ run.result.characters.length }}</span>
               </summary>
               <div class="chapter-hub-ai-section__content">
-                <article v-for="(item, index) in run.result.characters" :key="`character-${run.id}-${item.name}-${item.match.targetId ?? 'new'}`" class="chapter-hub-ai-suggestion">
-                  <div class="chapter-hub-ai-suggestion__eyebrow">
-                    <span>角色档案</span>
-                    <span>{{ actionLabel(item.match.type) }}</span>
-                  </div>
-                  <div class="chapter-hub-ai-suggestion__top">
-                    <div class="chapter-hub-ai-suggestion__main">
-                      <strong>{{ item.name }}</strong>
-                      <p class="chapter-hub-ai-suggestion__summary">{{ characterSummary(item) }}</p>
+                <article
+                  v-for="(item, index) in run.result.characters"
+                  :key="`character-${run.id}-${item.name}-${item.match.targetId ?? 'new'}`"
+                  class="chapter-hub-ai-card"
+                  :class="{ 'chapter-hub-ai-card--locked': isSuggestionLocked(item.uiState?.status) }"
+                >
+                  <header class="chapter-hub-ai-card__head">
+                    <div class="chapter-hub-ai-card__title-wrap">
+                      <h4 class="chapter-hub-ai-card__title">{{ item.name }}</h4>
+                      <p class="chapter-hub-ai-card__subtitle">
+                        {{ matchLabel(item.match.type, item.identityStatus) }} · {{ confidenceLabel(item.confidence) }}
+                      </p>
                     </div>
-                    <div class="chapter-hub-ai-suggestion__chips">
-                      <span class="chapter-hub-ai-chip" :data-kind="item.match.type">{{ matchLabel(item.match.type) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ confidenceLabel(item.confidence) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ suggestionStateLabel(item.uiState?.status) }}</span>
-                    </div>
-                  </div>
-                  <p v-if="item.match.targetName" class="chapter-hub-ai-suggestion__meta">匹配目标：{{ item.match.targetName }}</p>
-                  <p v-if="item.aliases.length" class="chapter-hub-ai-suggestion__meta">别名：{{ item.aliases.join('、') }}</p>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                  </header>
+
+                  <dl v-if="characterFieldRows(item).length" class="chapter-hub-ai-card__fields">
+                    <template v-for="field in characterFieldRows(item)" :key="`${item.name}-${field.label}`">
+                      <dt>{{ field.label }}</dt>
+                      <dd>{{ field.value }}</dd>
+                    </template>
+                  </dl>
+
+                  <p v-if="item.match.targetName" class="chapter-hub-ai-card__line">匹配档案：{{ item.match.targetName }}</p>
+                  <p v-if="item.aliases.length" class="chapter-hub-ai-card__line">别名：{{ item.aliases.join('、') }}</p>
+
                   <details v-if="item.evidences.length" class="chapter-hub-ai-evidence">
-                    <summary class="chapter-hub-ai-evidence__summary">引用证据 {{ item.evidences.length }}</summary>
+                    <summary class="chapter-hub-ai-evidence__summary">原文依据（{{ item.evidences.length }}）</summary>
                     <div class="chapter-hub-ai-evidence-list">
                       <p v-for="(ev, evIdx) in item.evidences" :key="`character-${index}-${evIdx}`">第 {{ ev.chapterNo ?? '?' }} 章 · {{ ev.quote }}</p>
                     </div>
                   </details>
                   <p v-for="warning in item.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-                  <div v-if="runIdx === 0 && !isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-suggestion__actions">
-                    <button v-if="item.match.type === 'new'" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'characters', index, action: 'create' })">新建</button>
-                    <button v-else-if="canMerge(item.match.type, item.match.targetId)" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'characters', index, action: 'merge' })">合并</button>
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'characters', index, action: 'ignore' })">忽略</button>
-                  </div>
-                  <div v-else-if="runIdx === 0 && item.uiState?.status === 'applied' && item.uiState?.editorTargetId" class="chapter-hub-ai-suggestion__actions">
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('open-editor', { section: 'characters', index })">打开编辑</button>
-                  </div>
+
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(item.uiState?.status)">
+                      <button
+                        v-if="item.match.type === 'new' || canMerge(item.match.type, item.match.targetId)"
+                        type="button"
+                        class="chapter-hub-ai-action chapter-hub-ai-action--primary"
+                        @click="$emit('apply', { section: 'characters', index, action: item.match.type === 'new' ? 'create' : 'merge' })"
+                      >
+                        {{ adoptLabel(item.match.type) }}
+                      </button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'characters', index, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'applied'">
+                      <button
+                        v-if="item.uiState?.editorTargetId"
+                        type="button"
+                        class="chapter-hub-ai-action chapter-hub-ai-action--primary"
+                        @click="$emit('open-editor', { section: 'characters', index })"
+                      >
+                        打开编辑
+                      </button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'characters', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'characters', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
                 </article>
               </div>
             </details>
@@ -423,14 +575,26 @@
                     </div>
                   </details>
                   <p v-for="warning in item.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-                  <div v-if="runIdx === 0 && !isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-suggestion__actions">
-                    <button v-if="item.match.type === 'new'" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'factions', index, action: 'create' })">新建</button>
-                    <button v-else-if="canMerge(item.match.type, item.match.targetId)" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'factions', index, action: 'merge' })">合并</button>
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'factions', index, action: 'ignore' })">忽略</button>
-                  </div>
-                  <div v-else-if="runIdx === 0 && item.uiState?.status === 'applied' && item.uiState?.editorTargetId" class="chapter-hub-ai-suggestion__actions">
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('open-editor', { section: 'factions', index })">打开编辑</button>
-                  </div>
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(item.uiState?.status)">
+                      <button
+                        v-if="item.match.type === 'new' || canMerge(item.match.type, item.match.targetId)"
+                        type="button"
+                        class="chapter-hub-ai-action chapter-hub-ai-action--primary"
+                        @click="$emit('apply', { section: 'factions', index, action: item.match.type === 'new' ? 'create' : 'merge' })"
+                      >
+                        {{ adoptLabel(item.match.type) }}
+                      </button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'factions', index, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'applied'">
+                      <button v-if="item.uiState?.editorTargetId" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('open-editor', { section: 'factions', index })">打开编辑</button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'factions', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'factions', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
                 </article>
               </div>
             </details>
@@ -441,38 +605,58 @@
                 <span class="chapter-hub-ai-section__count">{{ run.result.items.length }}</span>
               </summary>
               <div class="chapter-hub-ai-section__content">
-                <article v-for="(item, index) in run.result.items" :key="`item-${run.id}-${item.name}-${item.match.targetId ?? 'new'}`" class="chapter-hub-ai-suggestion">
-                  <div class="chapter-hub-ai-suggestion__eyebrow">
-                    <span>物品档案</span>
-                    <span>{{ actionLabel(item.match.type) }}</span>
-                  </div>
-                  <div class="chapter-hub-ai-suggestion__top">
-                    <div class="chapter-hub-ai-suggestion__main">
-                      <strong>{{ item.name }}</strong>
-                      <p class="chapter-hub-ai-suggestion__summary">{{ itemSummary(item) }}</p>
+                <article
+                  v-for="(item, index) in run.result.items"
+                  :key="`item-${run.id}-${item.name}-${item.match.targetId ?? 'new'}`"
+                  class="chapter-hub-ai-card"
+                  :class="{ 'chapter-hub-ai-card--locked': isSuggestionLocked(item.uiState?.status) }"
+                >
+                  <header class="chapter-hub-ai-card__head">
+                    <div class="chapter-hub-ai-card__title-wrap">
+                      <h4 class="chapter-hub-ai-card__title">{{ item.name }}</h4>
+                      <p class="chapter-hub-ai-card__subtitle">
+                        {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
+                      </p>
                     </div>
-                    <div class="chapter-hub-ai-suggestion__chips">
-                      <span class="chapter-hub-ai-chip" :data-kind="item.match.type">{{ matchLabel(item.match.type) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ confidenceLabel(item.confidence) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ suggestionStateLabel(item.uiState?.status) }}</span>
-                    </div>
-                  </div>
-                  <p v-if="item.match.targetName" class="chapter-hub-ai-suggestion__meta">匹配目标：{{ item.match.targetName }}</p>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                  </header>
+
+                  <dl v-if="itemFieldRows(item).length" class="chapter-hub-ai-card__fields">
+                    <template v-for="field in itemFieldRows(item)" :key="`${item.name}-${field.label}`">
+                      <dt>{{ field.label }}</dt>
+                      <dd>{{ field.value }}</dd>
+                    </template>
+                  </dl>
+
+                  <p v-if="item.match.targetName" class="chapter-hub-ai-card__line">匹配档案：{{ item.match.targetName }}</p>
+
                   <details v-if="item.evidences.length" class="chapter-hub-ai-evidence">
-                    <summary class="chapter-hub-ai-evidence__summary">引用证据 {{ item.evidences.length }}</summary>
+                    <summary class="chapter-hub-ai-evidence__summary">原文依据（{{ item.evidences.length }}）</summary>
                     <div class="chapter-hub-ai-evidence-list">
                       <p v-for="(ev, evIdx) in item.evidences" :key="`item-${index}-${evIdx}`">第 {{ ev.chapterNo ?? '?' }} 章 · {{ ev.quote }}</p>
                     </div>
                   </details>
                   <p v-for="warning in item.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-                  <div v-if="runIdx === 0 && !isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-suggestion__actions">
-                    <button v-if="item.match.type === 'new'" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'items', index, action: 'create' })">新建</button>
-                    <button v-else-if="canMerge(item.match.type, item.match.targetId)" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'items', index, action: 'merge' })">合并</button>
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'items', index, action: 'ignore' })">忽略</button>
-                  </div>
-                  <div v-else-if="runIdx === 0 && item.uiState?.status === 'applied' && item.uiState?.editorTargetId" class="chapter-hub-ai-suggestion__actions">
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('open-editor', { section: 'items', index })">打开编辑</button>
-                  </div>
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(item.uiState?.status)">
+                      <button
+                        v-if="item.match.type === 'new' || canMerge(item.match.type, item.match.targetId)"
+                        type="button"
+                        class="chapter-hub-ai-action chapter-hub-ai-action--primary"
+                        @click="$emit('apply', { section: 'items', index, action: item.match.type === 'new' ? 'create' : 'merge' })"
+                      >
+                        {{ adoptLabel(item.match.type) }}
+                      </button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'items', index, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'applied'">
+                      <button v-if="item.uiState?.editorTargetId" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('open-editor', { section: 'items', index })">打开编辑</button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'items', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'items', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
                 </article>
               </div>
             </details>
@@ -483,74 +667,105 @@
                 <span class="chapter-hub-ai-section__count">{{ run.result.memberships.length + run.result.relations.length }}</span>
               </summary>
               <div class="chapter-hub-ai-section__content">
-                <article v-for="(item, index) in run.result.memberships" :key="`membership-${run.id}-${index}`" class="chapter-hub-ai-suggestion chapter-hub-ai-suggestion--relation">
-                  <div class="chapter-hub-ai-suggestion__eyebrow">
-                    <span>势力归属</span>
-                    <span>{{ actionLabel(item.match.type) }}</span>
-                  </div>
-                  <div class="chapter-hub-ai-suggestion__top">
-                    <div class="chapter-hub-ai-suggestion__main">
-                      <span class="chapter-hub-ai-suggestion__type">所属势力</span>
-                      <strong>{{ item.characterName }} -> {{ item.factionName }}</strong>
-                      <p class="chapter-hub-ai-suggestion__summary">{{ item.description || '未提供补充说明' }}</p>
+                <article
+                  v-for="(item, index) in run.result.memberships"
+                  :key="`membership-${run.id}-${index}`"
+                  class="chapter-hub-ai-card chapter-hub-ai-card--relation"
+                  :class="{ 'chapter-hub-ai-card--locked': isSuggestionLocked(item.uiState?.status) }"
+                >
+                  <header class="chapter-hub-ai-card__head">
+                    <div class="chapter-hub-ai-card__title-wrap">
+                      <p class="chapter-hub-ai-card__kind">势力归属</p>
+                      <p class="chapter-hub-ai-card__subtitle">
+                        {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
+                      </p>
                     </div>
-                    <div class="chapter-hub-ai-suggestion__chips">
-                      <span class="chapter-hub-ai-chip" :data-kind="item.match.type">{{ matchLabel(item.match.type) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ confidenceLabel(item.confidence) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ suggestionStateLabel(item.uiState?.status) }}</span>
-                    </div>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                  </header>
+
+                  <div class="chapter-hub-ai-relation__flow">
+                    <span class="chapter-hub-ai-relation__person">{{ item.characterName }}</span>
+                    <span class="chapter-hub-ai-relation__arrow" aria-hidden="true">→</span>
+                    <span class="chapter-hub-ai-relation__person chapter-hub-ai-relation__person--faction">{{ item.factionName }}</span>
                   </div>
-                  <p v-if="item.match.targetName" class="chapter-hub-ai-suggestion__meta">匹配目标：{{ item.match.targetName }}</p>
+                  <p v-if="item.description" class="chapter-hub-ai-card__line">{{ item.description }}</p>
+                  <p v-else class="chapter-hub-ai-card__line chapter-hub-ai-card__line--muted">未提供补充说明</p>
+
+                  <p v-if="item.match.targetName" class="chapter-hub-ai-card__line">匹配档案：{{ item.match.targetName }}</p>
                   <details v-if="item.evidences.length" class="chapter-hub-ai-evidence">
-                    <summary class="chapter-hub-ai-evidence__summary">引用证据 {{ item.evidences.length }}</summary>
+                    <summary class="chapter-hub-ai-evidence__summary">原文依据（{{ item.evidences.length }}）</summary>
                     <div class="chapter-hub-ai-evidence-list">
                       <p v-for="(ev, evIdx) in item.evidences" :key="`membership-${index}-${evIdx}`">第 {{ ev.chapterNo ?? '?' }} 章 · {{ ev.quote }}</p>
                     </div>
                   </details>
                   <p v-for="warning in item.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-                  <div v-if="runIdx === 0 && !isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-suggestion__actions">
-                    <button v-if="item.match.type === 'new'" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'memberships', index, action: 'create' })">新建</button>
-                    <button v-else-if="canMerge(item.match.type, item.match.targetId)" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'memberships', index, action: 'merge' })">合并</button>
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'memberships', index, action: 'ignore' })">忽略</button>
-                  </div>
-                  <div v-else-if="runIdx === 0 && item.uiState?.status === 'applied' && item.uiState?.editorTargetId" class="chapter-hub-ai-suggestion__actions">
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('open-editor', { section: 'memberships', index })">打开编辑</button>
-                  </div>
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(item.uiState?.status)">
+                      <button
+                        v-if="item.match.type === 'new' || canMerge(item.match.type, item.match.targetId)"
+                        type="button"
+                        class="chapter-hub-ai-action chapter-hub-ai-action--primary"
+                        @click="$emit('apply', { section: 'memberships', index, action: item.match.type === 'new' ? 'create' : 'merge' })"
+                      >
+                        {{ adoptLabel(item.match.type) }}
+                      </button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'memberships', index, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'memberships', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
                 </article>
 
-                <article v-for="(item, index) in run.result.relations" :key="`relation-${run.id}-${index}`" class="chapter-hub-ai-suggestion chapter-hub-ai-suggestion--relation">
-                  <div class="chapter-hub-ai-suggestion__eyebrow">
-                    <span>角色关系</span>
-                    <span>{{ actionLabel(item.match.type) }}</span>
-                  </div>
-                  <div class="chapter-hub-ai-suggestion__top">
-                    <div class="chapter-hub-ai-suggestion__main">
-                      <span class="chapter-hub-ai-suggestion__type">角色关系</span>
-                      <strong>{{ item.fromCharacterName }} -> {{ item.toCharacterName }}</strong>
-                      <p class="chapter-hub-ai-suggestion__summary">{{ relationSummary(item) }}</p>
+                <article
+                  v-for="(item, index) in run.result.relations"
+                  :key="`relation-${run.id}-${index}`"
+                  class="chapter-hub-ai-card chapter-hub-ai-card--relation"
+                  :class="{ 'chapter-hub-ai-card--locked': isSuggestionLocked(item.uiState?.status) }"
+                >
+                  <header class="chapter-hub-ai-card__head">
+                    <div class="chapter-hub-ai-card__title-wrap">
+                      <p class="chapter-hub-ai-card__kind">角色关系</p>
+                      <p class="chapter-hub-ai-card__subtitle">
+                        {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
+                      </p>
                     </div>
-                    <div class="chapter-hub-ai-suggestion__chips">
-                      <span class="chapter-hub-ai-chip" :data-kind="item.match.type">{{ matchLabel(item.match.type) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ confidenceLabel(item.confidence) }}</span>
-                      <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ suggestionStateLabel(item.uiState?.status) }}</span>
-                    </div>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                  </header>
+
+                  <div class="chapter-hub-ai-relation__flow">
+                    <span class="chapter-hub-ai-relation__person">{{ item.fromCharacterName }}</span>
+                    <span class="chapter-hub-ai-relation__arrow" aria-hidden="true">→</span>
+                    <span v-if="item.relationType" class="chapter-hub-ai-relation__badge">{{ item.relationType }}</span>
+                    <span v-if="item.relationType" class="chapter-hub-ai-relation__arrow" aria-hidden="true">→</span>
+                    <span class="chapter-hub-ai-relation__person">{{ item.toCharacterName }}</span>
                   </div>
-                  <p v-if="item.match.targetName" class="chapter-hub-ai-suggestion__meta">匹配目标：{{ item.match.targetName }}</p>
+                  <p v-if="item.note" class="chapter-hub-ai-card__line">{{ item.note }}</p>
+
+                  <p v-if="item.match.targetName" class="chapter-hub-ai-card__line">匹配档案：{{ item.match.targetName }}</p>
                   <details v-if="item.evidences.length" class="chapter-hub-ai-evidence">
-                    <summary class="chapter-hub-ai-evidence__summary">引用证据 {{ item.evidences.length }}</summary>
+                    <summary class="chapter-hub-ai-evidence__summary">原文依据（{{ item.evidences.length }}）</summary>
                     <div class="chapter-hub-ai-evidence-list">
                       <p v-for="(ev, evIdx) in item.evidences" :key="`relation-${index}-${evIdx}`">第 {{ ev.chapterNo ?? '?' }} 章 · {{ ev.quote }}</p>
                     </div>
                   </details>
                   <p v-for="warning in item.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-                  <div v-if="runIdx === 0 && !isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-suggestion__actions">
-                    <button v-if="item.match.type === 'new'" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'relations', index, action: 'create' })">新建</button>
-                    <button v-else-if="canMerge(item.match.type, item.match.targetId)" type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'relations', index, action: 'merge' })">合并</button>
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'relations', index, action: 'ignore' })">忽略</button>
-                  </div>
-                  <div v-else-if="runIdx === 0 && item.uiState?.status === 'applied' && item.uiState?.editorTargetId" class="chapter-hub-ai-suggestion__actions">
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('open-editor', { section: 'relations', index })">打开编辑</button>
-                  </div>
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(item.uiState?.status)">
+                      <button
+                        v-if="item.match.type === 'new' || canMerge(item.match.type, item.match.targetId)"
+                        type="button"
+                        class="chapter-hub-ai-action chapter-hub-ai-action--primary"
+                        @click="$emit('apply', { section: 'relations', index, action: item.match.type === 'new' ? 'create' : 'merge' })"
+                      >
+                        {{ adoptLabel(item.match.type) }}
+                      </button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'relations', index, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'relations', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
                 </article>
               </div>
             </details>
@@ -590,10 +805,15 @@
                     </div>
                   </details>
                   <p v-for="warning in item.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-                  <div v-if="runIdx === 0 && !isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-suggestion__actions">
-                    <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'foreshadows', index, action: 'create' })">采纳</button>
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'foreshadows', index, action: 'ignore' })">忽略</button>
-                  </div>
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(item.uiState?.status)">
+                      <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'foreshadows', index, action: 'create' })">采用</button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'foreshadows', index, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'foreshadows', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
                 </article>
               </div>
             </details>
@@ -622,10 +842,15 @@
                   <p v-if="(run.classificationResult?.tags.length ?? 0) > 0" class="chapter-hub-ai-suggestion__meta">标签：{{ run.classificationResult?.tags.join('、') }}</p>
                   <p v-if="run.classificationResult?.rationale" class="chapter-hub-ai-suggestion__meta">判断依据：{{ run.classificationResult?.rationale }}</p>
                   <p v-for="warning in run.classificationResult?.warnings ?? []" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-                  <div v-if="runIdx === 0 && !isSuggestionLocked(run.classificationResult?.uiState?.status)" class="chapter-hub-ai-suggestion__actions">
-                    <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'classification', index: 0, action: 'merge' })">写入本章总结</button>
-                    <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'classification', index: 0, action: 'ignore' })">忽略</button>
-                  </div>
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(run.classificationResult?.uiState?.status)">
+                      <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'classification', index: 0, action: 'merge' })">采用</button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'classification', index: 0, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="run.classificationResult?.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'classification', index: 0, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
                 </article>
               </div>
             </details>
@@ -643,6 +868,97 @@
             <button type="button" class="chapter-hub-ai-panel__selection-clear" @click="$emit('clear-selection-quote')">清除</button>
           </div>
 
+          <div v-if="deskMode === 'write'" class="chapter-hub-ai-continue__options">
+            <div class="chapter-hub-ai-continue__option-row">
+              <span class="chapter-hub-ai-continue__label">位置</span>
+              <div class="chapter-hub-ai-continue__chips">
+                <button
+                  type="button"
+                  class="chapter-hub-ai-continue__chip"
+                  :class="{ 'is-active': continueDraft.position === 'end' }"
+                  @click="$emit('update-continue-position', 'end')"
+                >
+                  章末
+                </button>
+                <button
+                  type="button"
+                  class="chapter-hub-ai-continue__chip"
+                  :class="{ 'is-active': continueDraft.position === 'cursor' }"
+                  @click="$emit('update-continue-position', 'cursor')"
+                >
+                  光标处
+                </button>
+              </div>
+            </div>
+            <div class="chapter-hub-ai-continue__option-row">
+              <span class="chapter-hub-ai-continue__label">字数</span>
+              <div class="chapter-hub-ai-continue__chips">
+                <button
+                  v-for="size in continueSizeOptions"
+                  :key="size"
+                  type="button"
+                  class="chapter-hub-ai-continue__chip"
+                  :class="{ 'is-active': continueDraft.targetChars === size }"
+                  @click="$emit('update-continue-target-chars', size)"
+                >
+                  {{ size }} 字
+                </button>
+              </div>
+            </div>
+            <div class="chapter-hub-ai-continue__option-row">
+              <span class="chapter-hub-ai-continue__label">前情</span>
+              <div class="chapter-hub-ai-continue__chips">
+                <button
+                  v-for="count in continuePrevSummaryOptions"
+                  :key="count"
+                  type="button"
+                  class="chapter-hub-ai-continue__chip"
+                  :class="{ 'is-active': continueDraft.prevSummaryCount === count }"
+                  @click="$emit('update-continue-prev-summary-count', count)"
+                >
+                  前 {{ count }} 章
+                </button>
+              </div>
+            </div>
+            <div class="chapter-hub-ai-continue__option-row chapter-hub-ai-continue__option-row--checks">
+              <label class="chapter-hub-ai-continue__check">
+                <input
+                  type="checkbox"
+                  :checked="continueDraft.afterAdoptSummary"
+                  @change="$emit('update-continue-after-adopt-summary', ($event.target as HTMLInputElement).checked)"
+                />
+                采用后生成章总结
+              </label>
+              <label class="chapter-hub-ai-continue__check">
+                <input
+                  type="checkbox"
+                  :checked="continueDraft.afterAdoptExtract"
+                  @change="$emit('update-continue-after-adopt-extract', ($event.target as HTMLInputElement).checked)"
+                />
+                采用后整理档案
+              </label>
+              <label class="chapter-hub-ai-continue__check">
+                <input
+                  type="checkbox"
+                  :checked="continueDraft.enableRag"
+                  @change="$emit('update-continue-enable-rag', ($event.target as HTMLInputElement).checked)"
+                />
+                检索旧章正文（按出场人物）
+              </label>
+            </div>
+            <div class="chapter-hub-ai-continue__option-row chapter-hub-ai-continue__option-row--brief">
+              <button
+                type="button"
+                class="chapter-hub-ai-continue__brief-btn"
+                :disabled="continuityBriefLoading || loading"
+                @click="$emit('generate-continuity-brief')"
+              >
+                {{ continuityBriefLoading ? '生成中…' : continuityBrief ? '更新全书摘要' : '生成全书摘要' }}
+              </button>
+              <span v-if="continuityBrief" class="chapter-hub-ai-continue__brief-hint">已保存 {{ continuityBrief.length }} 字</span>
+            </div>
+          </div>
+
           <div class="chapter-hub-ai-panel__input-wrap">
             <textarea
               ref="composerInputRef"
@@ -650,37 +966,93 @@
               class="chapter-hub-ai-panel__input"
               rows="1"
               maxlength="500"
-              placeholder="询问当前章的人物、伏笔、冲突……"
+              :placeholder="deskMode === 'write' ? '描述续写方向（可选），如：两人争吵后陈平安独自离开…' : '询问当前章的人物、伏笔、冲突……'"
               @keydown="onComposerKeydown"
               @input="syncComposerHeight"
             />
           </div>
 
+          <div
+            v-if="deskMode === 'ask' && (askContextMeta.usedChars > 0 || askContextMeta.warnings.length > 0)"
+            class="chapter-hub-ai-ask-context"
+          >
+            <p v-if="askContextMeta.usedChars > 0" class="chapter-hub-ai-continue__context-meta">
+              上下文约 {{ askContextMeta.usedChars }} 字
+              <span v-if="askContextMeta.usedLayers.length > 0"> · 已用：{{ formatAskLayers(askContextMeta.usedLayers) }}</span>
+              <span v-if="askContextMeta.droppedLayers.length > 0"> · 已省略：{{ formatAskLayers(askContextMeta.droppedLayers) }}</span>
+            </p>
+            <details v-if="askContextMeta.ragHits.length > 0" class="chapter-hub-ai-continue__rag">
+              <summary>旧章检索 {{ askContextMeta.ragHits.length }} 段</summary>
+              <article
+                v-for="hit in askContextMeta.ragHits"
+                :key="`ask-rag-${hit.chapterId}-${hit.excerpt.slice(0, 20)}`"
+                class="chapter-hub-ai-continue__rag-item"
+              >
+                <p class="chapter-hub-ai-continue__rag-meta">
+                  第 {{ hit.chapterNo }} 章 · {{ ragSourceLabel(hit.source) }} · {{ hit.matchedTerms.join('、') }}
+                </p>
+                <p class="chapter-hub-ai-continue__rag-excerpt">{{ hit.excerpt }}</p>
+              </article>
+            </details>
+            <p v-for="warning in askContextMeta.warnings" :key="`ask-w-${warning}`" class="chapter-hub-ai-warning">{{ warning }}</p>
+          </div>
+
           <div class="chapter-hub-ai-panel__composer-bar">
-            <span class="chapter-hub-ai-panel__hint">Enter 发送，Shift+Enter 换行</span>
+            <span class="chapter-hub-ai-panel__hint">{{ composerHint }}</span>
             <button
+              v-if="deskMode === 'write'"
               type="button"
               class="chapter-hub-ai-panel__ask"
-              :data-busy="chatLoading ? 'true' : 'false'"
-              :disabled="loading || (!chatLoading && (!canSend || !targetChapter))"
-              @click="chatLoading ? $emit('stop-ask') : submitAsk()"
+              :class="{ 'chapter-hub-ai-panel__ask--stop': writeComposerBusy }"
+              :data-busy="writeComposerBusy ? 'true' : 'false'"
+              :disabled="loading || (!writeComposerBusy && !targetChapter)"
+              :aria-label="writeComposerBusy ? '终止续写' : '生成续写'"
+              @click="onWriteComposerClick()"
             >
-              {{ chatLoading ? '暂停' : '发送' }}
+              {{ writeComposerBusy ? '终止' : '生成' }}
+            </button>
+            <button
+              v-else
+              type="button"
+              class="chapter-hub-ai-panel__ask"
+              :class="{ 'chapter-hub-ai-panel__ask--stop': askComposerBusy }"
+              :data-busy="askComposerBusy ? 'true' : 'false'"
+              :disabled="loading || (!askComposerBusy && (!canSend || !targetChapter))"
+              :aria-label="askComposerBusy ? '终止回答' : '发送提问'"
+              @click="onAskComposerClick()"
+            >
+              {{ askComposerBusy ? '终止' : '发送' }}
             </button>
           </div>
         </div>
       </footer>
     </div>
   </aside>
+
+  <CardKeyRedeemDialog :open="redeemOpen" @close="redeemOpen = false" @redeemed="onRedeemed" />
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import CardKeyRedeemDialog from '../../../components/CardKeyRedeemDialog.vue'
+import { requestAiAccess } from '../../../composables/useAiAccess'
+import { useAuth } from '../../../composables/useAuth'
+import { formatBalanceYuan } from '../../../lib/balanceFormat'
+import { fetchWalletBalance } from '../../../lib/backendAi'
+import { ASK_CONTEXT_LAYER_LABELS, CONTINUE_CONTEXT_LAYER_LABELS } from '../../../lib/localAi'
 import type {
   AiAnalysisKind,
   AiDeskChatMessage,
+  AiAskContextMeta,
+  AiChapterSummaryDraft,
+  AiContinueDraft,
+  AiContinuePrevSummaryCount,
+  AiContinueTargetChars,
+  ContinueRagSnippetHit,
+  AiDeskMode,
   Chapter,
   EntityMatchType,
+  ExtractedCharacter,
   ExtractedFaction,
   ExtractedItem,
   ExtractedRelation,
@@ -718,43 +1090,129 @@ const props = defineProps<{
   hasRun: boolean
   chatMessages: AiDeskChatMessage[]
   selectionQuote?: string
+  deskMode: AiDeskMode
+  continueDraft: AiContinueDraft
+  continuityBrief: string
+  continuityBriefLoading: boolean
+  chapterSummaryDraft: AiChapterSummaryDraft
+  askContextMeta: AiAskContextMeta
 }>()
 
 const emit = defineEmits<{
   run: []
-  ask: [payload: { question: string }]
+  'toggle-desk-mode': []
+  ask: [payload: { question: string; mode: AiDeskMode }]
+  'continue-run': [payload: { direction: string }]
+  'continue-stop': []
+  'continue-adopt': []
+  'continue-ignore': []
+  'update-continue-position': [value: 'cursor' | 'end']
+  'update-continue-target-chars': [value: AiContinueTargetChars]
+  'update-continue-prev-summary-count': [value: AiContinuePrevSummaryCount]
+  'update-continue-after-adopt-summary': [value: boolean]
+  'update-continue-after-adopt-extract': [value: boolean]
+  'update-continue-enable-rag': [value: boolean]
+  'generate-continuity-brief': []
+  'chapter-summary-adopt': []
+  'chapter-summary-ignore': []
+  'chapter-summary-stop': []
   newChat: []
   switchChat: [sessionId: string]
   closeChat: [sessionId: string]
   deleteChat: [sessionId: string]
-  openSettings: []
   collapse: []
   clearSelectionQuote: []
   stopAsk: []
-  apply: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' }]
+  apply: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' | 'reopen' }]
   openEditor: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations'; index: number }]
 }>()
+
+const { balance, refresh: refreshAuth } = useAuth()
+const redeemOpen = ref(false)
+const balanceRefreshing = ref(false)
+
+const balanceLabel = computed(() => formatBalanceYuan(balance.value))
+
+async function refreshBalance(): Promise<void> {
+  if (!requestAiAccess()) return
+  if (balanceRefreshing.value) return
+  balanceRefreshing.value = true
+  try {
+    await fetchWalletBalance()
+    refreshAuth()
+  } catch {
+    /* 静默失败，用户可重试 */
+  } finally {
+    balanceRefreshing.value = false
+  }
+}
+
+function onWalletClick(): void {
+  if (!requestAiAccess()) return
+  redeemOpen.value = true
+  void refreshBalance()
+}
+
+function onRedeemed(): void {
+  refreshAuth()
+}
+
+function onAccountChanged(): void {
+  refreshAuth()
+}
 
 const draft = ref('')
 const scrollRef = ref<HTMLElement | null>(null)
 const composerInputRef = ref<HTMLTextAreaElement | null>(null)
 const historyOpen = ref(false)
 const expandedRunIds = ref<string[]>([])
-const busy = computed(() => props.loading || props.chatLoading)
+const continueSizeOptions: AiContinueTargetChars[] = [800, 1500, 3000]
+const continuePrevSummaryOptions: AiContinuePrevSummaryCount[] = [2, 3, 5]
+
+function formatContinueLayers(keys: string[]): string {
+  return keys.map((key) => CONTINUE_CONTEXT_LAYER_LABELS[key] ?? key).join('、')
+}
+
+function formatAskLayers(keys: string[]): string {
+  return keys.map((key) => ASK_CONTEXT_LAYER_LABELS[key] ?? CONTINUE_CONTEXT_LAYER_LABELS[key] ?? key).join('、')
+}
+
+function ragSourceLabel(source: ContinueRagSnippetHit['source']): string {
+  if (source === 'foreshadow') return '伏笔'
+  if (source === 'location') return '地点'
+  return '人物'
+}
+const lastContinueDirection = ref('')
+
+const busy = computed(() => props.loading || props.chatLoading || props.continueDraft.loading)
+const askComposerBusy = computed(() => props.chatLoading || props.chatThinking)
+const writeComposerBusy = computed(() => props.continueDraft.loading)
+const composerHint = computed(() => {
+  if (props.deskMode === 'write') {
+    return writeComposerBusy.value ? 'Enter 终止，Shift+Enter 换行' : 'Enter 生成，Shift+Enter 换行'
+  }
+  return askComposerBusy.value ? 'Enter 终止，Shift+Enter 换行' : 'Enter 发送，Shift+Enter 换行'
+})
 const hasLiveAssistantMessage = computed(() =>
-  props.chatLoading &&
+  askComposerBusy.value &&
   props.chatMessages.length > 0 &&
   props.chatMessages[props.chatMessages.length - 1]?.role === 'assistant',
 )
 
 function isLiveAssistantMessage(message: AiDeskChatMessage): boolean {
   return Boolean(
-    props.chatLoading &&
+    askComposerBusy.value &&
     props.chatMessages[props.chatMessages.length - 1]?.id === message.id &&
     message.role === 'assistant',
   )
 }
 const canSend = computed(() => !!draft.value.trim())
+
+const historyToggleLabel = computed(() =>
+  props.deskMode === 'write'
+    ? { open: '打开写作记录', close: '收起写作记录' }
+    : { open: '打开提问记录', close: '收起提问记录' },
+)
 
 function formatLastQuestionAt(value: string): string {
   const date = new Date(value)
@@ -843,6 +1301,13 @@ watch(draft, () => {
 })
 
 watch(
+  () => props.deskMode,
+  () => {
+    historyOpen.value = false
+  },
+)
+
+watch(
   () => props.extractRuns.map((item) => item.id).join('|'),
   () => {
     syncExpandedRuns()
@@ -851,10 +1316,15 @@ watch(
 )
 
 onMounted(() => {
+  window.addEventListener('novel-writing:changed', onAccountChanged)
   void nextTick(() => {
     scrollToBottom()
     syncComposerHeight()
   })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('novel-writing:changed', onAccountChanged)
 })
 
 function formatRunMode(mode: 'current' | 'recent' | 'all' | null): string {
@@ -893,9 +1363,35 @@ function syncExpandedRuns(): void {
 }
 
 function suggestionStateLabel(status?: 'pending' | 'applied' | 'ignored'): string {
-  if (status === 'applied') return '已处理'
+  if (status === 'applied') return '已采用'
   if (status === 'ignored') return '已忽略'
   return '待确认'
+}
+
+function adoptLabel(type: EntityMatchType): string {
+  return type === 'new' ? '采用' : '采用更新'
+}
+
+function characterFieldRows(item: ExtractedCharacter): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = []
+  if (item.gender) rows.push({ label: '性别', value: item.gender })
+  if (item.age) rows.push({ label: '年龄', value: item.age })
+  if (item.goal) rows.push({ label: '目标', value: item.goal })
+  if (item.secret) rows.push({ label: '秘密', value: item.secret })
+  if (item.arc) rows.push({ label: '弧光', value: item.arc })
+  for (const attr of item.attributes.slice(0, 4)) {
+    if (attr.key && attr.value) rows.push({ label: attr.key, value: attr.value })
+  }
+  if (item.notes) rows.push({ label: '备注', value: item.notes })
+  return rows
+}
+
+function itemFieldRows(item: ExtractedItem): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = []
+  if (item.summary) rows.push({ label: '摘要', value: item.summary })
+  if (item.ownerName) rows.push({ label: '归属', value: item.ownerName })
+  if (item.firstAppearanceChapterNo) rows.push({ label: '初登场', value: `第 ${item.firstAppearanceChapterNo} 章` })
+  return rows
 }
 
 function isSuggestionLocked(status?: 'pending' | 'applied' | 'ignored'): boolean {
@@ -1030,23 +1526,64 @@ function renderMessageMarkdown(content: string): string {
   return blocks.join('')
 }
 
+function onAskComposerClick(): void {
+  if (askComposerBusy.value) {
+    emit('stop-ask')
+    return
+  }
+  submitAsk()
+}
+
+function onWriteComposerClick(): void {
+  if (writeComposerBusy.value) {
+    emit('continue-stop')
+    return
+  }
+  submitWrite()
+}
+
 function submitAsk(): void {
+  if (askComposerBusy.value) {
+    emit('stop-ask')
+    return
+  }
   const question = draft.value.trim()
   if (!question) return
-  emit('ask', { question })
+  emit('ask', { question, mode: props.deskMode })
   draft.value = ''
   void nextTick(() => syncComposerHeight())
 }
 
-function onComposerKeydown(event: KeyboardEvent): void {
-  if (event.isComposing) return
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault()
-    submitAsk()
+function submitWrite(): void {
+  if (writeComposerBusy.value) {
+    emit('continue-stop')
+    return
   }
+  const direction = draft.value.trim()
+  lastContinueDirection.value = direction
+  emit('continue-run', { direction })
+  draft.value = ''
+  void nextTick(() => syncComposerHeight())
 }
 
-function matchLabel(type: EntityMatchType): string {
+function regenerateContinue(): void {
+  emit('continue-run', { direction: lastContinueDirection.value })
+}
+
+function onComposerKeydown(event: KeyboardEvent): void {
+  if (event.isComposing) return
+  if (event.key !== 'Enter' || event.shiftKey) return
+  event.preventDefault()
+  if (props.deskMode === 'write') {
+    onWriteComposerClick()
+    return
+  }
+  onAskComposerClick()
+}
+
+function matchLabel(type: EntityMatchType, identityStatus?: string): string {
+  if (identityStatus === 'uncertain') return '身份待确认'
+  if (identityStatus === 'possible_same_person') return '疑似同一人'
   if (type === 'new') return '新建建议'
   if (type === 'update') return '更新建议'
   if (type === 'possible_duplicate') return '疑似重复'
@@ -1075,6 +1612,7 @@ function characterSummary(item: ExtractedCharacter): string {
     item.age && `年龄 ${item.age}`,
     item.goal && `目标 ${item.goal}`,
     item.secret && `秘密 ${item.secret}`,
+    item.arc && `弧光 ${item.arc}`,
     attrPreview,
     item.notes,
   ]
@@ -1082,7 +1620,8 @@ function characterSummary(item: ExtractedCharacter): string {
 }
 
 function factionSummary(item: ExtractedFaction): string {
-  const parts = [item.leader && `首领 ${item.leader}`, item.notes]
+  const attrPreview = (item.attributes ?? []).slice(0, 2).map((attr) => `${attr.key} ${attr.value}`).join(' · ')
+  const parts = [item.leader && `首领 ${item.leader}`, attrPreview, item.notes]
   return parts.filter(Boolean).join(' · ') || '未提取到更多字段'
 }
 
@@ -1197,6 +1736,99 @@ function relationSummary(item: ExtractedRelation): string {
   padding: 0;
   font-size: 0.82rem;
   flex: 0 0 auto;
+}
+
+.chapter-hub-ai-panel__wallet {
+  display: inline-flex;
+  align-items: stretch;
+  min-height: 30px;
+  max-width: 132px;
+  flex: 0 1 auto;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 74%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 86%, var(--color-surface-muted) 14%);
+  overflow: hidden;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.chapter-hub-ai-panel__wallet:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border-strong));
+  background: color-mix(in srgb, var(--color-primary-soft) 24%, var(--color-surface));
+}
+
+.chapter-hub-ai-panel__wallet-main {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 0 6px 0 9px;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 84%, var(--color-primary) 16%);
+  cursor: pointer;
+  font: inherit;
+}
+
+.chapter-hub-ai-panel__wallet-main:hover {
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-panel__wallet-refresh {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--color-border-strong) 68%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text-muted) 88%, var(--color-text) 12%);
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.chapter-hub-ai-panel__wallet-refresh:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary-soft) 18%, transparent);
+}
+
+.chapter-hub-ai-panel__wallet-icon {
+  font-size: 0.72rem;
+  line-height: 1;
+  opacity: 0.88;
+}
+
+.chapter-hub-ai-panel__wallet-balance {
+  font-size: 0.64rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chapter-hub-ai-panel__wallet-refresh.is-spinning span {
+  display: inline-block;
+  animation: chapter-hub-ai-wallet-spin 0.7s linear infinite;
+}
+
+.chapter-hub-ai-panel__wallet-refresh:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+@keyframes chapter-hub-ai-wallet-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chapter-hub-ai-panel__toolbtn--primary,
@@ -1708,6 +2340,318 @@ function relationSummary(item: ExtractedRelation): string {
   border: 1px solid color-mix(in srgb, #f59e0b 24%, transparent);
 }
 
+.chapter-hub-ai-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-surface-muted) 6%);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+}
+
+.chapter-hub-ai-card--locked {
+  opacity: 0.88;
+}
+
+.chapter-hub-ai-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chapter-hub-ai-card__title-wrap {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.chapter-hub-ai-card__title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.chapter-hub-ai-card__subtitle {
+  margin: 0;
+  font-size: 0.62rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-card__state {
+  flex: 0 0 auto;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-primary) 78%, var(--color-text) 22%);
+  background: color-mix(in srgb, var(--color-primary-soft) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.chapter-hub-ai-card__fields {
+  display: grid;
+  grid-template-columns: minmax(52px, 72px) minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 42%, transparent);
+}
+
+.chapter-hub-ai-card__fields dt {
+  margin: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-card__fields dd {
+  margin: 0;
+  font-size: 0.65rem;
+  line-height: 1.55;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.chapter-hub-ai-card__line {
+  margin: 0;
+  font-size: 0.64rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--color-text) 86%, var(--color-text-muted) 14%);
+}
+
+.chapter-hub-ai-card__line--muted {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.chapter-hub-ai-card__kind {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-card--relation {
+  border-color: color-mix(in srgb, var(--color-primary) 14%, var(--color-border) 86%);
+}
+
+.chapter-hub-ai-card--continue {
+  border-color: color-mix(in srgb, var(--color-primary) 22%, var(--color-border) 78%);
+}
+
+.chapter-hub-ai-card--summary {
+  border-color: color-mix(in srgb, var(--color-primary) 16%, var(--color-border) 84%);
+}
+
+.chapter-hub-ai-continue__preview {
+  margin: 0;
+  padding: 10px;
+  max-height: 280px;
+  overflow: auto;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 42%, transparent);
+  font-family: inherit;
+  font-size: 0.68rem;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-continue__options {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 36%, transparent);
+}
+
+.chapter-hub-ai-continue__option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chapter-hub-ai-continue__label {
+  flex: 0 0 auto;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-continue__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chapter-hub-ai-continue__chip {
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chapter-hub-ai-continue__chip.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 42%, transparent);
+  color: color-mix(in srgb, var(--color-primary) 76%, var(--color-text) 24%);
+}
+
+.chapter-hub-ai-continue__option-row--checks {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.chapter-hub-ai-continue__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.62rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chapter-hub-ai-continue__option-row--brief {
+  justify-content: space-between;
+}
+
+.chapter-hub-ai-continue__brief-btn {
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chapter-hub-ai-continue__brief-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chapter-hub-ai-continue__brief-hint {
+  font-size: 0.58rem;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-continue__context-meta {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 0.58rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-ask-context {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.chapter-hub-ai-continue__rag {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 34%, transparent);
+  font-size: 0.62rem;
+}
+
+.chapter-hub-ai-continue__rag summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-continue__rag-item + .chapter-hub-ai-continue__rag-item {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.chapter-hub-ai-continue__rag-meta {
+  margin: 0 0 4px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-continue__rag-excerpt {
+  margin: 0;
+  line-height: 1.65;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chapter-hub-ai-relation__flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 42%, transparent);
+}
+
+.chapter-hub-ai-relation__person {
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.chapter-hub-ai-relation__person--faction {
+  color: color-mix(in srgb, var(--color-primary) 72%, var(--color-text) 28%);
+}
+
+.chapter-hub-ai-relation__arrow {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.chapter-hub-ai-relation__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-primary) 80%, var(--color-text) 20%);
+  background: color-mix(in srgb, var(--color-primary-soft) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+
+.chapter-hub-ai-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
 .chapter-hub-ai-suggestion {
   display: grid;
   gap: 8px;
@@ -1814,6 +2758,15 @@ function relationSummary(item: ExtractedRelation): string {
   line-height: 1.5;
 }
 
+.chapter-hub-ai-suggestion__actions,
+.chapter-hub-ai-card__footer .chapter-hub-ai-action {
+  min-height: 30px;
+}
+
+.chapter-hub-ai-card__footer .chapter-hub-ai-action--primary {
+  flex: 1 1 96px;
+}
+
 .chapter-hub-ai-suggestion__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1915,6 +2868,18 @@ function relationSummary(item: ExtractedRelation): string {
 
 .chapter-hub-ai-panel__ask[data-busy='true'] {
   background: color-mix(in srgb, var(--color-primary-soft) 58%, var(--color-surface));
+}
+
+.chapter-hub-ai-panel__ask--stop {
+  color: color-mix(in srgb, var(--danger-text) 88%, var(--color-text) 12%);
+  border-color: color-mix(in srgb, var(--danger-text) 28%, var(--color-border-strong));
+  background: color-mix(in srgb, var(--danger-bg) 42%, var(--color-surface) 58%);
+}
+
+.chapter-hub-ai-panel__ask--stop:hover {
+  color: var(--danger-text);
+  border-color: color-mix(in srgb, var(--danger-text) 40%, var(--color-border-strong));
+  background: color-mix(in srgb, var(--danger-bg) 58%, var(--color-surface) 42%);
 }
 
 .chapter-hub-ai-message__body--markdown :deep(p),

@@ -26,9 +26,7 @@ export const router = createRouter({
     },
     {
       path: '/reset-password',
-      name: 'reset-password',
-      component: AuthView,
-      props: { mode: 'reset-password' },
+      redirect: { name: 'login' },
     },
     {
       path: '/novels/:id',

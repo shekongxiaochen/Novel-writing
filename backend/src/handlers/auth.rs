@@ -1,11 +1,11 @@
 use crate::{
     error::Result,
-    models::{AuthResponse, LoginRequest, RegisterRequest, SendCodeRequest, User, UserInfo},
+    models::{AuthResponse, DeviceStatusResponse, LoginRequest, RegisterByDeviceResponse, User, UserInfo},
     services::AppState,
 };
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Extension, Json,
 };
 use serde::Serialize;
@@ -16,81 +16,102 @@ pub struct MessageResponse {
     message: String,
 }
 
-/// POST /auth/register - 用户注册
-pub async fn register(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<RegisterRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>)> {
-    tracing::info!("User registration attempt: {}", req.email);
-    
-    // 1. 注册用户
-    let user = state.auth.register(&req.email, &req.password, &req.code).await?;
-    
-    // 2. 生成token
-    let token = state.auth.login(&req.email, &req.password, "127.0.0.1").await?;
-    
-    tracing::info!("User registered successfully: {}", user.id);
-    
-    Ok((
-        StatusCode::CREATED,
-        Json(AuthResponse {
-            token,
-            user: user.into(),
-        }),
-    ))
+fn client_ip(headers: &HeaderMap) -> &str {
+    headers
+        .get("X-Forwarded-For")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            headers
+                .get("X-Real-IP")
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or("0.0.0.0")
 }
 
-/// POST /auth/login - 用户登录
+fn device_id_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("X-Device-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string)
+}
+
+/// GET /auth/device-status
+pub async fn device_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<DeviceStatusResponse>> {
+    let device_id = device_id_from_headers(&headers)
+        .ok_or_else(|| crate::error::AppError::Validation("缺少 X-Device-Id".to_string()))?;
+    let status = state.auth.device_status(&device_id).await?;
+    Ok(Json(status))
+}
+
+/// POST /auth/register-by-device
+pub async fn register_by_device(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<RegisterByDeviceResponse>)> {
+    let device_id = device_id_from_headers(&headers)
+        .ok_or_else(|| crate::error::AppError::Validation("缺少 X-Device-Id".to_string()))?;
+    let ip = client_ip(&headers);
+    tracing::info!("Device registration for device_id prefix={}", &device_id[..device_id.len().min(8)]);
+    let resp = state.auth.register_by_device(&device_id, ip).await?;
+    Ok((StatusCode::CREATED, Json(resp)))
+}
+
+/// POST /auth/login
 pub async fn login(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>> {
-    tracing::info!("User login attempt: {}", req.email);
-    
-    // 1. 登录
-    let token = state.auth.login(&req.email, &req.password, "127.0.0.1").await?;
-    
-    // 2. 获取用户信息
+    let ip = client_ip(&headers);
+    let token = state
+        .auth
+        .login(&req.username, &req.password, ip)
+        .await?;
     let user = state.auth.verify_token(&token).await?;
-    
-    tracing::info!("User logged in successfully: {}", user.id);
-    
+    let user_info = state.auth.user_info_with_balance(&user).await?;
     Ok(Json(AuthResponse {
         token,
-        user: user.into(),
+        user: user_info,
     }))
 }
 
-/// POST /auth/send-code - 发送验证码
-pub async fn send_code(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<SendCodeRequest>,
-) -> Result<Json<MessageResponse>> {
-    tracing::info!("Sending verification code to: {}", req.email);
-    
-    state.auth.send_verification_code(&req.email, &req.purpose).await?;
-    
-    Ok(Json(MessageResponse {
-        message: "验证码已发送".to_string(),
-    }))
-}
-
-/// GET /auth/me - 获取当前用户信息
+/// GET /auth/me
 pub async fn get_current_user(
+    State(state): State<Arc<AppState>>,
     Extension(user): Extension<User>,
-) -> Json<UserInfo> {
-    Json(user.into())
+) -> Result<Json<UserInfo>> {
+    let info = state.auth.user_info_with_balance(&user).await?;
+    Ok(Json(info))
 }
 
-/// POST /auth/logout - 登出
+/// POST /auth/logout
 pub async fn logout(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Extension(user): Extension<User>,
+    headers: HeaderMap,
 ) -> Result<Json<MessageResponse>> {
-    // 从header获取token（简化处理，实际应该从request中提取）
-    // 这里我们通过user_id来删除所有session
+    if let Some(token) = bearer_token(&headers) {
+        state.auth.logout(&token).await?;
+    }
     tracing::info!("User logout: {}", user.id);
-    
     Ok(Json(MessageResponse {
         message: "已登出".to_string(),
     }))

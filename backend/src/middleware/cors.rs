@@ -1,4 +1,4 @@
-use axum::http::{header, Method};
+use axum::http::{header, HeaderName, Method};
 use tower_http::cors::CorsLayer;
 
 /// CORS中间件配置
@@ -19,6 +19,11 @@ pub fn cors_layer(origins: &str) -> CorsLayer {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+            HeaderName::from_static("x-device-id"),
+        ])
         .allow_credentials(true)
 }

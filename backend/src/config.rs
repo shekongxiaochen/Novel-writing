@@ -23,13 +23,9 @@ pub struct Config {
     // CORS
     pub cors_origins: String,
     
-    // AI（预留，接入通义时启用）
-    #[allow(dead_code)]
-    pub dashscope_api_key: String,
-    #[allow(dead_code)]
-    pub dashscope_model: String,
-    #[allow(dead_code)]
-    pub dashscope_base_url: String,
+    // DeepSeek（密钥仅服务端，勿暴露给用户 API）
+    pub deepseek_api_key: String,
+    pub deepseek_base_url: String,
 
     // 邮件（预留 SMTP 字段；当前仅 mail_enabled 参与逻辑）
     #[allow(dead_code)]
@@ -86,11 +82,9 @@ impl Config {
                 .parse()?,
             cors_origins: env::var("CORS_ORIGINS")
                 .unwrap_or_else(|_| "http://localhost:5173".to_string()),
-            dashscope_api_key: env::var("DASHSCOPE_API_KEY").unwrap_or_default(),
-            dashscope_model: env::var("DASHSCOPE_MODEL")
-                .unwrap_or_else(|_| "qwen-plus".to_string()),
-            dashscope_base_url: env::var("DASHSCOPE_BASE_URL")
-                .unwrap_or_else(|_| "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions".to_string()),
+            deepseek_api_key: env::var("DEEPSEEK_API_KEY").unwrap_or_default(),
+            deepseek_base_url: env::var("DEEPSEEK_BASE_URL")
+                .unwrap_or_else(|_| "https://api.deepseek.com".to_string()),
             smtp_host: env::var("SMTP_HOST").unwrap_or_default(),
             smtp_port: env::var("SMTP_PORT")
                 .unwrap_or_else(|_| "465".to_string())

@@ -1,9 +1,19 @@
+pub mod ai_service;
+pub mod card_key_service;
+pub mod deepseek_client;
 pub mod app_state;
 pub mod auth_service;
 pub mod cache_service;
 pub mod novel_service;
+pub mod settings_service;
+pub mod wallet_service;
+pub mod wallet_units;
 
+pub use ai_service::AiService;
 pub use app_state::AppState;
 pub use auth_service::AuthService;
 pub use cache_service::CacheService;
 pub use novel_service::NovelService;
+pub use settings_service::SettingsService;
+pub use card_key_service::CardKeyService;
+pub use wallet_service::WalletService;

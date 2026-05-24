@@ -35,7 +35,10 @@ argon2 = "0.5"
 jsonwebtoken = "9.2"
 
 # HTTP客户端 (AI API)
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
+futures-util = "0.3"
+bytes = "1"
+tokio-stream = "0.1"
 
 # 日志
 tracing = "0.1"
@@ -61,6 +64,8 @@ rand = "0.8"
 # 管理后台（Django Admin 风格）
 axum-admin = { version = "0.1.1", features = ["seaorm"] }
 sea-orm-migration = { version = "1", features = ["sqlx-mysql", "runtime-tokio-rustls"] }
+minijinja = "2"
+tower-cookies = "0.10"
 
 [dev-dependencies]
 tokio-test = "0.4"
