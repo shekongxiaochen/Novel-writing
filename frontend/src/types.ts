@@ -119,6 +119,10 @@ export type OutlineItem = {
   factionIds?: string[]
   foreshadowIds?: string[]
   issueIds?: string[]
+  /** 本场情绪转折（写作节拍，可选） */
+  emotionalTurn?: string
+  /** 语气/意象/禁忌等写作提示（可选） */
+  proseHint?: string
   createdAt: string
   updatedAt: string
 }
@@ -144,6 +148,8 @@ export type NewOutlineInput = {
   factionIds?: string[]
   foreshadowIds?: string[]
   issueIds?: string[]
+  emotionalTurn?: string
+  proseHint?: string
 }
 
 /** 角色与势力的从属关系（多对多）；描述为该角色在此势力中的身份/立场等 */
@@ -456,6 +462,18 @@ export type AiToolResult = {
   success: boolean
   message: string
   data?: Record<string, any>
+}
+
+export type AiPendingToolAction = {
+  id: string
+  toolCall: AiToolCall
+  label: string
+  previewText?: string
+  status: 'pending' | 'applied' | 'ignored'
+}
+
+export type AiToolExecutionContext = {
+  defaultChapterId?: string
 }
 
 export type EntityMatchType = 'new' | 'update' | 'possible_duplicate' | 'conflict'

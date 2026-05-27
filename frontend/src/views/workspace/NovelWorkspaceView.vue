@@ -96,8 +96,39 @@
             <dd>{{ outlineConsoleStats.linked }}</dd>
           </div>
         </dl>
+        <div
+          v-if="outlineStorylines.length > 0"
+          class="outline-map-hero__storyline-filter"
+          role="toolbar"
+          aria-label="按故事线筛选"
+        >
+          <button
+            type="button"
+            class="outline-map-hero__filter-chip"
+            :class="{ 'is-active': !outlineStorylineFilterId }"
+            @click="outlineStorylineFilterId = ''"
+          >
+            全部
+          </button>
+          <button
+            v-for="storyline in outlineStorylines"
+            :key="storyline.id"
+            type="button"
+            class="outline-map-hero__filter-chip"
+            :class="{ 'is-active': outlineStorylineFilterId === storyline.id }"
+            :style="{ '--storyline-color': storyline.color }"
+            @click="outlineStorylineFilterId = storyline.id"
+          >
+            {{ storyline.name }}
+          </button>
+        </div>
         <div class="outline-map-hero__actions">
-          <button type="button" class="btn-secondary" @click="openOutlineAiDesigner">AI设计大纲</button>
+          <button v-if="outlineItems.length > 0" type="button" class="btn-primary" @click="openOutlineAiExpand">
+            AI 扩展大纲
+          </button>
+          <button type="button" class="btn-secondary" @click="openOutlineAiDesignerCreate">
+            {{ outlineItems.length > 0 ? '从零设计' : 'AI 设计大纲' }}
+          </button>
           <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
         </div>
         <Transition name="chapter-hub-save-toast">
@@ -109,7 +140,7 @@
         <h2>先建立第一张情节导图</h2>
         <p class="muted">创建第一个节点后，这里会直接呈现思维导图和右侧编辑区。</p>
         <div class="outline-map-empty-state__actions">
-          <button type="button" class="btn-secondary" @click="openOutlineAiDesigner">AI设计大纲</button>
+          <button type="button" class="btn-secondary" @click="openOutlineAiDesignerCreate">AI 设计大纲</button>
           <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
         </div>
       </div>
@@ -131,6 +162,7 @@
           :item="activeOutlineMapItem"
           :chapters="chapters"
           :linked-chapters="activeOutlineMapLinkedChapters"
+          :storylines="outlineStorylines"
           :assoc-start="activeOutlineAssocStart"
           :assoc-end="activeOutlineAssocEnd"
           :assoc-dirty="activeOutlineAssocDirty"
@@ -142,6 +174,7 @@
           @set-assoc-end="setOutlineAssocEnd"
           @apply-assoc="requestApplyOutlineAssoc"
           @cancel-assoc="requestCancelOutlineAssoc"
+          @ai-expand="openOutlineAiExpandFromNode"
         />
       </div>
 
@@ -153,30 +186,98 @@
               <div class="confirm-dialog__body workspace-outline-dialog__body">
                 <div class="workspace-outline-ai-dialog__head">
                   <div>
-                    <h2 class="confirm-dialog__title">AI设计大纲</h2>
+                    <h2 class="confirm-dialog__title">{{ outlineAiMode === 'expand' ? 'AI 扩展大纲' : 'AI 设计大纲' }}</h2>
                     <p class="muted workspace-outline-dialog__sub">
                       {{
-                        outlineAiDesignerStep === 'interview'
-                          ? 'AI 会像编辑一样一步一步追问，问到信息够用为止。'
-                          : outlineAiDesignerStep === 'options'
-                            ? '从备选方案里挑一个最顺手的，再展开成正式大纲。'
-                            : '确认这份大纲草案后，直接写入当前作品。'
+                        outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
+                          ? '会结合全书设定、已有大纲与写作进度在后台整理上下文；你只需选位置、说一句方向。'
+                          : outlineAiDesignerStep === 'interview'
+                            ? '信息够用时可直接出方案，不必答完所有轮次。'
+                            : outlineAiDesignerStep === 'options'
+                              ? '选好方案后一键生成；已有大纲时更推荐用「AI 扩展大纲」。'
+                              : outlineAiDesignerStep === 'skeleton'
+                                ? '确认卷/幕/章结构后，再决定是否补充场景细节。'
+                                : outlineAiAppendMode
+                                  ? '确认后追加到现有导图，不会覆盖已有节点。'
+                                  : '确认草案后写入；写入后仍可在大纲页慢慢改。'
                       }}
                     </p>
                   </div>
                   <span class="workspace-outline-ai-dialog__progress">
                       {{
-                        outlineAiDesignerStep === 'interview'
-                          ? `访谈中 · ${outlineAiInterviewTurnCount}`
-                          : outlineAiDesignerStep === 'options'
-                            ? '方案选择'
-                            : '草案预览'
+                        outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
+                          ? '扩展'
+                          : outlineAiDesignerStep === 'interview'
+                            ? `访谈中 · ${outlineAiInterviewTurnCount}`
+                            : outlineAiDesignerStep === 'options'
+                              ? '方案选择'
+                              : outlineAiDesignerStep === 'skeleton'
+                                ? '章节骨架'
+                                : '预览'
                       }}
                     </span>
                   </div>
 
+                <div
+                  v-if="outlineItems.length > 0"
+                  class="workspace-outline-ai-mode-tabs"
+                  role="tablist"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    :aria-selected="outlineAiMode === 'expand'"
+                    :class="{ 'is-active': outlineAiMode === 'expand' }"
+                    @click="switchOutlineAiMode('expand')"
+                  >
+                    接着现有大纲
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    :aria-selected="outlineAiMode === 'create'"
+                    :class="{ 'is-active': outlineAiMode === 'create' }"
+                    @click="switchOutlineAiMode('create')"
+                  >
+                    从零规划
+                  </button>
+                </div>
+
                 <div class="workspace-outline-dialog__scroll scrollbar-paper workspace-outline-ai-dialog__scroll">
-                  <template v-if="outlineAiDesignerStep === 'interview'">
+                  <template v-if="outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'">
+                    <section class="workspace-outline-ai-panel workspace-outline-ai-panel--expand">
+                      <p class="workspace-outline-ai-brief">
+                        扩展位置：<strong>{{ outlineAiExpandAnchorLabel }}</strong>
+                      </p>
+                      <div class="workspace-outline-ai-expand-presets">
+                        <button
+                          v-for="preset in outlineAiExpandPresets"
+                          :key="preset.id"
+                          type="button"
+                          class="workspace-outline-ai-option"
+                          :class="{ 'workspace-outline-ai-option--active': outlineAiExpandPreset === preset.id }"
+                          @click="outlineAiExpandPreset = preset.id"
+                        >
+                          {{ preset.label }}
+                        </button>
+                      </div>
+                      <label class="workspace-outline-ai-expand-note">
+                        <span>补充说明（可选）</span>
+                        <textarea
+                          v-model="outlineAiExpandNote"
+                          class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea"
+                          rows="3"
+                          maxlength="300"
+                          placeholder="例如：从第12章往后扩5章、把「夜袭」拆成三场戏、加一条感情线支线…"
+                        />
+                      </label>
+                      <p class="muted workspace-outline-ai-expand-hint">
+                        生成时会自动带上角色、伏笔、已写章节与节拍路径，无需你手动整理。
+                      </p>
+                    </section>
+                  </template>
+
+                  <template v-else-if="outlineAiDesignerStep === 'interview'">
                     <section class="workspace-outline-ai-panel">
                       <div class="workspace-outline-ai-panel__summary">
                         <strong>已确认 {{ outlineAiInterviewHistory.length }} 轮</strong>
@@ -245,8 +346,9 @@
                               <h3>{{ option.title }}</h3>
                               <p>{{ option.premise }}</p>
                             </div>
-                            <span>{{ option.structure }}</span>
+                            <span>{{ option.narrativeShape || option.structure }}</span>
                           </div>
+                          <p v-if="option.coreQuestion" class="workspace-outline-ai-plan__question muted">核心问题：{{ option.coreQuestion }}</p>
                           <div class="workspace-outline-ai-plan__section">
                             <strong>亮点</strong>
                             <ul>
@@ -280,8 +382,39 @@
                     </section>
                   </template>
 
+                  <template v-else-if="outlineAiDesignerStep === 'skeleton' && outlineAiDesignerDraft">
+                    <section class="workspace-outline-ai-panel">
+                      <p class="workspace-outline-ai-brief">
+                        当前是<strong>章节骨架</strong>（{{ outlineAiSkeletonItemCount }} 个结构节点）。可先写入，或继续让 AI 补充场景节拍。
+                      </p>
+                      <div class="workspace-outline-ai-draft-list">
+                        <article
+                          v-for="item in outlineAiDesignerDraft.items"
+                          :key="item.tempId"
+                          class="workspace-outline-ai-draft-item workspace-outline-ai-draft-item--skeleton"
+                        >
+                          <div class="workspace-outline-ai-draft-item__head">
+                            <strong>{{ item.title }}</strong>
+                            <span>{{ item.level }}</span>
+                          </div>
+                          <p>{{ item.summary || item.goal || '暂无说明' }}</p>
+                        </article>
+                      </div>
+                    </section>
+                  </template>
+
                   <template v-else-if="outlineAiDesignerDraft">
                     <section class="workspace-outline-ai-panel">
+                      <div
+                        v-if="outlineAiDraftLintIssues.length > 0 && !outlineAiLintDismissed"
+                        class="workspace-outline-ai-lint"
+                        role="status"
+                      >
+                        <p v-for="(issue, index) in outlineAiDraftLintIssues" :key="index" :class="`workspace-outline-ai-lint--${issue.severity}`">
+                          {{ issue.message }}
+                        </p>
+                        <button type="button" class="workspace-outline-ai-lint__dismiss" @click="outlineAiLintDismissed = true">知道了</button>
+                      </div>
                       <div class="workspace-outline-ai-preview-head">
                         <div>
                           <h3>{{ outlineAiDesignerDraft.title || selectedOutlineAiOption?.title || '未命名大纲' }}</h3>
@@ -292,8 +425,19 @@
                             <dt>节点</dt>
                             <dd>{{ outlineAiDesignerDraft.items.length }}</dd>
                           </div>
+                          <div v-if="outlineAiDesignerDraft.storylines?.length">
+                            <dt>故事线</dt>
+                            <dd>{{ outlineAiDesignerDraft.storylines.length }}</dd>
+                          </div>
                         </dl>
                       </div>
+                      <ul v-if="outlineAiDesignerDraft.storylines?.length" class="workspace-outline-ai-storylines">
+                        <li v-for="sl in outlineAiDesignerDraft.storylines" :key="sl.name" class="workspace-outline-ai-storyline">
+                          <strong>{{ sl.name }}</strong>
+                          <span>{{ sl.type }}</span>
+                          <p>{{ sl.description }}</p>
+                        </li>
+                      </ul>
                       <div class="workspace-outline-ai-draft-list">
                         <article v-for="item in outlineAiDesignerDraft.items" :key="item.tempId" class="workspace-outline-ai-draft-item">
                           <div class="workspace-outline-ai-draft-item__head">
@@ -317,8 +461,18 @@
 
                 <div class="confirm-dialog__actions workspace-outline-dialog__actions workspace-outline-ai-dialog__actions">
                   <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="closeOutlineAiDesigner">关闭</button>
+                  <template v-if="outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'">
+                    <button
+                      type="button"
+                      class="btn-primary"
+                      :disabled="outlineAiDesignerLoading || !outlineAiExpandAnchorId"
+                      @click="generateOutlineAiExpand"
+                    >
+                      {{ outlineAiDesignerLoading ? '生成中…' : '生成扩展' }}
+                    </button>
+                  </template>
                   <button
-                    v-if="outlineAiDesignerStep === 'interview'"
+                    v-else-if="outlineAiDesignerStep === 'interview'"
                     type="button"
                     class="btn-secondary"
                     :disabled="outlineAiDesignerLoading || outlineAiInterviewHistory.length === 0"
@@ -346,18 +500,47 @@
                       {{ outlineAiDesignerLoading ? '调整中…' : 'AI 调整方案' }}
                     </button>
                     <button type="button" class="btn-primary" :disabled="outlineAiDesignerLoading || !selectedOutlineAiOption" @click="generateOutlineAiDraft">
-                      {{ outlineAiDesignerLoading ? '展开中…' : '生成正式大纲' }}
+                      {{ outlineAiDesignerLoading ? '生成中…' : '生成完整大纲' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary workspace-outline-ai-dialog__link-btn"
+                      :disabled="outlineAiDesignerLoading || !selectedOutlineAiOption"
+                      @click="generateOutlineAiSkeleton"
+                    >
+                      {{ outlineAiDesignerLoading ? '生成中…' : '先看章节骨架' }}
+                    </button>
+                  </template>
+                  <template v-else-if="outlineAiDesignerStep === 'skeleton'">
+                    <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="backToOutlineAiOptions">返回方案</button>
+                    <button
+                      type="button"
+                      class="btn-secondary"
+                      :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting"
+                      @click="applyOutlineAiDraft"
+                    >
+                      {{ outlineAiDesignerWriting ? '写入中…' : '直接写入骨架' }}
+                    </button>
+                    <button type="button" class="btn-primary" :disabled="outlineAiDesignerLoading" @click="generateOutlineAiScenesFromSkeleton">
+                      {{ outlineAiDesignerLoading ? '展开中…' : '补充场景细节' }}
                     </button>
                   </template>
                   <template v-else-if="outlineAiDesignerStep === 'preview'">
-                    <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="backToOutlineAiOptions">返回方案</button>
+                    <button
+                      type="button"
+                      class="btn-secondary"
+                      :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting"
+                      @click="outlineAiAppendMode ? backToOutlineAiExpand() : backToOutlineAiOptions()"
+                    >
+                      {{ outlineAiAppendMode ? '返回修改' : '返回方案' }}
+                    </button>
                     <button
                       type="button"
                       class="btn-primary"
                       :disabled="outlineAiDesignerWriting || !outlineAiDesignerDraft?.items?.length"
                       @click="applyOutlineAiDraft"
                     >
-                      {{ outlineAiDesignerWriting ? '写入中…' : '写入当前大纲' }}
+                      {{ outlineAiDesignerWriting ? '写入中…' : outlineAiAppendMode ? '追加到大纲' : '写入当前大纲' }}
                     </button>
                   </template>
                 </div>
@@ -372,7 +555,7 @@
               <div class="confirm-dialog__accent" aria-hidden="true" />
               <div class="confirm-dialog__body workspace-outline-dialog__body">
                 <h2 class="confirm-dialog__title">新增情节点</h2>
-                <p class="muted workspace-outline-dialog__sub">只填写最关键的信息：标题、状态、目标和简介。</p>
+                <p class="muted workspace-outline-dialog__sub">填写标题和简介即可；节拍、故事线可在右侧选中节点后再补。</p>
                 <form class="outline-dialog-form" @submit.prevent="submitOutlineCreate">
                   <div class="workspace-outline-dialog__scroll scrollbar-paper">
                     <div class="outline-dialog-grid outline-dialog-grid--primary outline-dialog-grid--simple">
@@ -387,10 +570,6 @@
                           <option value="doing">进行中</option>
                           <option value="done">已完成</option>
                         </select>
-                      </label>
-                      <label class="outline-dialog-field outline-dialog-field--wide">
-                        <span>目标</span>
-                        <input v-model="outlineForm.goal" maxlength="120" placeholder="这个节点要完成什么" />
                       </label>
                       <label class="outline-dialog-field outline-dialog-field--wide">
                         <span>简介</span>
@@ -2508,10 +2687,14 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   createCategory,
   createCharacter,
+  createCharacterRelation,
   createFaction,
   createItem,
   createOutlineItem,
+  createOutlineStoryline,
   createTimelineEvent,
+  getOutlineStorylinesByNovelId,
+  resolveOutlineStorylineColor,
   buildNovelWorkspacePayload,
   deleteCategory,
   deleteCharacter,
@@ -2553,7 +2736,17 @@ import {
   updateTimelineEvent,
 } from '../../lib/storage'
 import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
-import { designOutlineInterviewTurnByAi, designOutlineOptionsByAi, expandOutlineDesignByAi, expandOutlineItemByAi, refineOutlineOptionsByAi } from '../../lib/localAi'
+import {
+  designOutlineInterviewTurnByAi,
+  designOutlineOptionsByAi,
+  expandOutlineDesignByAi,
+  expandOutlineItemByAi,
+  expandOutlineFromExistingByAi,
+  expandOutlineScenesForSkeletonByAi,
+  expandOutlineSkeletonByAi,
+  refineOutlineOptionsByAi,
+} from '../../lib/localAi'
+import { lintOutlineDraftItems } from '../../lib/outlineDraftLint'
 import { syncAllNovelsWithCloud } from '../../lib/cloudSync'
 import { getCurrentSession } from '../../lib/auth'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
@@ -2575,6 +2768,8 @@ import type {
   OutlineNodeLevel,
   OutlinePlotStage,
   OutlineStatus,
+  OutlineStoryline,
+  OutlineStorylineType,
   OutlineTension,
   TimelineEvent,
 } from '../../types'
@@ -2586,6 +2781,7 @@ import OutlineMindMapCanvas from './components/outline-map/OutlineMindMapCanvas.
 import OutlineMindMapInspector from './components/outline-map/OutlineMindMapInspector.vue'
 import { useOutlineChapterMapping } from '../../features/outline-map/composables/useOutlineChapterMapping'
 import { useOutlineMindMapLayout } from '../../features/outline-map/composables/useOutlineMindMapLayout'
+import { useOutlineStorylineFilter } from '../../features/outline-map/composables/useOutlineStorylineFilter'
 const route = useRoute()
 const router = useRouter()
 const workspaceChromeAnchorRef = ref<HTMLElement | null>(null)
@@ -2616,6 +2812,9 @@ type OutlineAiOption = {
   title: string
   premise: string
   structure: string
+  narrativeShape?: string
+  coreQuestion?: string
+  forbiddenCliche?: string
   highlights: string[]
   endingTone: string
   beats: string[]
@@ -2631,14 +2830,28 @@ type OutlineAiFollowupTurn = {
 type OutlineAiDraft = {
   title: string
   summary: string
+  storylines?: Array<{
+    name: string
+    type: OutlineStorylineType
+    description: string
+    colorHint: string
+  }>
   characterCast?: Array<{
     name: string
     role: string
     voice: string
+    personality: string
     desire: string
     fear: string
     secret: string
     arc: string
+  }>
+  relationCast?: Array<{
+    fromName: string
+    toName: string
+    relationType: string
+    note: string
+    dynamic?: string
   }>
   items: Array<{
     tempId: string
@@ -2658,6 +2871,8 @@ type OutlineAiDraft = {
     timeLabel: string
     characterNames?: string[]
     povCharacterName?: string
+    emotionalTurn?: string
+    proseHint?: string
   }>
 }
 
@@ -2667,10 +2882,33 @@ const activeTab = ref<WorkspaceTab>('write')
 const lastTabBeforeCharacters = ref<Exclude<WorkspaceTab, 'characters'> | ''>('')
 const chapters = ref<Chapter[]>([])
 const outlineItems = ref<OutlineItem[]>([])
+const outlineStorylines = ref<OutlineStoryline[]>([])
+const outlineStorylineFilterId = ref('')
+const { dimmedOutlineIdSet } = useOutlineStorylineFilter({
+  outlineItems,
+  filterStorylineId: outlineStorylineFilterId,
+})
 const expandedOutlineId = ref<string>('')
 const outlineCreateOpen = ref(false)
 const outlineAiDesignerOpen = ref(false)
-const outlineAiDesignerStep = ref<'interview' | 'options' | 'preview'>('interview')
+type OutlineAiDesignerStep = 'expand' | 'interview' | 'options' | 'skeleton' | 'preview'
+type OutlineAiMode = 'expand' | 'create'
+type OutlineAiExpandPreset = 'auto' | 'next_chapters' | 'split_scenes' | 'subplot'
+
+const outlineAiMode = ref<OutlineAiMode>('create')
+const outlineAiDesignerStep = ref<OutlineAiDesignerStep>('interview')
+const outlineAiDraftIsSkeletonOnly = ref(false)
+const outlineAiAppendMode = ref(false)
+const outlineAiLintDismissed = ref(false)
+const outlineAiExpandAnchorId = ref('')
+const outlineAiExpandNote = ref('')
+const outlineAiExpandPreset = ref<OutlineAiExpandPreset>('auto')
+const outlineAiExpandPresets: Array<{ id: OutlineAiExpandPreset; label: string }> = [
+  { id: 'auto', label: '智能判断' },
+  { id: 'next_chapters', label: '往后扩章' },
+  { id: 'split_scenes', label: '细化场景' },
+  { id: 'subplot', label: '补支线' },
+]
 const outlineAiDesignerLoading = ref(false)
 const outlineAiDesignerWriting = ref(false)
 const outlineAiDesignerError = ref('')
@@ -2936,6 +3174,32 @@ const {
 } = useOutlineMindMapLayout({
   outlineItems,
   linkedChapterCountByOutlineId,
+  dimmedOutlineIdSet,
+})
+
+const outlineAiDraftLintIssues = computed(() => {
+  const draft = outlineAiDesignerDraft.value
+  if (!draft || outlineAiDesignerStep.value !== 'preview') return []
+  return lintOutlineDraftItems(draft.items)
+})
+
+watch(activeOutlineMapId, (id) => {
+  if (!outlineAiDesignerOpen.value || outlineAiMode.value !== 'expand') return
+  if (outlineAiDesignerStep.value !== 'expand') return
+  if (id) outlineAiExpandAnchorId.value = id
+})
+
+const outlineAiSkeletonItemCount = computed(() => {
+  const draft = outlineAiDesignerDraft.value
+  if (!draft) return 0
+  return draft.items.filter((row) => row.level === 'volume' || row.level === 'act' || row.level === 'chapter').length
+})
+
+const outlineAiExpandAnchorLabel = computed(() => {
+  const item = outlineItems.value.find((row) => row.id === outlineAiExpandAnchorId.value)
+  if (!item) return '请先在导图选中一个节点'
+  const level = item.level === 'volume' ? '卷' : item.level === 'act' ? '幕' : item.level === 'chapter' ? '章' : '场景'
+  return `${level} · ${item.title || '未命名'}`
 })
 
 const activeOutlineMapItem = computed(() =>
@@ -3609,6 +3873,7 @@ watch(
   (id) => {
     chapters.value = getChaptersByNovelId(id)
     outlineItems.value = getOutlineByNovelId(id)
+    outlineStorylines.value = getOutlineStorylinesByNovelId(id)
     characters.value = getCharactersByNovelId(id)
     characterRelations.value = getCharacterRelationsByNovelId(id)
     graphFocusCharacterId.value = characters.value[0]?.id ?? ''
@@ -3745,7 +4010,14 @@ function openOutlineCreate(): void {
 }
 
 function resetOutlineAiDesignerState(): void {
-  outlineAiDesignerStep.value = 'interview'
+  outlineAiMode.value = outlineItems.value.length > 0 ? 'expand' : 'create'
+  outlineAiDesignerStep.value = outlineItems.value.length > 0 ? 'expand' : 'interview'
+  outlineAiDraftIsSkeletonOnly.value = false
+  outlineAiAppendMode.value = false
+  outlineAiLintDismissed.value = false
+  outlineAiExpandAnchorId.value = activeOutlineMapId.value || outlineItems.value[0]?.id || ''
+  outlineAiExpandNote.value = ''
+  outlineAiExpandPreset.value = 'auto'
   outlineAiDesignerLoading.value = false
   outlineAiDesignerWriting.value = false
   outlineAiDesignerError.value = ''
@@ -3766,14 +4038,56 @@ function setOutlineAiOptionNote(optionId: string, value: string): void {
   outlineAiOptionNotes.value = { ...outlineAiOptionNotes.value, [optionId]: value }
 }
 
-async function openOutlineAiDesigner(): Promise<void> {
+function switchOutlineAiMode(mode: OutlineAiMode): void {
+  if (outlineAiDesignerLoading.value || outlineAiDesignerWriting.value) return
+  outlineAiMode.value = mode
+  outlineAiDesignerError.value = ''
+  outlineAiDesignerDraft.value = null
+  outlineAiAppendMode.value = false
+  if (mode === 'expand') {
+    outlineAiDesignerStep.value = 'expand'
+    if (!outlineAiExpandAnchorId.value) {
+      outlineAiExpandAnchorId.value = activeOutlineMapId.value || outlineItems.value[0]?.id || ''
+    }
+    return
+  }
+  outlineAiDesignerStep.value = outlineAiInterviewHistory.value.length > 0 ? 'options' : 'interview'
+  if (outlineAiDesignerStep.value === 'interview' && !outlineAiCurrentQuestion.value) {
+    void requestNextOutlineAiQuestion()
+  }
+}
+
+function openOutlineAiExpand(): void {
   closeWorkspaceDropdowns()
   resetOutlineAiDesignerState()
+  outlineAiMode.value = 'expand'
+  outlineAiDesignerStep.value = 'expand'
+  outlineAiExpandAnchorId.value = activeOutlineMapId.value || outlineItems.value[0]?.id || ''
+  outlineAiDesignerOpen.value = true
+}
+
+function openOutlineAiExpandFromNode(outlineId: string): void {
+  if (outlineId) activeOutlineMapId.value = outlineId
+  openOutlineAiExpand()
+}
+
+async function openOutlineAiDesignerCreate(): Promise<void> {
+  closeWorkspaceDropdowns()
+  resetOutlineAiDesignerState()
+  outlineAiMode.value = 'create'
+  outlineAiDesignerStep.value = 'interview'
   outlineAiDesignerOpen.value = true
   const hasNext = await requestNextOutlineAiQuestion()
   if (!hasNext && !outlineAiDesignerError.value) {
     await generateOutlineAiOptions()
   }
+}
+
+function backToOutlineAiExpand(): void {
+  if (outlineAiDesignerLoading.value) return
+  outlineAiDesignerStep.value = 'expand'
+  outlineAiDesignerDraft.value = null
+  outlineAiAppendMode.value = false
 }
 
 function closeOutlineAiDesigner(): void {
@@ -3841,6 +4155,7 @@ async function generateOutlineAiOptions(): Promise<void> {
       {
         novelTitle: novel.value.title,
         novelSummary: novel.value.summary,
+        novel: novel.value,
         history: collectOutlineAiInterviewHistory(),
       },
     )
@@ -3898,6 +4213,7 @@ async function refineOutlineAiOptions(): Promise<void> {
       {
         novelTitle: novel.value.title,
         novelSummary: novel.value.summary,
+        novel: novel.value,
         history: collectOutlineAiInterviewHistory(),
         currentOptions: outlineAiDesignerOptions.value,
         selectedOptionId: selected.id,
@@ -3923,29 +4239,172 @@ async function refineOutlineAiOptions(): Promise<void> {
   }
 }
 
-async function generateOutlineAiDraft(): Promise<void> {
-  if (!novel.value || !selectedOutlineAiOption.value) return
+function buildOutlineAiDraftInput() {
+  if (!novel.value || !selectedOutlineAiOption.value) return null
+  return {
+    novelTitle: novel.value.title,
+    novelSummary: novel.value.summary,
+    novel: novel.value,
+    history: collectOutlineAiInterviewHistory(),
+    selectedOption: selectedOutlineAiOption.value,
+    selectedOptionId: outlineAiDesignerSelectedOptionId.value,
+    optionRefinement: outlineAiSelectedOptionNote.value,
+    optionRevisionHistory: outlineAiOptionRevisionHistory.value,
+  }
+}
+
+function skeletonItemsToDraftItems(
+  items: Array<{
+    tempId: string
+    parentTempId: string
+    title: string
+    summary: string
+    level: 'volume' | 'act' | 'chapter'
+    goal: string
+    storylineNames: string[]
+  }>,
+): OutlineAiDraft['items'] {
+  return items.map((row) => ({
+    tempId: row.tempId,
+    parentTempId: row.parentTempId,
+    title: row.title,
+    summary: row.summary,
+    level: row.level,
+    goal: row.goal,
+    conflict: '',
+    twist: '',
+    result: '',
+    suspense: '',
+    plotStage: 'idea',
+    storylineNames: row.storylineNames ?? [],
+    tension: 3,
+    location: '',
+    timeLabel: '',
+    characterNames: [],
+    povCharacterName: '',
+    emotionalTurn: '',
+    proseHint: '',
+  }))
+}
+
+async function generateOutlineAiExpand(): Promise<void> {
+  if (!novel.value) return
+  const anchorId = outlineAiExpandAnchorId.value
+  if (!anchorId) {
+    outlineAiDesignerError.value = '请先在导图选中要扩展的节点，或确保大纲里至少有一个节点。'
+    return
+  }
   outlineAiDesignerLoading.value = true
   outlineAiDesignerError.value = ''
   outlineAiDesignerDraft.value = null
+  outlineAiAppendMode.value = true
+  outlineAiLintDismissed.value = false
   try {
-    const result = await expandOutlineDesignByAi(
-      buildNovelWorkspacePayload(novel.value.id),
-      {
-        novelTitle: novel.value.title,
-        novelSummary: novel.value.summary,
-        history: collectOutlineAiInterviewHistory(),
-        selectedOption: selectedOutlineAiOption.value,
-        selectedOptionId: outlineAiDesignerSelectedOptionId.value,
-        optionRefinement: outlineAiSelectedOptionNote.value,
-        optionRevisionHistory: outlineAiOptionRevisionHistory.value,
-      },
-    )
+    const payload = buildNovelWorkspacePayload(novel.value.id)
+    const result = await expandOutlineFromExistingByAi(payload, {
+      novel: novel.value,
+      anchorOutlineId: anchorId,
+      expandNote: outlineAiExpandNote.value,
+      expandPreset: outlineAiExpandPreset.value,
+    })
+    if (result.items.length === 0) throw new Error('AI 没有生成可追加的情节点，请换种说法或换个锚点再试。')
+    outlineAiDesignerDraft.value = {
+      title: novel.value.title,
+      summary: result.brief,
+      items: result.items,
+    }
+    outlineAiDesignerStep.value = 'preview'
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 扩展大纲失败，请稍后重试。'
+  } finally {
+    outlineAiDesignerLoading.value = false
+  }
+}
+
+async function generateOutlineAiDraft(): Promise<void> {
+  const input = buildOutlineAiDraftInput()
+  if (!novel.value || !input) return
+  outlineAiDesignerLoading.value = true
+  outlineAiDesignerError.value = ''
+  outlineAiDesignerDraft.value = null
+  outlineAiDraftIsSkeletonOnly.value = false
+  outlineAiAppendMode.value = false
+  outlineAiLintDismissed.value = false
+  try {
+    const result = await expandOutlineDesignByAi(buildNovelWorkspacePayload(novel.value.id), input)
     if (result.items.length === 0) throw new Error('AI 这次没有展开出可用的大纲节点。')
     outlineAiDesignerDraft.value = result
     outlineAiDesignerStep.value = 'preview'
   } catch (error: unknown) {
     outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 展开大纲失败，请稍后重试。'
+  } finally {
+    outlineAiDesignerLoading.value = false
+  }
+}
+
+async function generateOutlineAiSkeleton(): Promise<void> {
+  const input = buildOutlineAiDraftInput()
+  if (!novel.value || !input) return
+  outlineAiDesignerLoading.value = true
+  outlineAiDesignerError.value = ''
+  outlineAiDesignerDraft.value = null
+  outlineAiDraftIsSkeletonOnly.value = false
+  outlineAiLintDismissed.value = false
+  try {
+    const result = await expandOutlineSkeletonByAi(buildNovelWorkspacePayload(novel.value.id), input)
+    if (result.items.length === 0) throw new Error('AI 这次没有生成可用的章节骨架。')
+    outlineAiDesignerDraft.value = {
+      title: result.title,
+      summary: result.summary,
+      storylines: result.storylines,
+      characterCast: [],
+      items: skeletonItemsToDraftItems(result.items),
+    }
+    outlineAiDraftIsSkeletonOnly.value = true
+    outlineAiDesignerStep.value = 'skeleton'
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 生成章节骨架失败，请稍后重试。'
+  } finally {
+    outlineAiDesignerLoading.value = false
+  }
+}
+
+async function generateOutlineAiScenesFromSkeleton(): Promise<void> {
+  const input = buildOutlineAiDraftInput()
+  const draft = outlineAiDesignerDraft.value
+  if (!novel.value || !input || !draft) return
+  const skeletonItems = draft.items.filter((row) => row.level === 'volume' || row.level === 'act' || row.level === 'chapter')
+  if (skeletonItems.length === 0) {
+    outlineAiDesignerError.value = '当前没有可补充的章节骨架。'
+    return
+  }
+  outlineAiDesignerLoading.value = true
+  outlineAiDesignerError.value = ''
+  outlineAiLintDismissed.value = false
+  try {
+    const result = await expandOutlineScenesForSkeletonByAi(buildNovelWorkspacePayload(novel.value.id), {
+      ...input,
+      skeletonItems: skeletonItems.map((row) => ({
+        tempId: row.tempId,
+        parentTempId: row.parentTempId,
+        title: row.title,
+        summary: row.summary,
+        level: row.level as 'volume' | 'act' | 'chapter',
+        goal: row.goal,
+        storylineNames: row.storylineNames ?? [],
+      })),
+      characterCast: draft.characterCast,
+    })
+    outlineAiDesignerDraft.value = {
+      ...draft,
+      characterCast: result.characterCast.length > 0 ? result.characterCast : draft.characterCast,
+      relationCast: [...(draft.relationCast ?? []), ...result.relationCast],
+      items: [...skeletonItems, ...result.items],
+    }
+    outlineAiDraftIsSkeletonOnly.value = false
+    outlineAiDesignerStep.value = 'preview'
+  } catch (error: unknown) {
+    outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 补充场景失败，请稍后重试。'
   } finally {
     outlineAiDesignerLoading.value = false
   }
@@ -3962,6 +4421,19 @@ function backToOutlineAiInterview(): void {
 function backToOutlineAiOptions(): void {
   if (outlineAiDesignerLoading.value) return
   outlineAiDesignerStep.value = 'options'
+}
+
+function mergeOutlineCharacterNotes(existing: string, incomingParts: string[]): string {
+  const chunks = [String(existing ?? '').trim(), ...incomingParts.map((row) => String(row ?? '').trim()).filter(Boolean)]
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const chunk of chunks) {
+    const key = chunk.toLowerCase()
+    if (!chunk || seen.has(key)) continue
+    seen.add(key)
+    out.push(chunk)
+  }
+  return out.join('；').slice(0, 480)
 }
 
 async function applyOutlineAiDraft(): Promise<void> {
@@ -3987,11 +4459,32 @@ async function applyOutlineAiDraft(): Promise<void> {
     const nameToId = new Map<string, string>()
     for (const row of characters.value) {
       const name = String(row.name ?? '').trim()
-      if (name) nameToId.set(name, row.id)
+      if (name) nameToId.set(name.toLowerCase(), row.id)
     }
+
+    let createdCharacterCount = 0
+    let updatedCharacterCount = 0
+
     for (const cast of outlineAiDesignerDraft.value.characterCast ?? []) {
       const name = String(cast.name ?? '').trim()
-      if (!name || nameToId.has(name)) continue
+      if (!name) continue
+      const key = name.toLowerCase()
+      const noteParts = [cast.role, cast.voice, cast.personality, cast.fear].map((row) => String(row ?? '').trim()).filter(Boolean)
+      const existingId = nameToId.get(key)
+      if (existingId) {
+        const existing = characters.value.find((row) => row.id === existingId)
+        if (existing) {
+          updateCharacter({
+            id: existingId,
+            goal: String(cast.desire ?? '').trim() || existing.goal,
+            secret: String(cast.secret ?? '').trim() || existing.secret,
+            arc: String(cast.arc ?? '').trim() || existing.arc,
+            notes: mergeOutlineCharacterNotes(existing.notes, noteParts),
+          })
+          updatedCharacterCount += 1
+        }
+        continue
+      }
       const created = createCharacter({
         novelId: novel.value.id,
         name,
@@ -4000,17 +4493,98 @@ async function applyOutlineAiDraft(): Promise<void> {
         goal: cast.desire ?? '',
         secret: cast.secret ?? '',
         arc: cast.arc ?? '',
-        notes: [cast.role, cast.voice, cast.fear].filter(Boolean).join('；'),
+        notes: noteParts.join('；'),
       })
-      nameToId.set(name, created.id)
+      nameToId.set(key, created.id)
+      createdCharacterCount += 1
+    }
+
+    let createdRelationCount = 0
+    const existingRelations = getCharacterRelationsByNovelId(novel.value.id)
+    for (const rel of outlineAiDesignerDraft.value.relationCast ?? []) {
+      const fromName = String(rel.fromName ?? '').trim()
+      const toName = String(rel.toName ?? '').trim()
+      const relationType = String(rel.relationType ?? '').trim()
+      if (!fromName || !toName || !relationType) continue
+      const fromId = nameToId.get(fromName.toLowerCase())
+      const toId = nameToId.get(toName.toLowerCase())
+      if (!fromId || !toId || fromId === toId) continue
+      const note = [String(rel.note ?? '').trim(), String(rel.dynamic ?? '').trim()].filter(Boolean).join('；')
+      const duplicated = existingRelations.some(
+        (row) =>
+          row.fromCharacterId === fromId &&
+          row.toCharacterId === toId &&
+          String(row.relationType ?? '').trim() === relationType,
+      )
+      if (duplicated) continue
+      createCharacterRelation({
+        novelId: novel.value.id,
+        fromCharacterId: fromId,
+        toCharacterId: toId,
+        relationType,
+        note,
+      })
+      existingRelations.push({
+        id: `pending-${fromId}-${toId}`,
+        novelId: novel.value.id,
+        fromCharacterId: fromId,
+        toCharacterId: toId,
+        relationType,
+        note,
+        createdAt: '',
+        updatedAt: '',
+      })
+      createdRelationCount += 1
+    }
+
+    const storylineNameToId = new Map<string, string>()
+    for (const row of outlineStorylines.value) {
+      const name = String(row.name ?? '').trim()
+      if (name) storylineNameToId.set(name.toLowerCase(), row.id)
+    }
+    for (const sl of outlineAiDesignerDraft.value.storylines ?? []) {
+      const name = String(sl.name ?? '').trim()
+      if (!name) continue
+      const key = name.toLowerCase()
+      if (storylineNameToId.has(key)) continue
+      const type = sl.type ?? 'custom'
+      const createdStoryline = createOutlineStoryline({
+        novelId: novel.value.id,
+        name,
+        type,
+        color: resolveOutlineStorylineColor(type, sl.colorHint),
+        description: sl.description ?? '',
+      })
+      storylineNameToId.set(key, createdStoryline.id)
+    }
+
+    const mapStorylineIds = (names: string[]): string[] => {
+      const ids: string[] = []
+      for (const rawName of names) {
+        const id = storylineNameToId.get(String(rawName).trim().toLowerCase())
+        if (id && !ids.includes(id)) ids.push(id)
+      }
+      return ids
     }
 
     const createdIdMap = new Map<string, string>()
+    const appendAnchorId = outlineAiAppendMode.value ? outlineAiExpandAnchorId.value : ''
+    if (appendAnchorId) createdIdMap.set('anchor', appendAnchorId)
+
+    const resolveParentId = (parentTempId: string): string | null => {
+      const key = String(parentTempId ?? '').trim()
+      if (!key) return appendAnchorId || null
+      if (key === 'anchor' || key === 'ANCHOR') return appendAnchorId || null
+      return createdIdMap.get(key) ?? null
+    }
+
     for (const item of outlineAiDesignerDraft.value.items) {
       const characterIds = (item.characterNames ?? [])
-        .map((name) => nameToId.get(String(name).trim()))
+        .map((name) => nameToId.get(String(name).trim().toLowerCase()))
         .filter((id): id is string => Boolean(id))
-      const povCharacterId = item.povCharacterName ? nameToId.get(String(item.povCharacterName).trim()) ?? null : null
+      const povCharacterId = item.povCharacterName
+        ? nameToId.get(String(item.povCharacterName).trim().toLowerCase()) ?? null
+        : null
       const created = createOutlineItem({
         novelId: novel.value.id,
         title: item.title,
@@ -4022,12 +4596,15 @@ async function applyOutlineAiDraft(): Promise<void> {
         result: item.result,
         suspense: item.suspense,
         plotStage: item.plotStage,
-        parentId: item.parentTempId ? (createdIdMap.get(item.parentTempId) ?? null) : null,
+        parentId: resolveParentId(item.parentTempId),
         location: item.location,
         timeLabel: item.timeLabel,
         povCharacterId,
         tension: item.tension,
         characterIds,
+        storylineIds: mapStorylineIds(item.storylineNames ?? []),
+        emotionalTurn: item.emotionalTurn ?? '',
+        proseHint: item.proseHint ?? '',
       })
       createdIdMap.set(item.tempId, created.id)
     }
@@ -4044,14 +4621,23 @@ async function applyOutlineAiDraft(): Promise<void> {
     }
 
     characters.value = getCharactersByNovelId(novel.value.id)
+    characterRelations.value = getCharacterRelationsByNovelId(novel.value.id)
     outlineItems.value = getOutlineByNovelId(novel.value.id)
+    outlineStorylines.value = getOutlineStorylinesByNovelId(novel.value.id)
     activeOutlineMapId.value = outlineItems.value[outlineItems.value.length - 1]?.id ?? ''
     outlineAiDesignerOpen.value = false
 
     if (!outlineAiWriteToast.value) {
-      const castNote = castCount > 0 ? `，并创建 ${castCount} 个角色` : ''
-      showOutlineAiWriteToast(`已写入 ${itemCount} 个大纲节点${castNote}`)
+      const profileBits = [
+        createdCharacterCount > 0 ? `新建 ${createdCharacterCount} 个角色` : '',
+        updatedCharacterCount > 0 ? `丰富 ${updatedCharacterCount} 个角色` : '',
+        createdRelationCount > 0 ? `补充 ${createdRelationCount} 条关系` : '',
+      ].filter(Boolean)
+      const castNote = profileBits.length > 0 ? `，${profileBits.join('、')}` : castCount > 0 ? `，角色表 ${castCount} 人` : ''
+      const verb = outlineAiAppendMode.value ? '已追加' : '已写入'
+      showOutlineAiWriteToast(`${verb} ${itemCount} 个大纲节点${castNote}`)
     }
+    outlineAiAppendMode.value = false
   } catch (error: unknown) {
     outlineAiDesignerError.value = error instanceof Error ? error.message : '写入大纲失败，请稍后重试。'
   } finally {
@@ -6884,6 +7470,97 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.outline-map-hero__storyline-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.outline-map-hero__filter-chip {
+  border: 1px solid color-mix(in srgb, var(--storyline-color, var(--color-border-strong)) 45%, transparent);
+  background: var(--color-surface);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.outline-map-hero__filter-chip.is-active {
+  background: color-mix(in srgb, var(--storyline-color, var(--color-primary)) 18%, var(--color-surface));
+  font-weight: 600;
+}
+
+.workspace-outline-ai-lint {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-warning, #d97706) 35%, transparent);
+  background: color-mix(in srgb, var(--color-warning, #d97706) 8%, var(--color-surface));
+  font-size: 13px;
+}
+
+.workspace-outline-ai-lint--info {
+  color: var(--color-text-muted);
+}
+
+.workspace-outline-ai-lint--warn {
+  color: var(--color-text);
+}
+
+.workspace-outline-ai-lint__dismiss {
+  justify-self: start;
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+
+.workspace-outline-ai-dialog__link-btn {
+  font-size: 13px;
+}
+
+.workspace-outline-ai-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.workspace-outline-ai-mode-tabs button {
+  flex: 1;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 30%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.workspace-outline-ai-mode-tabs button.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 50%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 30%, var(--color-surface));
+  font-weight: 600;
+}
+
+.workspace-outline-ai-expand-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-outline-ai-expand-note {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-outline-ai-expand-hint {
+  font-size: 12px;
+  margin: 0;
 }
 
 .workspace-outline-ai-dialog {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildOutlineBeatPathForChapter } from './outlineBeatPack'
+import { buildOutlineBeatPathForChapter, suggestNextChapterOutlineBinding } from './outlineBeatPack'
 import type { OutlineItem } from '../types'
 
 function makeItem(partial: Partial<OutlineItem> & Pick<OutlineItem, 'id' | 'title' | 'order'>): OutlineItem {
@@ -63,5 +63,18 @@ describe('buildOutlineBeatPathForChapter', () => {
     expect(result.text).toContain('后续节拍预告')
     expect(result.text).toContain('林晚')
     expect(result.outlineCharacterIds).toContain('char-a')
+  })
+})
+
+describe('suggestNextChapterOutlineBinding', () => {
+  it('picks the next unbound scene after the current chapter beat', () => {
+    const outline: OutlineItem[] = [
+      makeItem({ id: 's1', title: '雨夜', order: 1, level: 'scene', goal: '对峙' }),
+      makeItem({ id: 's2', title: '线索', order: 2, level: 'scene', goal: '交换' }),
+    ]
+    const chapters = [{ outlineItemIds: ['s1'] }] as Array<{ outlineItemIds: string[] }>
+    const suggestion = suggestNextChapterOutlineBinding(outline, chapters, { outlineItemIds: ['s1'] })
+    expect(suggestion?.title).toBe('线索')
+    expect(suggestion?.outlineItemIds).toEqual(['s2'])
   })
 })

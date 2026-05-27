@@ -8,33 +8,90 @@
       <div class="chapter-hub__workspace" :style="aiWorkspaceStyle">
         <section class="chapter-hub__editor-shell" aria-label="正文编辑区">
           <header class="chapter-hub__tabs-region" aria-label="打开的章节">
-            <div
-              class="chapter-hub__open-tabs"
-              role="tablist"
-              aria-label="打开的章节"
-              @wheel="props.onChapterTabsWheel?.($event)"
-            >
-              <button
-                v-for="ch in openedChapterTabs"
-                :key="ch.id"
-                type="button"
-                class="chapter-hub__open-tab"
-                :class="{ 'is-active': props.activeChapterId === ch.id }"
-                :title="`第${ch.chapterNo}章 ${ch.title || '未命名章节'}`"
-                @click="props.onOpenChapter?.(ch.id)"
+            <div class="chapter-hub__tabs-left">
+              <div
+                class="chapter-hub__open-tabs"
+                role="tablist"
+                aria-label="打开的章节"
+                @wheel="props.onChapterTabsWheel?.($event)"
               >
-                <span class="chapter-hub__open-tab-title">第{{ ch.chapterNo }}章 {{ ch.title || '未命名章节' }}</span>
-                <span
-                  class="chapter-hub__open-tab-close"
-                  role="button"
-                  tabindex="0"
-                  @click.stop="props.onCloseChapterTab?.(ch.id)"
-                  @keydown.enter.stop.prevent="props.onCloseChapterTab?.(ch.id)"
+                <button
+                  v-for="ch in openedChapterTabs"
+                  :key="ch.id"
+                  type="button"
+                  class="chapter-hub__open-tab"
+                  :class="{ 'is-active': props.activeChapterId === ch.id }"
+                  :title="`第${ch.chapterNo}章 ${ch.title || '未命名章节'}`"
+                  @click="props.onOpenChapter?.(ch.id)"
                 >
-                  ×
-                </span>
+                  <span class="chapter-hub__open-tab-title">第{{ ch.chapterNo }}章 {{ ch.title || '未命名章节' }}</span>
+                  <span
+                    class="chapter-hub__open-tab-close"
+                    role="button"
+                    tabindex="0"
+                    @click.stop="props.onCloseChapterTab?.(ch.id)"
+                    @keydown.enter.stop.prevent="props.onCloseChapterTab?.(ch.id)"
+                  >
+                    ×
+                  </span>
+                </button>
+              </div>
+              <button
+                type="button"
+                class="chapter-hub__search-button"
+                :title="'搜索 Ctrl+F'"
+                @click="toggleChapterSearch()"
+              >
+                <span class="chapter-hub__search-icon" aria-hidden="true">🔍</span>
               </button>
             </div>
+
+            <transition name="chapter-hub-search">
+              <form
+                v-if="chapterSearchVisible"
+                class="chapter-hub__search-bar"
+                role="search"
+                @submit.prevent
+              >
+                <input
+                  ref="chapterSearchInputRef"
+                  v-model="chapterSearchQuery"
+                  class="chapter-hub__search-input"
+                  type="search"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="查找"
+                  @keydown.stop
+                />
+                <span v-if="chapterSearchQuery" class="chapter-hub__search-status">{{ chapterSearchStatusLabel }}</span>
+                <button
+                  type="button"
+                  class="chapter-hub__search-btn"
+                  :disabled="!chapterSearchQuery"
+                  @click="jumpChapterSearch(-1)"
+                  title="上一个"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  class="chapter-hub__search-btn"
+                  :disabled="!chapterSearchQuery"
+                  @click="jumpChapterSearch(1)"
+                  title="下一个"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  class="chapter-hub__search-btn chapter-hub__search-btn--close"
+                  @click="hideChapterSearch()"
+                  title="关闭"
+                >
+                  ×
+                </button>
+              </form>
+            </transition>
           </header>
 
           <section class="chapter-hub__content-region">
@@ -46,15 +103,20 @@
                 :entity-preview-lines="entityPreviewLines"
                 :should-show-entity-overlay="shouldShowEntityOverlay"
                 :is-chapter-textarea-focused="isChapterTextareaFocused"
+                :pinned-quote-range="pinnedQuoteRangeForPaper"
                 :active-flash-fs-key="activeFlashFsKey"
                 :readonly="false"
+                :search-query="chapterSearchQuery"
+                :search-active-match-index="chapterSearchActiveMatchIndex"
                 @input="onChapterContentInputWithForeshadowSync(selectedChapter.id, $event)"
                 @keydown="onChapterTextareaKeydown"
+                @beforeinput="onChapterTextareaBeforeInput"
                 @keyup="onChapterTextareaKeyup"
                 @mouseup="onChapterTextareaMouseup"
                 @select="onChapterTextareaSelect"
+                @paper-interact="onChapterPaperPointerDown"
                 @focus="onChapterTextareaFocus"
-                @blur="onChapterTextareaBlur"
+                @blur="onChapterTextareaBlur($event)"
                 @entity-enter="onPaperEntityEnter"
                 @faction-enter="onPaperFactionEnter"
                 @item-enter="onPaperItemEnter"
@@ -86,6 +148,8 @@
           class="chapter-hub__ai-studio"
           :class="{ 'chapter-hub__ai-studio--open': aiStudioOpen }"
           aria-label="AI 阅读台"
+          @pointerdown.capture="onAiStudioPointerDown"
+          @focusin.capture="onAiStudioPointerDown"
         >
           <div class="chapter-hub__ai-studio-resizer" @pointerdown="onAiStudioResizerPointerDown" @dblclick="resetAiStudioWidth" />
           <ChapterHubAiEntityPanel
@@ -107,25 +171,23 @@
             :chat-messages="aiChatMessages"
             :selection-quote="aiSelectionQuote"
             :desk-mode="aiDeskMode"
+            :composer-draft="aiComposerDraft"
+            :active-direction-preset="aiActiveDirectionPreset"
             :continue-draft="aiContinueDraft"
-            :continuity-brief="novel?.continuityBrief ?? ''"
-            :continuity-brief-loading="aiContinuityBriefLoading"
+            :continue-thinking-text="aiContinueThinkingText"
+            :continue-outline-hint="continueOutlineHint"
             :chapter-summary-draft="aiChapterSummaryDraft"
             :ask-context-meta="aiAskContextMeta"
+            :pending-tool-actions="aiPendingToolActions"
             @run="runCurrentAiExtract"
+            @update:composer-draft="(value) => (aiComposerDraft = value)"
+            @update:active-direction-preset="(value) => (aiActiveDirectionPreset = value)"
             @toggle-desk-mode="toggleAiDeskMode"
             @ask="askAiReadingDesk"
             @continue-run="runAiContinue"
             @continue-stop="stopAiContinue"
             @continue-adopt="applyContinueDraft"
             @continue-ignore="ignoreContinueDraft"
-            @update-continue-position="(value) => (aiContinueDraft.position = value)"
-            @update-continue-target-chars="(value) => (aiContinueDraft.targetChars = value)"
-            @update-continue-prev-summary-count="onUpdateContinuePrevSummaryCount"
-            @update-continue-after-adopt-summary="onUpdateContinueAfterAdoptSummary"
-            @update-continue-after-adopt-extract="onUpdateContinueAfterAdoptExtract"
-            @update-continue-enable-rag="onUpdateContinueEnableRag"
-            @generate-continuity-brief="generateContinuityBrief"
             @chapter-summary-adopt="applyChapterSummaryDraft"
             @chapter-summary-ignore="ignoreChapterSummaryDraft"
             @chapter-summary-stop="stopChapterSummaryDraft"
@@ -135,9 +197,12 @@
             @close-chat="closeAiChatSession"
             @delete-chat="deleteAiChatSession"
             @collapse="toggleAiStudio"
-            @clear-selection-quote="clearAiSelectionQuote"
+            @clear-selection-quote="clearChapterQuoteSelection"
             @apply="applyAiSuggestion"
             @open-editor="openAiSuggestionEditor"
+            @pending-tool-adopt-all="applyAiPendingToolActions"
+            @pending-tool-adopt-one="applyOneAiPendingToolAction"
+            @pending-tool-ignore-all="ignoreAiPendingToolActions"
           />
         </aside>
       </div>
@@ -290,6 +355,8 @@ import type {
   AiDeskMode,
   AiExtractMode,
   AiMessage,
+  AiPendingToolAction,
+  Chapter,
   Character,
   CharacterAttribute,
   Faction,
@@ -307,6 +374,7 @@ import {
   createForeshadowPlant,
   addForeshadowFulfillment,
   buildNovelWorkspacePayload,
+  createChapter,
   createCharacter,
   createCharacterFactionMembership,
   createCharacterRelation,
@@ -340,12 +408,26 @@ import {
   summarizeNovelChapterFromWorkspaceStream,
   summarizeNovelContinuityBriefFromWorkspaceStream,
 } from '../../lib/localAi'
+import { executeToolCall } from '../../lib/aiTools'
 import { formatChapterSummaryText } from '../../lib/chapterSummary'
 import { fetchWalletBalance } from '../../lib/backendAi'
 import { normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
 import { useChapterHubChapterMutations } from '../../features/chapter-hub/composables/useChapterHubChapterMutations'
 import { useChapterHubCtxMenu } from '../../features/chapter-hub/composables/useChapterHubCtxMenu'
 import { useChapterHubData } from '../../features/chapter-hub/composables/useChapterHubData'
+import { buildChapterContinueOutlineHint } from '../../lib/outlineContinueHint'
+import {
+  inferContinueOptionsFromDirection,
+  isNextChapterIntent,
+} from '../../lib/inferContinueFromDirection'
+import { suggestNextChapterOutlineBinding } from '../../lib/outlineBeatPack'
+import {
+  emptyAiDeskSessionUiState,
+  hydrateContinueDraft,
+  normalizeAiDeskSessionUiState,
+  serializeContinueDraft,
+  type AiDeskSessionUiState,
+} from '../../features/chapter-hub/lib/aiDeskSessionUi'
 import { useChapterHubDomRefs } from '../../features/chapter-hub/composables/useChapterHubDomRefs'
 import {
   useChapterHubForeshadowTooltip,
@@ -355,7 +437,12 @@ import { useChapterHubEntityTooltip } from '../../features/chapter-hub/composabl
 import { useChapterHubNameSuggest } from '../../features/chapter-hub/composables/useChapterHubNameSuggest'
 import { useChapterHubForeshadowDeepLink } from '../../features/chapter-hub/composables/useChapterHubForeshadowDeepLink'
 import { useChapterHubTextareaEditor } from '../../features/chapter-hub/composables/useChapterHubTextareaEditor'
+import {
+  normalizeQuoteRange,
+  type ChapterPinnedQuoteSelection,
+} from '../../features/chapter-hub/lib/chapterQuoteSelection'
 import { scrollCaretIntoView } from '../../features/chapter-hub/caretGeometry'
+import { findTextSearchMatches } from '../../features/chapter-hub/lib/chapterTextSearch'
 import ChapterHubCharacterGraphModal from './components/ChapterHubCharacterGraphModal.vue'
 import ChapterHubCtxMenuTeleport from './components/ChapterHubCtxMenuTeleport.vue'
 import ChapterHubFactionDetailModal from './components/ChapterHubFactionDetailModal.vue'
@@ -437,6 +524,7 @@ type AiExtractRun = {
 }
 const aiExtractRuns = ref<AiExtractRun[]>([])
 const aiPendingAppliedDetail = ref('')
+const aiPendingToolActions = ref<AiPendingToolAction[]>([])
 const aiExtractHasRun = ref(false)
 const aiExtractLastMode = ref<AiExtractMode | null>(null)
 const aiChatMessages = ref<AiDeskChatMessage[]>([])
@@ -462,71 +550,55 @@ type AiDeskChatSession = {
     pendingAppliedDetail: string
     error: string
   }
+  uiState?: AiDeskSessionUiState
+  pendingToolActions?: AiPendingToolAction[]
 }
 const aiChatSessions = ref<AiDeskChatSession[]>([])
-const aiDeskMode = ref<AiDeskMode>('ask')
+const aiDeskMode = ref<AiDeskMode>('write')
 const activeAiChatSessionId = ref('')
 const activeAskSessionId = ref('')
 const activeWriteSessionId = ref('')
 const openAiChatSessionIds = ref<string[]>([])
 const aiSelectionQuote = ref('')
+const chapterPinnedQuoteSelection = ref<ChapterPinnedQuoteSelection | null>(null)
+const chapterSearchVisible = ref(false)
+const chapterSearchQuery = ref('')
+const chapterSearchActiveMatchIndex = ref(-1)
+const chapterSearchInputRef = ref<HTMLInputElement | null>(null)
+
+const chapterSearchMatches = computed(() =>
+  findTextSearchMatches(selectedChapter.value?.content ?? '', chapterSearchQuery.value),
+)
+
+const chapterSearchStatusLabel = computed(() => {
+  const query = chapterSearchQuery.value.trim()
+  if (!query) return ''
+  const total = chapterSearchMatches.value.length
+  if (total === 0) return '无结果'
+  const current = chapterSearchActiveMatchIndex.value >= 0 ? chapterSearchActiveMatchIndex.value + 1 : 1
+  return `${current}/${total}`
+})
+
+const pinnedQuoteRangeForPaper = computed(() => {
+  const pin = chapterPinnedQuoteSelection.value
+  const chapter = selectedChapter.value
+  if (!pin || !chapter || pin.chapterId !== chapter.id) return null
+  return normalizeQuoteRange(pin.start, pin.end, (chapter.content ?? '').length)
+})
 let aiChatAbortController: AbortController | null = null
 let aiContinueAbortController: AbortController | null = null
 
-const AI_CONTINUE_PREFS_KEY = 'novel-writing.ai-continue-prefs'
-
-type AiContinuePrefs = {
-  prevSummaryCount: AiContinuePrevSummaryCount
-  afterAdoptSummary: boolean
-  afterAdoptExtract: boolean
-  enableRag: boolean
-}
-
-function readAiContinuePrefs(): AiContinuePrefs {
-  if (typeof window === 'undefined') {
-    return { prevSummaryCount: 3, afterAdoptSummary: false, afterAdoptExtract: false, enableRag: true }
-  }
-  try {
-    const raw = localStorage.getItem(AI_CONTINUE_PREFS_KEY)
-    if (!raw) return { prevSummaryCount: 3, afterAdoptSummary: false, afterAdoptExtract: false, enableRag: true }
-    const parsed = JSON.parse(raw) as Partial<AiContinuePrefs>
-    const count = Number(parsed.prevSummaryCount)
-    const prevSummaryCount: AiContinuePrevSummaryCount =
-      count === 2 || count === 5 ? count : 3
-    return {
-      prevSummaryCount,
-      afterAdoptSummary: Boolean(parsed.afterAdoptSummary),
-      afterAdoptExtract: Boolean(parsed.afterAdoptExtract),
-      enableRag: parsed.enableRag !== false,
-    }
-  } catch {
-    return { prevSummaryCount: 3, afterAdoptSummary: false, afterAdoptExtract: false, enableRag: true }
-  }
-}
-
-function persistAiContinuePrefs(prefs: AiContinuePrefs): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(AI_CONTINUE_PREFS_KEY, JSON.stringify(prefs))
-  } catch {
-    /* ignore */
-  }
-}
-
-const aiContinuePrefs = ref<AiContinuePrefs>(readAiContinuePrefs())
-
 function emptyAiContinueDraft(): AiContinueDraft {
-  const prefs = aiContinuePrefs.value
   return {
     text: '',
     loading: false,
     status: 'idle',
     position: 'end',
     targetChars: 1500,
-    prevSummaryCount: prefs.prevSummaryCount,
-    afterAdoptSummary: prefs.afterAdoptSummary,
-    afterAdoptExtract: prefs.afterAdoptExtract,
-    enableRag: prefs.enableRag,
+    prevSummaryCount: 3,
+    afterAdoptSummary: true,
+    afterAdoptExtract: true,
+    enableRag: true,
     insertOffset: null,
     warnings: [],
     droppedLayers: [],
@@ -537,7 +609,11 @@ function emptyAiContinueDraft(): AiContinueDraft {
 }
 
 const aiContinueDraft = ref<AiContinueDraft>(emptyAiContinueDraft())
+const aiContinueThinkingText = ref('')
+const aiComposerDraft = ref('')
+const aiActiveDirectionPreset = ref('')
 const aiContinuityBriefLoading = ref(false)
+let aiDeskUiPersistTimer: number | null = null
 let aiContinuityBriefAbortController: AbortController | null = null
 
 function emptyChapterSummaryDraft(): AiChapterSummaryDraft {
@@ -759,7 +835,59 @@ function createAiChatSession(title = '新聊天', kind: AiDeskMode = 'ask'): AiD
     kind,
     messages: [],
     history: [],
+    uiState: emptyAiDeskSessionUiState(),
   }
+}
+
+function aiChapterUiKey(chapterId = selectedChapterId.value): string {
+  return String(chapterId ?? '').trim() || '__novel__'
+}
+
+function saveActiveSessionUiState(): void {
+  const activeId = activeAiChatSessionId.value
+  if (!activeId) return
+  const chapterKey = aiChapterUiKey()
+  const continueSnapshot = serializeContinueDraft(aiContinueDraft.value)
+  aiChatSessions.value = aiChatSessions.value.map((session) => {
+    if (session.id !== activeId) return session
+    const continueByChapter = { ...(session.uiState?.continueByChapter ?? {}) }
+    continueByChapter[chapterKey] = continueSnapshot
+    return {
+      ...session,
+      extractState: currentAiExtractState(),
+      uiState: {
+        composerDraft: aiComposerDraft.value,
+        activeDirectionPreset: aiActiveDirectionPreset.value,
+        continueByChapter,
+      },
+    }
+  })
+  if (novelId.value) persistAiChatSessions(novelId.value, aiChatSessions.value)
+}
+
+function restoreSessionUiState(session: AiDeskChatSession | null | undefined): void {
+  const ui = session?.uiState
+  aiComposerDraft.value = ui?.composerDraft ?? ''
+  aiActiveDirectionPreset.value = ui?.activeDirectionPreset ?? ''
+  const chapterKey = aiChapterUiKey()
+  aiContinueDraft.value = hydrateContinueDraft(ui?.continueByChapter?.[chapterKey], emptyAiContinueDraft)
+}
+
+function schedulePersistActiveSessionUi(): void {
+  if (typeof window === 'undefined') return
+  if (aiDeskUiPersistTimer != null) window.clearTimeout(aiDeskUiPersistTimer)
+  aiDeskUiPersistTimer = window.setTimeout(() => {
+    aiDeskUiPersistTimer = null
+    saveActiveSessionUiState()
+  }, 280)
+}
+
+function flushActiveSessionUiState(): void {
+  if (aiDeskUiPersistTimer != null) {
+    window.clearTimeout(aiDeskUiPersistTimer)
+    aiDeskUiPersistTimer = null
+  }
+  saveActiveSessionUiState()
 }
 
 function defaultAiChatSessionTitle(kind: AiDeskMode): string {
@@ -795,6 +923,25 @@ function deriveAiChatSessionTitle(messages: AiDeskChatMessage[], fallback = '新
 
 function lastQuestionAtFromMessages(messages: AiDeskChatMessage[]): string {
   return messages.filter((msg) => msg.role === 'user').slice(-1)[0]?.createdAt || ''
+}
+
+function normalizePendingToolActions(raw: unknown): AiPendingToolAction[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => {
+      const toolCall = item?.toolCall
+      const id = String(item?.id ?? toolCall?.id ?? '').trim()
+      if (!id || !toolCall?.function?.name) return null
+      return {
+        id,
+        toolCall,
+        label: String(item?.label ?? '').trim() || id,
+        status: item?.status === 'applied' || item?.status === 'ignored' ? item.status : 'pending',
+      } satisfies AiPendingToolAction
+    })
+    .filter((row): row is AiPendingToolAction => !!row)
+    .filter((row) => row.status === 'pending')
+    .slice(0, 24)
 }
 
 function normalizeAiHistory(raw: unknown): AiMessage[] {
@@ -904,6 +1051,8 @@ function loadAiChatSessions(novelId: string): AiDeskChatSession[] {
             messages: Array.isArray(item?.messages) ? item.messages : [],
             history: normalizeAiHistory(item?.history),
             extractState: item?.extractState ? normalizeAiExtractState(item.extractState) : undefined,
+            uiState: normalizeAiDeskSessionUiState(item?.uiState),
+            pendingToolActions: normalizePendingToolActions(item?.pendingToolActions),
           }))
           .filter((item) => item.id)
           .map((item) => ({
@@ -972,15 +1121,26 @@ function persistAiChatMessages(novelId: string, messages: AiDeskChatMessage[]): 
   aiChatSessions.value = aiChatSessions.value
     .map((session) =>
       session.id === activeId
-        ? {
-            ...session,
-            title: deriveAiChatSessionTitle(messages, session.title),
-            updatedAt,
-            lastQuestionAt: messages.length === 0 ? '' : nextLastQuestionAt || session.lastQuestionAt,
-            messages: messages.slice(-200),
-            history: conversationHistory.value.slice(-60),
-            extractState: currentAiExtractState(),
-          }
+        ? (() => {
+            const chapterKey = aiChapterUiKey()
+            const continueByChapter = { ...(session.uiState?.continueByChapter ?? {}) }
+            continueByChapter[chapterKey] = serializeContinueDraft(aiContinueDraft.value)
+            return {
+              ...session,
+              title: deriveAiChatSessionTitle(messages, session.title),
+              updatedAt,
+              lastQuestionAt: messages.length === 0 ? '' : nextLastQuestionAt || session.lastQuestionAt,
+              messages: messages.slice(-200),
+              history: conversationHistory.value.slice(-60),
+              pendingToolActions: aiPendingToolActions.value.filter((row) => row.status === 'pending'),
+              extractState: currentAiExtractState(),
+              uiState: {
+                composerDraft: aiComposerDraft.value,
+                activeDirectionPreset: aiActiveDirectionPreset.value,
+                continueByChapter,
+              },
+            }
+          })()
         : session,
     )
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
@@ -997,30 +1157,6 @@ function toggleAiStudio(): void {
   }
   if (!aiStudioOpen.value && !requestAiAccess()) return
   aiStudioOpen.value = !aiStudioOpen.value
-}
-
-function onUpdateContinuePrevSummaryCount(value: AiContinuePrevSummaryCount): void {
-  aiContinueDraft.value.prevSummaryCount = value
-  aiContinuePrefs.value = { ...aiContinuePrefs.value, prevSummaryCount: value }
-  persistAiContinuePrefs(aiContinuePrefs.value)
-}
-
-function onUpdateContinueAfterAdoptSummary(value: boolean): void {
-  aiContinueDraft.value.afterAdoptSummary = value
-  aiContinuePrefs.value = { ...aiContinuePrefs.value, afterAdoptSummary: value }
-  persistAiContinuePrefs(aiContinuePrefs.value)
-}
-
-function onUpdateContinueAfterAdoptExtract(value: boolean): void {
-  aiContinueDraft.value.afterAdoptExtract = value
-  aiContinuePrefs.value = { ...aiContinuePrefs.value, afterAdoptExtract: value }
-  persistAiContinuePrefs(aiContinuePrefs.value)
-}
-
-function onUpdateContinueEnableRag(value: boolean): void {
-  aiContinueDraft.value.enableRag = value
-  aiContinuePrefs.value = { ...aiContinuePrefs.value, enableRag: value }
-  persistAiContinuePrefs(aiContinuePrefs.value)
 }
 
 async function generateContinuityBrief(): Promise<void> {
@@ -1103,7 +1239,10 @@ function applyChapterSummaryDraft(): void {
   appendAiSystemNote('章总结已写入本章「总结」字段')
 }
 
-async function runChapterSummaryAfterContinue(chapterId: string): Promise<void> {
+async function runChapterSummaryAfterContinue(
+  chapterId: string,
+  options?: { autoApply?: boolean },
+): Promise<void> {
   const id = novelId.value
   if (!id || !requestAiAccess()) return
 
@@ -1140,6 +1279,18 @@ async function runChapterSummaryAfterContinue(chapterId: string): Promise<void> 
     if (!summary) {
       aiChapterSummaryDraft.value = emptyChapterSummaryDraft()
       appendAiSystemNote('章总结生成结果为空。')
+      return
+    }
+    if (options?.autoApply) {
+      updateChapter({ id: chapterId, annotation: summary })
+      reload()
+      aiChapterSummaryDraft.value = {
+        chapterId,
+        text: summary,
+        loading: false,
+        status: 'applied',
+      }
+      appendAiSystemNote('章总结已自动写入本章「总结」字段')
       return
     }
     aiChapterSummaryDraft.value = {
@@ -1192,6 +1343,7 @@ const aiChatHistorySummaries = computed(() =>
 )
 
 function switchAiChatSession(sessionId: string): void {
+  flushActiveSessionUiState()
   const target = aiChatSessions.value.find((session) => session.id === sessionId)
   if (!target) return
   aiDeskMode.value = target.kind
@@ -1199,7 +1351,9 @@ function switchAiChatSession(sessionId: string): void {
   openAiChatSessionIds.value = normalizeOpenAiChatSessionIds([target.id, ...openAiChatSessionIds.value], aiChatSessions.value, target.id)
   aiChatMessages.value = target.messages.slice(-200)
   conversationHistory.value = target.history.slice(-60)
+  aiPendingToolActions.value = (target.pendingToolActions ?? []).filter((row) => row.status === 'pending')
   restoreAiExtractStateFromSession(target)
+  restoreSessionUiState(target)
   rememberActiveSessionForMode(target.kind, target.id)
   if (novelId.value) persistAiDeskState(novelId.value, target.id, openAiChatSessionIds.value)
 }
@@ -1211,7 +1365,9 @@ function startNewAiChat(): void {
   switchAiChatSession(session.id)
   aiChatMessages.value = []
   conversationHistory.value = []
-  clearAiSelectionQuote()
+  aiPendingToolActions.value = []
+  aiAskContextMeta.value = emptyAiAskContextMeta()
+  clearChapterQuoteSelection()
   resetAiExtractState()
   if (novelId.value) {
     persistAiChatSessions(novelId.value, aiChatSessions.value)
@@ -1275,7 +1431,7 @@ function deleteAiChatSession(sessionId: string): void {
     openAiChatSessionIds.value = normalizeOpenAiChatSessionIds([nextActive.id, ...openAiChatSessionIds.value], aiChatSessions.value, nextActive.id)
     aiChatMessages.value = nextActive.messages.slice(-200)
     conversationHistory.value = nextActive.history.slice(-60)
-    clearAiSelectionQuote()
+    clearChapterQuoteSelection()
     restoreAiExtractStateFromSession(nextActive)
   }
 
@@ -1409,12 +1565,21 @@ const {
   items,
   categories,
   characterFactionMemberships,
+  outlineItems,
   selectedChapterId,
   selectedChapter,
   selectedChapterCtx,
   chapterForm,
   reload,
 } = useChapterHubData()
+
+const continueOutlineHint = computed(() =>
+  buildChapterContinueOutlineHint(
+    outlineItems.value,
+    selectedChapter.value,
+    characters.value.map((row) => ({ id: row.id, name: row.name, goal: row.goal, arc: row.arc })),
+  ),
+)
 
 const openedChapterTabs = computed(() =>
   props.openChapterIds
@@ -1965,6 +2130,12 @@ function aiRecentChapterIds(): string[] {
     .map((chapter) => chapter.id)
 }
 
+function appendAiConversationTurn(role: 'user' | 'assistant', content: string): void {
+  const text = String(content ?? '').trim()
+  if (!text) return
+  conversationHistory.value = [...conversationHistory.value, { role, content: text }].slice(-60)
+}
+
 function appendAiChatMessage(role: 'user' | 'assistant', content: string, mode: AiExtractMode): void {
   const text = String(content ?? '').trim()
   if (!text) return
@@ -1978,6 +2149,7 @@ function appendAiChatMessage(role: 'user' | 'assistant', content: string, mode: 
       createdAt: new Date().toISOString(),
     },
   ]
+  appendAiConversationTurn(role, text)
   if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
 }
 
@@ -2056,6 +2228,7 @@ function resetAiReadingDesk(): void {
   aiAppliedActions.value = []
   aiExtractRuns.value = []
   aiPendingAppliedDetail.value = ''
+  aiPendingToolActions.value = []
   aiChatMessages.value = []
   persistActiveAiSessionState()
   if (novelId.value) persistAiChatMessages(novelId.value, [])
@@ -2158,21 +2331,34 @@ function stopAiContinue(): void {
 
 async function runAiContinue(payload: { direction: string }): Promise<void> {
   const id = novelId.value
-  const chapter = selectedChapter.value
-  if (!id || !chapter) return
+  if (!id) return
   if (!requestAiAccess()) return
 
-  const direction = String(payload.direction ?? '').trim()
+  const rawDirection = String(payload.direction ?? '').trim()
+  const nextChapterSetup = isNextChapterIntent(rawDirection)
+    ? suggestNextChapterOutlineBinding(outlineItems.value, chapters.value, selectedChapter.value)
+    : null
+
+  if (isNextChapterIntent(rawDirection)) {
+    if (rawDirection) appendAiChatMessage('user', rawDirection, 'current')
+    prepareNextChapterForContinue(rawDirection, nextChapterSetup)
+  } else if (rawDirection) {
+    appendAiChatMessage('user', rawDirection, 'current')
+  }
+
+  applyInferredContinueOptions(rawDirection)
+
+  const chapter = selectedChapter.value
+  if (!chapter) return
+
+  const direction = buildEffectiveContinueDirection(rawDirection, nextChapterSetup)
   const position: AiContinuePosition = aiContinueDraft.value.position
   const cursorOffset = position === 'cursor' ? resolveContinueCursorOffset() : chapter.content?.length ?? 0
-
-  if (direction) {
-    appendAiChatMessage('user', direction, 'current')
-  }
 
   aiContinueAbortController?.abort()
   aiContinueAbortController = new AbortController()
   aiExtractError.value = ''
+  aiContinueThinkingText.value = ''
   aiContinueDraft.value = {
     ...aiContinueDraft.value,
     text: '',
@@ -2220,6 +2406,9 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
             text: aiContinueDraft.value.text + text,
           }
         },
+        onReasoningChunk: (text: string) => {
+          aiContinueThinkingText.value += text
+        },
         onError: (err: Error) => {
           if (err.name === 'AbortError') return
           aiExtractError.value = err.message || '续写失败'
@@ -2228,10 +2417,30 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
       aiContinueAbortController.signal,
     )
 
+    const finalText = (result.text || aiContinueDraft.value.text).trim()
+    if (!finalText) {
+      aiExtractError.value =
+        aiContinueThinkingText.value.trim().length > 0
+          ? '模型只返回了思考过程，未生成可写入的正文。请换用对话模型（非纯推理模型）、缩短要求后重试，或改用「提问」模式查看「待确认的修改」。'
+          : '续写未生成正文。请确认当前章有大纲绑定或章末有锚点正文，并检查余额与网络后重试。'
+      aiContinueDraft.value = {
+        ...aiContinueDraft.value,
+        loading: false,
+        text: '',
+        status: 'idle',
+        warnings: result.warnings,
+        droppedLayers: result.droppedLayers,
+        usedLayers: result.usedLayers,
+        usedChars: result.usedChars,
+        ragHits: result.ragHits,
+      }
+      return
+    }
+
     aiContinueDraft.value = {
       ...aiContinueDraft.value,
       loading: false,
-      text: result.text || aiContinueDraft.value.text,
+      text: finalText,
       status: 'ready',
       warnings: result.warnings,
       droppedLayers: result.droppedLayers,
@@ -2252,6 +2461,7 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
     }
   } finally {
     aiContinueAbortController = null
+    aiContinueThinkingText.value = ''
     if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
     void fetchWalletBalance().catch(() => {
       /* ignore */
@@ -2275,30 +2485,163 @@ async function applyContinueDraft(): Promise<void> {
     nextContent = `${content.slice(0, offset)}${text}${content.slice(offset)}`
   }
 
-  const runSummary = aiContinueDraft.value.afterAdoptSummary
-  const runExtract = aiContinueDraft.value.afterAdoptExtract
-
   updateChapter({ id: chapter.id, content: nextContent })
   chapters.value = chapters.value.map((item) => (item.id === chapter.id ? { ...item, content: nextContent } : item))
   triggerChapterHubSaveToast()
   aiContinueDraft.value = { ...aiContinueDraft.value, status: 'applied' }
-  appendAiSystemNote(`已采用续写内容（约 ${text.length} 字）写入正文`)
+  appendAiSystemNote(`已采用续写内容（约 ${text.length} 字）写入正文；将自动更新章总结并整理人物档案…`)
   appendAiChatMessage('assistant', `【已采用续写】${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`, 'current')
   if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
 
-  if (runSummary) {
-    void runChapterSummaryAfterContinue(chapter.id)
-  }
-  if (runExtract) {
-    switchToAiDeskMode('ask')
-    void runAiExtract('current')
-  }
+  void runChapterSummaryAfterContinue(chapter.id, { autoApply: true })
+  switchToAiDeskMode('ask')
+  void runAiExtract('current')
 }
 
 function ignoreContinueDraft(): void {
   aiContinueDraft.value = { ...aiContinueDraft.value, status: 'ignored', text: '' }
   appendAiSystemNote('已忽略本次续写草稿')
 }
+
+function aiToolExecutionContext() {
+  return { defaultChapterId: selectedChapterId.value || selectedChapter.value?.id }
+}
+
+function openChapterById(chapterId: string): void {
+  const id = String(chapterId ?? '').trim()
+  if (!id) return
+  selectedChapterId.value = id
+  props.onOpenChapter?.(id)
+}
+
+function createAndOpenNextChapter(titleHint = '', outlineItemIds: string[] = []): Chapter | null {
+  const id = novelId.value
+  if (!id) return null
+  const chapter = createChapter({
+    novelId: id,
+    title: titleHint.trim(),
+    notes: '',
+    annotation: '',
+  })
+  if (outlineItemIds.length > 0) {
+    updateChapter({ id: chapter.id, outlineItemIds })
+  }
+  reload()
+  openChapterById(chapter.id)
+  return chapter
+}
+
+function applyInferredContinueOptions(direction: string): void {
+  const inferred = inferContinueOptionsFromDirection(direction)
+  aiContinueDraft.value = {
+    ...aiContinueDraft.value,
+    position: inferred.position,
+    targetChars: inferred.targetChars,
+    prevSummaryCount: inferred.prevSummaryCount,
+    afterAdoptSummary: true,
+    afterAdoptExtract: true,
+    enableRag: true,
+  }
+}
+
+function buildEffectiveContinueDirection(
+  userDirection: string,
+  setup: ReturnType<typeof suggestNextChapterOutlineBinding>,
+): string {
+  const base = String(userDirection ?? '').trim()
+  const outlinePart = setup?.suggestedDirection || setup?.beatLine || ''
+  if (base && outlinePart) return `${base}\n（大纲节拍：${outlinePart}）`
+  return base || outlinePart
+}
+
+function prepareNextChapterForContinue(
+  userDirection: string,
+  setup: ReturnType<typeof suggestNextChapterOutlineBinding>,
+): boolean {
+  if (!isNextChapterIntent(userDirection)) return false
+  const created = createAndOpenNextChapter(setup?.title ?? '', setup?.outlineItemIds ?? [])
+  if (!created) return true
+  aiContinueDraft.value = emptyAiContinueDraft()
+  const beatNote = setup?.beatLine ? `\n${setup.beatLine}` : ''
+  appendAiChatMessage(
+    'assistant',
+    `已新建第 ${created.chapterNo} 章${setup?.title ? `「${setup.title}」` : ''}，正在按你的要求与大纲生成正文草稿（见下方，采用后写入稿纸）。${beatNote}`,
+    'current',
+  )
+  return true
+}
+
+function applyAiPendingToolActions(): void {
+  const pending = aiPendingToolActions.value.filter((row) => row.status === 'pending')
+  if (!novelId.value || pending.length === 0) return
+  const messages: string[] = []
+  const appliedRows: AiMessage[] = []
+  let createdChapterId = ''
+  for (const action of pending) {
+    const result = executeToolCall(novelId.value, action.toolCall, aiToolExecutionContext())
+    messages.push(result.message)
+    if (action.toolCall.function.name === 'create_chapter' && result.success) {
+      createdChapterId = String(result.data?.chapterId ?? '').trim()
+    }
+    appliedRows.push({
+      role: 'tool',
+      tool_call_id: action.toolCall.id,
+      content: JSON.stringify(result),
+    })
+    action.status = result.success ? 'applied' : 'pending'
+  }
+  conversationHistory.value = [...conversationHistory.value, ...appliedRows].slice(-60)
+  aiPendingToolActions.value = []
+  reload()
+  triggerChapterHubSaveToast()
+  if (createdChapterId) openChapterById(createdChapterId)
+  appendAiChatMessage('assistant', `【已采用】${messages.join('；')}`, 'current')
+  if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+}
+
+function applyOneAiPendingToolAction(actionId: string): void {
+  const action = aiPendingToolActions.value.find((row) => row.id === actionId && row.status === 'pending')
+  if (!action || !novelId.value) return
+  const result = executeToolCall(novelId.value, action.toolCall, aiToolExecutionContext())
+  action.status = result.success ? 'applied' : 'pending'
+  conversationHistory.value = [
+    ...conversationHistory.value,
+    { role: 'tool', tool_call_id: action.toolCall.id, content: JSON.stringify(result) },
+  ].slice(-60)
+  aiPendingToolActions.value = aiPendingToolActions.value.filter((row) => row.status === 'pending')
+  reload()
+  triggerChapterHubSaveToast()
+  if (action.toolCall.function.name === 'create_chapter' && result.success) {
+    const chapterId = String(result.data?.chapterId ?? '').trim()
+    if (chapterId) openChapterById(chapterId)
+  }
+  appendAiChatMessage('assistant', `【已采用】${result.message}`, 'current')
+  if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+}
+
+function ignoreAiPendingToolActions(silent = false): void {
+  const pending = aiPendingToolActions.value.filter((row) => row.status === 'pending')
+  if (pending.length === 0) return
+  for (const action of pending) {
+    conversationHistory.value = [
+      ...conversationHistory.value,
+      {
+        role: 'tool',
+        tool_call_id: action.toolCall.id,
+        content: JSON.stringify({ success: false, message: '作者未采用此修改' }),
+      },
+    ].slice(-60)
+    action.status = 'ignored'
+  }
+  aiPendingToolActions.value = []
+  if (!silent) {
+    appendAiChatMessage('assistant', '【已忽略】本次修改提案未写入作品。', 'current')
+    if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+  }
+}
+
+const WRITE_BODY_INTENT_RE =
+  /(续写|写下一章|下一章内容|按大纲写|根据大纲写|撰写本章|生成正文|写出本章|写本章|按节拍写)/
 
 async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }): Promise<void> {
   const id = novelId.value
@@ -2309,7 +2652,22 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
   }
   const deskMode = payload.mode ?? aiDeskMode.value
   const question = String(payload.question ?? '').trim()
-  if (deskMode === 'write') {
+  if (deskMode === 'write' || (deskMode === 'ask' && WRITE_BODY_INTENT_RE.test(question))) {
+    const switchedFromAsk = deskMode === 'ask'
+    if (switchedFromAsk) switchToAiDeskMode('write')
+
+    if (isNextChapterIntent(question)) {
+      await runAiContinue({ direction: question })
+      return
+    }
+
+    if (switchedFromAsk) {
+      appendAiChatMessage(
+        'assistant',
+        '已识别为生成正文任务：请在下方「续写草稿」中预览，点「采用」后才会写入稿纸。',
+        'current',
+      )
+    }
     await runAiContinue({ direction: question })
     return
   }
@@ -2318,6 +2676,9 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
   const composedQuestion = quoted
     ? `请结合以下引用片段回答：\n「${quoted}」\n\n作者问题：${question}`
     : question
+  if (aiPendingToolActions.value.some((row) => row.status === 'pending')) {
+    ignoreAiPendingToolActions(true)
+  }
   appendAiChatMessage('user', quoted ? `引用：${quoted}\n${question}` : question, 'current')
   aiChatLoading.value = true
   aiChatThinking.value = true
@@ -2345,7 +2706,7 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
         aiExtractError.value = err.message || 'AI 请求失败'
       },
     }
-    const { history, contextMeta } = await askAiWithToolsStream(
+    const { history, contextMeta, pendingToolActions, text } = await askAiWithToolsStream(
       snapshot,
       {
         mode: 'current',
@@ -2353,8 +2714,8 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
         chapterIds: selectedChapter.value ? [selectedChapter.value.id] : [],
         novelId: id,
         selectionQuote: quoted || undefined,
-        prevSummaryCount: aiContinuePrefs.value.prevSummaryCount,
-        enableRag: aiContinuePrefs.value.enableRag,
+        prevSummaryCount: 3,
+        enableRag: true,
         novel: novel.value
           ? {
               title: novel.value.title,
@@ -2369,6 +2730,11 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
       streamCallbacks,
       conversationHistory.value.length > 0 ? conversationHistory.value : undefined,
       aiChatAbortController.signal,
+      {
+        alwaysEnableTools: true,
+        confirmBeforeApply: true,
+        toolContext: aiToolExecutionContext(),
+      },
     )
     conversationHistory.value = history
     aiAskContextMeta.value = {
@@ -2378,8 +2744,15 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
       usedChars: contextMeta.usedChars,
       ragHits: contextMeta.ragHits,
     }
-    if (!msg.content.trim()) {
-      msg.content = '已回答完毕，但这次没有生成可显示的内容。'
+    if (pendingToolActions && pendingToolActions.length > 0) {
+      aiPendingToolActions.value = pendingToolActions
+      const hasChapterDraft = pendingToolActions.some((row) => row.toolCall.function.name === 'update_chapter_content')
+      msg.content = hasChapterDraft
+        ? `${text}\n\n正文已写入上方「待确认的修改」卡片（显示开头预览），请点「采用」后才会出现在稿纸。`
+        : text
+      aiChatThinking.value = false
+    } else if (!msg.content.trim()) {
+      msg.content = text?.trim() || '已回答完毕，但这次没有生成可显示的内容。'
     }
   } catch (e: unknown) {
     if (e instanceof Error && e.name === 'AbortError') {
@@ -2566,24 +2939,34 @@ function snapshotForeshadowSelectionFromCtxMenu(): void {
   pendingForeshadowSelection.value = snapshotSelectionFromCtxMenu()
 }
 
-function clearAiSelectionQuote(): void {
+function clearChapterQuoteSelection(): void {
   aiSelectionQuote.value = ''
+  chapterPinnedQuoteSelection.value = null
+  const ta = chapterTextareaRef.value
+  if (ta) {
+    const pos = ta.selectionEnd ?? ta.value.length
+    ta.setSelectionRange(pos, pos)
+  }
 }
 
 function syncAiSelectionQuoteFromTextarea(): void {
   const ta = chapterTextareaRef.value
   const chapter = selectedChapter.value
   if (!ta || !chapter) {
-    aiSelectionQuote.value = ''
+    clearChapterQuoteSelection()
     return
   }
   const start = ta.selectionStart ?? 0
   const end = ta.selectionEnd ?? start
-  if (end <= start) {
-    aiSelectionQuote.value = ''
+  const range = normalizeQuoteRange(start, end, (chapter.content ?? '').length)
+  if (!range) {
+    clearChapterQuoteSelection()
     return
   }
-  aiSelectionQuote.value = excerptForAiQuote((chapter.content ?? '').slice(start, end))
+  chapterPinnedQuoteSelection.value = { chapterId: chapter.id, start: range.start, end: range.end }
+  aiSelectionQuote.value = excerptForAiQuote((chapter.content ?? '').slice(range.start, range.end))
+  closeCtxMenu()
+  engageChapterWritingView()
   if (aiSelectionQuote.value && !focusMode.value) {
     if (!requestAiAccess()) return
     aiStudioOpen.value = true
@@ -3003,18 +3386,8 @@ function restoreAiExtractStateFromSession(session: AiDeskChatSession | null | un
 }
 
 function persistActiveAiSessionState(): void {
-  const id = novelId.value
-  const activeId = activeAiChatSessionId.value
-  if (!id || !activeId) return
-  aiChatSessions.value = aiChatSessions.value.map((session) =>
-    session.id === activeId
-      ? {
-          ...session,
-          extractState: currentAiExtractState(),
-        }
-      : session,
-  )
-  persistAiChatSessions(id, aiChatSessions.value)
+  if (!novelId.value || !activeAiChatSessionId.value) return
+  saveActiveSessionUiState()
 }
 
 const {
@@ -3214,6 +3587,11 @@ const {
 function onChapterContentInputWithForeshadowSync(chapterId: string, event: Event): void {
   onChapterContentInput(chapterId, event)
   foreshadowDataTick.value += 1
+  const pin = chapterPinnedQuoteSelection.value
+  const chapter = selectedChapter.value
+  if (!pin || !chapter || pin.chapterId !== chapterId) return
+  const len = (chapter.content ?? '').length
+  if (pin.start >= len || pin.end > len) clearChapterQuoteSelection()
 }
 
 // 角色变更历史 Map：characterId -> CharacterChangeEvent[]
@@ -3242,7 +3620,12 @@ const {
   entityPreviewLines,
   shouldShowEntityOverlay,
   onChapterTextareaKeydown,
+  onChapterTextareaBeforeInput,
   onChapterTextareaKeyup: handleChapterTextareaKeyup,
+  onChapterPaperPointerDown,
+  onAiStudioPointerDown,
+  engageChapterWritingView,
+  exitChapterWritingView,
   onChapterTextareaFocus,
   onChapterTextareaBlur: handleChapterTextareaBlur,
   onChapterTextareaMouseup: handleChapterTextareaMouseup,
@@ -3270,6 +3653,7 @@ const {
   openCtxMenuAtPoint,
   closeCtxMenu,
   onEntityNameLeave,
+  hasPinnedQuoteSelection: () => Boolean(chapterPinnedQuoteSelection.value),
 })
 
 function onChapterTextareaKeyup(event: KeyboardEvent): void {
@@ -3287,15 +3671,36 @@ function onChapterTextareaSelect(): void {
   window.setTimeout(syncAiSelectionQuoteFromTextarea, 0)
 }
 
-function onChapterTextareaBlur(): void {
-  syncAiSelectionQuoteFromTextarea()
-  handleChapterTextareaBlur()
+function onChapterTextareaBlur(event: FocusEvent): void {
+  handleChapterTextareaBlur(event)
 }
 
-watch(selectedChapterId, () => {
-  clearAiSelectionQuote()
-  const activeSession = aiChatSessions.value.find((session) => session.id === activeAiChatSessionId.value)
+watch(selectedChapterId, (nextId, prevId) => {
+  clearChapterQuoteSelection()
+  const activeId = activeAiChatSessionId.value
+  if (activeId && prevId) {
+    const prevKey = String(prevId).trim() || '__novel__'
+    const continueSnapshot = serializeContinueDraft(aiContinueDraft.value)
+    aiChatSessions.value = aiChatSessions.value.map((session) => {
+      if (session.id !== activeId) return session
+      const continueByChapter = { ...(session.uiState?.continueByChapter ?? {}) }
+      continueByChapter[prevKey] = continueSnapshot
+      return {
+        ...session,
+        uiState: {
+          composerDraft: aiComposerDraft.value,
+          activeDirectionPreset: aiActiveDirectionPreset.value,
+          continueByChapter,
+        },
+      }
+    })
+  }
+  const activeSession = aiChatSessions.value.find((session) => session.id === activeId)
   restoreAiExtractStateFromSession(activeSession)
+  if (activeSession) {
+    const chapterKey = String(nextId ?? '').trim() || '__novel__'
+    aiContinueDraft.value = hydrateContinueDraft(activeSession.uiState?.continueByChapter?.[chapterKey], emptyAiContinueDraft)
+  }
 })
 
 watch(aiStudioOpen, (open) => {
@@ -3334,11 +3739,34 @@ watch(
     aiChatMessages.value = activeSession?.messages.slice(-200) ?? []
     conversationHistory.value = activeSession?.history.slice(-60) ?? []
     rememberActiveSessionForMode(activeSession?.kind ?? aiDeskMode.value, activeId)
-    clearAiSelectionQuote()
+    clearChapterQuoteSelection()
     restoreAiExtractStateFromSession(activeSession)
+    restoreSessionUiState(activeSession)
   },
   { immediate: true },
 )
+
+watch([aiComposerDraft, aiActiveDirectionPreset], () => {
+  schedulePersistActiveSessionUi()
+})
+
+watch(
+  aiContinueDraft,
+  () => {
+    schedulePersistActiveSessionUi()
+  },
+  { deep: true },
+)
+
+function onDocumentPointerDownOutsideChapterHub(e: PointerEvent): void {
+  if (!chapterPinnedQuoteSelection.value) return
+  const target = e.target
+  if (!(target instanceof Node)) return
+  const hub = document.querySelector('.chapter-hub')
+  if (hub?.contains(target)) return
+  clearChapterQuoteSelection()
+  exitChapterWritingView()
+}
 
 onMounted(() => {
   if (typeof window === 'undefined') return
@@ -3348,6 +3776,20 @@ onMounted(() => {
   window.addEventListener('pointerup', onWindowPointerUp)
   window.addEventListener('pointercancel', onWindowPointerCancel)
   window.addEventListener('resize', onWindowResize)
+  window.addEventListener('keydown', onWindowKeydown)
+  document.addEventListener('pointerdown', onDocumentPointerDownOutsideChapterHub, true)
+})
+
+onUnmounted(() => {
+  if (typeof window === 'undefined') return
+  window.removeEventListener('novel-writing:set-ai-open', onSetAiStudioOpenEvent as EventListener)
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointermove', onWindowPointerMoveForAiStudioResize)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  window.removeEventListener('pointercancel', onWindowPointerCancel)
+  window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('keydown', onWindowKeydown)
+  document.removeEventListener('pointerdown', onDocumentPointerDownOutsideChapterHub, true)
 })
 
 /** 伏笔弹窗打开/关闭时：清选区浮层（菜单、联想、实体/伏笔提示），折叠选区避免关窗后仍冒出小窗 */
@@ -3367,17 +3809,70 @@ watch(
   { flush: 'post' },
 )
 
+function onWindowKeydown(e: KeyboardEvent): void {
+  if (e.defaultPrevented) return
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault()
+    toggleChapterSearch(true)
+  }
+}
+
 function setNameSuggestActiveIndex(i: number) {
   nameSuggestIndex.value = i
 }
 
+function toggleChapterSearch(forceOpen?: boolean): void {
+  const next = forceOpen ? true : !chapterSearchVisible.value
+  chapterSearchVisible.value = next
+  if (next) {
+    nextTick(() => {
+      chapterSearchInputRef.value?.focus()
+      chapterSearchInputRef.value?.select()
+    })
+  }
+}
+
+function hideChapterSearch(): void {
+  chapterSearchVisible.value = false
+  chapterSearchQuery.value = ''
+  chapterSearchActiveMatchIndex.value = -1
+}
+
+function jumpChapterSearch(direction: 1 | -1): void {
+  const total = chapterSearchMatches.value.length
+  if (!chapterSearchQuery.value.trim() || total === 0) return
+
+  let next = chapterSearchActiveMatchIndex.value
+  if (next < 0) next = direction > 0 ? 0 : total - 1
+  else next = (next + direction + total) % total
+
+  chapterSearchActiveMatchIndex.value = next
+  nextTick(() => {
+    paperBlockRef.value?.goToSearchMatch?.(next, { focus: true })
+  })
+}
+
+watch(chapterSearchQuery, (query) => {
+  const trimmed = String(query ?? '').trim()
+  if (!trimmed) {
+    chapterSearchActiveMatchIndex.value = -1
+    return
+  }
+  chapterSearchActiveMatchIndex.value = 0
+  nextTick(() => {
+    paperBlockRef.value?.goToSearchMatch?.(0, { focus: false })
+  })
+})
+
 onUnmounted(() => {
+  flushActiveSessionUiState()
   clearForeshadowFlash()
   if (chapterHubSaveToastTimer != null) {
     window.clearTimeout(chapterHubSaveToastTimer)
     chapterHubSaveToastTimer = null
   }
   if (typeof window !== 'undefined') {
+    document.removeEventListener('pointerdown', onDocumentPointerDownOutsideChapterHub, true)
     window.removeEventListener('novel-writing:set-ai-open', onSetAiStudioOpenEvent as EventListener)
     window.removeEventListener('pointermove', onWindowPointerMove)
     window.removeEventListener('pointermove', onWindowPointerMoveForAiStudioResize)

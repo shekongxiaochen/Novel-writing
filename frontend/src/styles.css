@@ -4596,6 +4596,132 @@ a.module-item.module-item--link:focus-visible {
   caret-color: var(--writing-caret-color) !important;
 }
 
+.chapter-hub__textarea-wrap--quote-selection .chapter-hub__textarea::selection {
+  background: transparent;
+  color: inherit;
+}
+
+.chapter-hub__entity-overlay--quote-only {
+  pointer-events: none;
+}
+
+.chapter-hub__entity-overlay--quote-only .chapter-hub__entity-plain-token:not(.chapter-hub__quote-selection),
+.chapter-hub__entity-overlay--quote-only .chapter-hub__entity-name:not(.chapter-hub__quote-selection),
+.chapter-hub__entity-overlay--quote-only .chapter-hub__foreshadow-mark:not(.chapter-hub__quote-selection) {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.chapter-hub__quote-selection {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, var(--color-primary) 72%, var(--paper-text) 28%);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-radius: 2px;
+}
+
+.chapter-hub__search-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2rem 2.5rem 2.4rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-paper);
+  font-weight: 400;
+  font-size: 1rem;
+  line-height: 2.05;
+  letter-spacing: 0.01em;
+  scrollbar-width: none;
+}
+
+.chapter-hub__search-backdrop::-webkit-scrollbar {
+  display: none;
+}
+
+.chapter-hub__search-backdrop-plain {
+  color: var(--paper-text);
+  -webkit-text-fill-color: var(--paper-text);
+}
+
+.chapter-hub__search-backdrop-match {
+  color: var(--paper-text);
+  -webkit-text-fill-color: var(--paper-text);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background: color-mix(in srgb, #ea5c00 38%, transparent);
+}
+
+.chapter-hub__search-backdrop-match--active {
+  background: color-mix(in srgb, #ea5c00 62%, transparent);
+  outline: 1px solid color-mix(in srgb, #ea5c00 78%, transparent);
+  outline-offset: -1px;
+}
+
+/* 搜索时由底层镜像层显示正文与高亮，textarea 仅负责输入与光标 */
+.chapter-hub__textarea-wrap--search-active .chapter-hub__textarea {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.chapter-hub__textarea-wrap--search-active .chapter-hub__search-backdrop {
+  z-index: 0;
+}
+
+.chapter-hub__search-match {
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background: color-mix(in srgb, #ea5c00 38%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.chapter-hub__search-match--active {
+  background: color-mix(in srgb, #ea5c00 62%, transparent) !important;
+  outline: 1px solid color-mix(in srgb, #ea5c00 78%, transparent);
+  outline-offset: -1px;
+}
+
+.cursor-shell__content--writing .chapter-hub__search-backdrop {
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Sarasa Mono SC', 'Microsoft YaHei UI', ui-monospace, monospace;
+  font-size: 14.5px;
+  line-height: 1.68;
+  letter-spacing: 0;
+}
+
+.cursor-shell__content--writing .chapter-hub__search-backdrop-plain,
+.cursor-shell__content--writing .chapter-hub__search-backdrop-match {
+  color: #d4d4d4;
+  -webkit-text-fill-color: #d4d4d4;
+}
+
+.cursor-shell__content--writing .chapter-hub__textarea-wrap--search-active .chapter-hub__textarea {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.chapter-hub__search-status {
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  padding: 0 2px;
+}
+
+.chapter-hub__entity-overlay--quote-only .chapter-hub__quote-selection {
+  color: var(--paper-text);
+  -webkit-text-fill-color: var(--paper-text);
+}
+
 .chapter-hub__textarea-wrap--overlay .chapter-hub__textarea {
   color: var(--paper-text);
   -webkit-text-fill-color: var(--paper-text);
@@ -4697,10 +4823,12 @@ a.module-item.module-item--link:focus-visible {
   position: fixed;
   inset: 0;
   z-index: 4700;
+  pointer-events: none;
 }
 
 .chapter-hub__ctx-menu {
   position: fixed;
+  pointer-events: auto;
   min-width: 180px;
   border-radius: 14px;
   border: 1px solid var(--color-border-strong);
@@ -12106,6 +12234,7 @@ button[type='submit'],
   position: absolute;
   left: 0;
   top: 0;
+  z-index: 0;
   pointer-events: none;
 }
 
@@ -12134,7 +12263,10 @@ button[type='submit'],
   position: absolute;
   left: 0;
   top: 0;
+  z-index: 1;
   width: 260px;
+  height: auto;
+  overflow: visible;
 }
 
 .outline-map-node {
@@ -12142,6 +12274,9 @@ button[type='submit'],
   position: relative;
   display: grid;
   gap: 8px;
+  height: auto;
+  max-height: none;
+  overflow: visible;
   border: 1px solid color-mix(in srgb, var(--node-status-color) 42%, var(--color-border));
   border-radius: 16px;
   padding: 12px;
@@ -12549,7 +12684,9 @@ button[type='submit'],
 .outline-map-canvas--workspace .outline-map-node {
   gap: 6px;
   min-height: 116px;
-  max-height: 128px;
+  height: auto;
+  max-height: none;
+  overflow: visible;
   border-color: color-mix(in srgb, var(--color-border) 78%, transparent);
   border-radius: 16px;
   padding: 11px 12px;
@@ -12599,13 +12736,14 @@ button[type='submit'],
 .outline-map-canvas--workspace .outline-map-node__main p {
   color: var(--color-text-muted);
   font-size: 0.72rem;
-  -webkit-line-clamp: 1;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .outline-map-canvas--workspace .outline-map-node__meta {
   gap: 4px;
-  max-height: 19px;
-  overflow: hidden;
+  flex-wrap: wrap;
 }
 
 .outline-map-canvas--workspace .outline-map-node__meta-pill {
@@ -14438,6 +14576,17 @@ body.is-resizing-ai-studio .chapter-hub__workspace {
   border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 42%, transparent);
   background: color-mix(in srgb, var(--color-surface) 82%, transparent);
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chapter-hub__tabs-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .chapter-hub__open-tabs {
@@ -14452,6 +14601,93 @@ body.is-resizing-ai-studio .chapter-hub__workspace {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-text-muted) 24%, transparent) transparent;
+}
+
+.chapter-hub__search-button {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-surface-muted) 42%, transparent);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chapter-hub__search-button:hover {
+  background: color-mix(in srgb, var(--color-surface-muted) 56%, transparent);
+  color: var(--color-text);
+}
+
+.chapter-hub__search-icon {
+  font-size: 0.8rem;
+}
+
+.chapter-hub__search-bar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-surface-muted) 64%, transparent);
+}
+
+.chapter-hub__search-input {
+  width: 160px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+}
+
+.chapter-hub__search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.chapter-hub__search-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.chapter-hub__search-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-surface) 64%, transparent);
+  color: var(--color-text);
+}
+
+.chapter-hub__search-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chapter-hub__search-btn--close {
+  font-size: 0.8rem;
+}
+
+.chapter-hub-search-enter-active,
+.chapter-hub-search-leave-active {
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.chapter-hub-search-enter-from,
+.chapter-hub-search-leave-to {
+  opacity: 0;
+  transform: translateY(-2px);
 }
 
 .chapter-hub__open-tabs::-webkit-scrollbar {

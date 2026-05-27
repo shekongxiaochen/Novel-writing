@@ -195,7 +195,11 @@ export async function postAiCompletion(
 
 export async function postAiCompletionStream(
   input: Omit<AiCompletionBody, 'messages' | 'stream'> & { messages: AiMessage[] },
-  callbacks: { onChunk: (text: string) => void; onError: (err: Error) => void },
+  callbacks: {
+    onChunk: (text: string) => void
+    onError: (err: Error) => void
+    onReasoningChunk?: (text: string) => void
+  },
   signal?: AbortSignal,
 ): Promise<{ text: string; balanceYuan: number }> {
   const resp = await aiRequest(
@@ -260,6 +264,10 @@ export async function postAiCompletionStream(
             continue
           }
           const delta = String(parsed?.choices?.[0]?.delta?.content ?? '')
+          const reasoningDelta = String(
+            (parsed?.choices?.[0]?.delta as { reasoning_content?: string } | undefined)?.reasoning_content ?? '',
+          )
+          if (reasoningDelta) callbacks.onReasoningChunk?.(reasoningDelta)
           if (delta) {
             full += delta
             callbacks.onChunk(delta)

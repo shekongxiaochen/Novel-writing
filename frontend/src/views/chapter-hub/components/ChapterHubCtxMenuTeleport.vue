@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="open" class="chapter-hub__ctx-overlay" @click="emit('close')">
+    <div v-if="open" class="chapter-hub__ctx-overlay">
       <div class="chapter-hub__ctx-menu" :style="{ top: `${y}px`, left: `${x}px` }" @click.stop>
         <p v-if="notice" class="chapter-hub__ctx-notice">{{ notice }}</p>
         <p v-if="selectedCharacter" class="chapter-hub__ctx-entity-title">角色：{{ selectedCharacter.name }}</p>

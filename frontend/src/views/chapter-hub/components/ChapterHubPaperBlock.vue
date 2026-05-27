@@ -10,12 +10,36 @@
               'chapter-hub__textarea-wrap--writing': isChapterTextareaFocused,
               'chapter-hub__textarea-wrap--overlay-show': shouldShowEntityOverlay,
               'chapter-hub__textarea-wrap--overlay-ready': shouldShowEntityOverlay && overlayReady,
+              'chapter-hub__textarea-wrap--quote-selection': !!pinnedQuoteRange,
+              'chapter-hub__textarea-wrap--search-active': !!searchQuery,
             }"
+            @pointerdown.capture="onWrapPointerDownCapture"
           >
+            <div
+              v-if="searchQuery"
+              ref="searchBackdropRef"
+              class="chapter-hub__search-backdrop"
+              aria-hidden="true"
+            >
+              <div class="chapter-hub__search-backdrop-inner">
+                <template v-for="(segment, segIdx) in searchSegments" :key="`search-seg-${segIdx}`">
+                  <span
+                    v-if="segment.kind === 'text'"
+                    class="chapter-hub__search-backdrop-plain"
+                  >{{ segment.text }}</span>
+                  <span
+                    v-else
+                    class="chapter-hub__search-backdrop-match"
+                    :class="{ 'chapter-hub__search-backdrop-match--active': segment.matchIndex === searchActiveMatchIndex }"
+                  >{{ segment.text }}</span>
+                </template>
+              </div>
+            </div>
             <div
               ref="overlayRef"
               class="chapter-hub__entity-overlay"
-              v-show="shouldShowEntityOverlay && !isChapterTextareaFocused"
+              :class="{ 'chapter-hub__entity-overlay--quote-only': showQuoteSelectionOverlay }"
+              v-show="(showPreviewEntityOverlay || showQuoteSelectionOverlay) && !searchQuery"
               @wheel="onEntityWheel"
               @scroll="onOverlayScroll"
               @mousedown="onOverlayTextMouseDown"
@@ -30,6 +54,8 @@
                         ...foreshadowAugmentClass(token.foreshadow),
                         'chapter-hub__entity-name--anchor-edit': !!token.characterAnchorEditSite,
                         ...stateZoneClass(token.characterStateZone?.zoneIndex, 'character'),
+                        'chapter-hub__quote-selection': isQuoteToken(token),
+                        ...searchHighlightClass(token),
                       }"
                       :data-range-start="token.range?.start ?? ''"
                       :data-range-end="token.range?.end ?? ''"
@@ -52,6 +78,8 @@
                         ...foreshadowAugmentClass(token.foreshadow),
                         'chapter-hub__entity-name--anchor-edit-faction': !!token.factionAnchorEditSite,
                         ...stateZoneClass(token.factionStateZone?.zoneIndex, 'faction'),
+                        'chapter-hub__quote-selection': isQuoteToken(token),
+                        ...searchHighlightClass(token),
                       }"
                       :data-range-start="token.range?.start ?? ''"
                       :data-range-end="token.range?.end ?? ''"
@@ -70,7 +98,11 @@
                     <span
                       v-else-if="token.item"
                       class="chapter-hub__entity-name chapter-hub__entity-name--item"
-                      :class="foreshadowAugmentClass(token.foreshadow)"
+                      :class="{
+                        ...foreshadowAugmentClass(token.foreshadow),
+                        'chapter-hub__quote-selection': isQuoteToken(token),
+                        ...searchHighlightClass(token),
+                      }"
                       :data-range-start="token.range?.start ?? ''"
                       :data-range-end="token.range?.end ?? ''"
                       role="link"
@@ -91,6 +123,8 @@
                       :class="{
                         ...foreshadowAugmentClass(token.foreshadow),
                         ...foreshadowFlashClass(token.foreshadow),
+                        'chapter-hub__quote-selection': isQuoteToken(token),
+                        ...searchHighlightClass(token),
                       }"
                       v-bind="foreshadowDataset(token.foreshadow, token)"
                       tabindex="0"
@@ -107,6 +141,7 @@
                     <span
                       v-else
                       class="chapter-hub__entity-plain-token"
+                      :class="{ 'chapter-hub__quote-selection': isQuoteToken(token), ...searchHighlightClass(token) }"
                       :data-range-start="token.range?.start ?? ''"
                       :data-range-end="token.range?.end ?? ''"
                     >{{ token.text }}</span>
@@ -126,9 +161,11 @@
               @scroll="onTextareaScroll"
               @input="onTextareaInput"
               @keydown="emit('keydown', $event)"
+              @beforeinput="emit('beforeinput', $event)"
               @keyup="onTextareaKeyup"
               @mouseup="onTextareaMouseup"
               @select="onTextareaSelect"
+              @mousedown="onTextareaMouseDown"
               @focus="onTextareaFocus"
               @blur="onTextareaBlur"
             />
@@ -142,6 +179,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { EntityToken } from '../../../features/chapter-hub/types'
+import {
+  tokenOverlapsQuoteSelection,
+  type ChapterQuoteSelectionRange,
+} from '../../../features/chapter-hub/lib/chapterQuoteSelection'
+import {
+  buildTextSearchSegments,
+  findTextSearchMatches,
+  resolveSearchMatchHighlight,
+} from '../../../features/chapter-hub/lib/chapterTextSearch'
+import { scrollCaretIntoView } from '../../../features/chapter-hub/caretGeometry'
 import type { Character, Faction, Item } from '../../../types'
 
 const props = defineProps<{
@@ -149,9 +196,36 @@ const props = defineProps<{
   entityPreviewLines: EntityToken[][]
   shouldShowEntityOverlay: boolean
   isChapterTextareaFocused: boolean
+  pinnedQuoteRange?: ChapterQuoteSelectionRange | null
   activeFlashFsKey?: string
   readonly?: boolean
+  searchQuery?: string
+  searchActiveMatchIndex?: number
 }>()
+
+const showPreviewEntityOverlay = computed(
+  () => props.shouldShowEntityOverlay && !props.isChapterTextareaFocused && !props.pinnedQuoteRange,
+)
+const showQuoteSelectionOverlay = computed(() => !!props.pinnedQuoteRange)
+
+function isQuoteToken(token: EntityToken): boolean {
+  return tokenOverlapsQuoteSelection(token, props.pinnedQuoteRange)
+}
+
+const searchQuery = computed(() => String(props.searchQuery ?? '').trim())
+const searchActiveMatchIndex = computed(() => Math.max(-1, Math.trunc(Number(props.searchActiveMatchIndex ?? -1))))
+
+const searchMatches = computed(() => findTextSearchMatches(props.content ?? '', searchQuery.value))
+const searchSegments = computed(() => buildTextSearchSegments(props.content ?? '', searchMatches.value))
+
+function searchHighlightClass(token: EntityToken): Record<string, boolean> {
+  const highlight = resolveSearchMatchHighlight(token.range ?? null, searchMatches.value, searchActiveMatchIndex.value)
+  if (!highlight) return {}
+  return {
+    'chapter-hub__search-match': highlight === 'match',
+    'chapter-hub__search-match--active': highlight === 'active',
+  }
+}
 
 const overlayReady = computed(() => {
   const lines = props.entityPreviewLines ?? []
@@ -390,24 +464,52 @@ function onWindowMouseUpForOverlaySelection(e: MouseEvent): void {
   focusTextareaWithSelection(start, end)
 }
 
+function isInteractiveOverlayTarget(target: EventTarget | null): HTMLElement | null {
+  const rawTarget = target
+  return rawTarget instanceof Element
+    ? rawTarget.closest<HTMLElement>(
+        '.chapter-hub__entity-name--link, .chapter-hub__entity-name--faction, .chapter-hub__foreshadow-mark, .chapter-hub__entity-name--item',
+      )
+    : rawTarget instanceof Node
+      ? rawTarget.parentElement?.closest<HTMLElement>(
+          '.chapter-hub__entity-name--link, .chapter-hub__entity-name--faction, .chapter-hub__foreshadow-mark, .chapter-hub__entity-name--item',
+        ) ?? null
+      : null
+}
+
+function onWrapPointerDownCapture(e: PointerEvent): void {
+  if (e.button !== 0 || props.readonly) return
+  emit('paperInteract')
+
+  const ta = textareaRef.value
+  if (!ta) return
+  if (isInteractiveOverlayTarget(e.target)) return
+
+  const targetNode = e.target instanceof Node ? e.target : null
+  if (targetNode && (targetNode === ta || ta.contains(targetNode))) {
+    if (!props.isChapterTextareaFocused) {
+      const pos = ta.selectionStart ?? ta.value.length
+      focusTextareaAtPosition(pos)
+    }
+    return
+  }
+
+  if (props.shouldShowEntityOverlay) syncTextareaScrollFromOverlay()
+  const pos = getTokenCaretPositionFromPoint(e as unknown as MouseEvent) ?? ta.value.length
+  focusTextareaAtPosition(pos)
+}
+
+function onTextareaMouseDown(): void {
+  emit('paperInteract')
+}
+
 function onOverlayTextMouseDown(e: MouseEvent): void {
   if (props.isChapterTextareaFocused) return
   if (e.button !== 0) return
   // 失焦时 overlay 可能被滚动到不同位置；进入聚焦前先同步到 textarea，避免跳回上一次聚焦画面
   syncTextareaScrollFromOverlay()
-  const rawTarget = e.target
-  const interactiveEl =
-    rawTarget instanceof Element
-      ? rawTarget.closest<HTMLElement>(
-          '.chapter-hub__entity-name--link, .chapter-hub__entity-name--faction, .chapter-hub__foreshadow-mark'
-        )
-      : rawTarget instanceof Node
-        ? rawTarget.parentElement?.closest<HTMLElement>(
-            '.chapter-hub__entity-name--link, .chapter-hub__entity-name--faction, .chapter-hub__foreshadow-mark'
-          ) ?? null
-        : null
   // 角色/势力/伏笔点击保持失焦交互（弹窗/跳转）
-  if (interactiveEl) return
+  if (isInteractiveOverlayTarget(e.target)) return
 
   e.preventDefault()
 
@@ -430,11 +532,13 @@ const emit = defineEmits<{
   input: [event: Event]
   scroll: [event: Event]
   keydown: [event: KeyboardEvent]
+  beforeinput: [event: InputEvent]
   keyup: [event: KeyboardEvent]
   mouseup: [event: MouseEvent]
   select: []
   focus: []
-  blur: []
+  blur: [event: FocusEvent]
+  paperInteract: []
   entityEnter: [
     event: MouseEvent,
     character: Character,
@@ -465,6 +569,14 @@ const emit = defineEmits<{
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const overlayRef = ref<HTMLElement | null>(null)
 const overlayInnerRef = ref<HTMLElement | null>(null)
+const searchBackdropRef = ref<HTMLElement | null>(null)
+
+function syncSearchBackdropScroll(): void {
+  const ta = textareaRef.value
+  const backdrop = searchBackdropRef.value
+  if (!ta || !backdrop) return
+  backdrop.scrollTop = ta.scrollTop
+}
 
 function syncEntityOverlayScroll(): void {
   const ta = textareaRef.value
@@ -472,6 +584,7 @@ function syncEntityOverlayScroll(): void {
   if (!ta || !overlay) return
   // 用原生 scrollTop 同步，比 translateY 更稳（可自动 clamped 到底部，避免底部空白）
   overlay.scrollTop = ta.scrollTop
+  syncSearchBackdropScroll()
 }
 
 function onTextareaScroll(e: Event): void {
@@ -499,8 +612,8 @@ function onTextareaFocus(): void {
   emit('focus')
 }
 
-function onTextareaBlur(): void {
-  emit('blur')
+function onTextareaBlur(e: FocusEvent): void {
+  emit('blur', e)
 }
 
 function onEntityWheel(e: WheelEvent): void {
@@ -531,6 +644,24 @@ watch(
   },
 )
 
+watch(
+  () => props.pinnedQuoteRange,
+  () => {
+    void nextTick(() => syncEntityOverlayScroll())
+  },
+)
+
+watch(
+  () => [searchQuery.value, searchActiveMatchIndex.value, props.content] as const,
+  ([query, activeIndex]) => {
+    void nextTick(() => {
+      syncSearchBackdropScroll()
+      if (!query || activeIndex < 0) return
+      goToSearchMatch(activeIndex, { focus: false })
+    })
+  },
+)
+
 let textareaResizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
@@ -549,5 +680,22 @@ onUnmounted(() => {
   textareaResizeObserver = null
 })
 
-defineExpose({ textareaRef })
+function goToSearchMatch(index: number, options?: { focus?: boolean }): boolean {
+  const match = searchMatches.value[index]
+  const ta = textareaRef.value
+  if (!match || !ta) return false
+
+  const shouldFocus = options?.focus !== false
+  if (shouldFocus) ta.focus({ preventScroll: true })
+  ta.setSelectionRange(match.start, match.end)
+  scrollCaretIntoView(ta, match.start)
+  syncSearchBackdropScroll()
+  return true
+}
+
+function getSearchMatchCount(): number {
+  return searchMatches.value.length
+}
+
+defineExpose({ textareaRef, goToSearchMatch, getSearchMatchCount })
 </script>

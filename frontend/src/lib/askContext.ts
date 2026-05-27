@@ -26,6 +26,7 @@ export const ASK_CONTEXT_LAYER_LABELS: Record<string, string> = {
   continuity_brief: '全书连续性',
   novel_brief: '作品信息',
   session_note: '会话说明',
+  tool_scope: '工具作用域',
 }
 
 export type AskPromptBuildResult = {
@@ -428,6 +429,11 @@ function buildAskContextParts(
   const parts: Record<string, string> = {
     instruction: ['【作者提问】', `提问范围：${input.mode}`, question].filter(Boolean).join('\n'),
     selection_quote: s(input.selectionQuote) ? ['【引用片段】', s(input.selectionQuote)].join('\n') : '',
+    tool_scope: [
+      '【工具作用域】',
+      `当前章 ID：${current.id}（第 ${current.chapterNo} 章《${s(current.title)}》）`,
+      '未传 chapterId 时，正文与章总结类工具默认作用于当前章。',
+    ].join('\n'),
     current_chapter: [
       '【当前章正文】',
       `第 ${current.chapterNo} 章 ${s(current.title)}`,
