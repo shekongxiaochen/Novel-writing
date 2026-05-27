@@ -1,5 +1,6 @@
-import type { AiToolCall, AiToolDefinition, AiToolResult, OutlineTension } from '../types'
+import type { AiToolCall, AiToolDefinition, AiToolResult, AiToolExecutionContext, OutlineTension } from '../types'
 import {
+  createChapter,
   createCharacter,
   createCharacterRelation,
   createFaction,
@@ -8,7 +9,9 @@ import {
   createTimelineEvent,
   deleteCharacter,
   deleteOutlineItem,
+  getChaptersByNovelId,
   updateCharacter,
+  updateChapter,
   updateOutlineItem,
 } from './storage'
 
@@ -172,6 +175,59 @@ export const AI_WRITE_TOOLS: AiToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'create_chapter',
+      description:
+        '在作品末尾新建一章。用于「写下一章」「新开章节」等需求；可选 title、章总结 annotation、初稿 content（replace 写入）、绑定的大纲节点 outlineItemIds。',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '章节标题，可省略则自动生成「第N章」' },
+          annotation: { type: 'string', description: '章总结（可选）' },
+          content: { type: 'string', description: '初稿正文（可选，有则写入新章）' },
+          outlineItemIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '绑定的大纲情节点 ID 列表（可选）',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_chapter_content',
+      description:
+        '修改当前或指定章节的正文。mode=append 在章末追加 text；mode=replace 用 text 替换整章正文（慎用）。未传 chapterId 时使用作者当前正在编辑的章节。',
+      parameters: {
+        type: 'object',
+        properties: {
+          chapterId: { type: 'string', description: '章节 ID，可省略则使用当前章' },
+          mode: { type: 'string', enum: ['append', 'replace'], description: 'append 追加；replace 整章替换' },
+          text: { type: 'string', description: '要写入的正文片段' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_chapter_summary',
+      description: '更新章节总结（写作台「总结」字段）。未传 chapterId 时使用当前章。',
+      parameters: {
+        type: 'object',
+        properties: {
+          chapterId: { type: 'string', description: '章节 ID，可省略则使用当前章' },
+          summary: { type: 'string', description: '章总结正文' },
+        },
+        required: ['summary'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_timeline_event',
       description: '创建故事时间线事件。',
       parameters: {
@@ -209,7 +265,11 @@ function toTension(value: unknown): OutlineTension | undefined {
   return t as OutlineTension
 }
 
-export function executeToolCall(novelId: string, toolCall: AiToolCall): AiToolResult {
+export function executeToolCall(
+  novelId: string,
+  toolCall: AiToolCall,
+  ctx: AiToolExecutionContext = {},
+): AiToolResult {
   const args = parseArgs(toolCall.function.arguments)
   if (!args) {
     return { success: false, message: `参数解析失败` }
@@ -236,8 +296,86 @@ export function executeToolCall(novelId: string, toolCall: AiToolCall): AiToolRe
       return execCreateForeshadow(novelId, args)
     case 'create_timeline_event':
       return execCreateTimelineEvent(novelId, args)
+    case 'create_chapter':
+      return execCreateChapter(novelId, args)
+    case 'update_chapter_content':
+      return execUpdateChapterContent(novelId, args, ctx)
+    case 'update_chapter_summary':
+      return execUpdateChapterSummary(novelId, args, ctx)
     default:
       return { success: false, message: `未知操作: ${name}` }
+  }
+}
+
+function resolveChapter(novelId: string, chapterId: unknown, ctx: AiToolExecutionContext) {
+  const id = n(chapterId) || n(ctx.defaultChapterId)
+  if (!id) return null
+  return getChaptersByNovelId(novelId).find((row) => row.id === id) ?? null
+}
+
+function execCreateChapter(novelId: string, args: Record<string, any>): AiToolResult {
+  const created = createChapter({
+    novelId,
+    title: n(args.title),
+    notes: '',
+    annotation: n(args.annotation) || n(args.summary),
+  })
+  const content = n(args.content) || n(args.text)
+  const outlineItemIds = Array.isArray(args.outlineItemIds)
+    ? args.outlineItemIds.map((id: unknown) => n(id)).filter(Boolean)
+    : []
+  let chapter = created
+  if (content) {
+    const updated = updateChapter({ id: created.id, content })
+    if (updated) chapter = updated
+  }
+  if (outlineItemIds.length > 0) {
+    const updated = updateChapter({ id: chapter.id, outlineItemIds })
+    if (updated) chapter = updated
+  }
+  return {
+    success: true,
+    message: `已新建第 ${chapter.chapterNo} 章「${chapter.title}」`,
+    data: { chapterId: chapter.id, chapterNo: chapter.chapterNo },
+  }
+}
+
+function execUpdateChapterContent(
+  novelId: string,
+  args: Record<string, any>,
+  ctx: AiToolExecutionContext,
+): AiToolResult {
+  const chapter = resolveChapter(novelId, args.chapterId, ctx)
+  if (!chapter) return { success: false, message: '未找到目标章节，请先选择章节或提供 chapterId' }
+  const text = n(args.text)
+  if (!text) return { success: false, message: '正文内容不能为空' }
+  const mode = n(args.mode) === 'replace' ? 'replace' : 'append'
+  const nextContent = mode === 'replace' ? text : `${chapter.content ?? ''}${text}`
+  const updated = updateChapter({ id: chapter.id, content: nextContent })
+  if (!updated) return { success: false, message: '更新章节正文失败' }
+  const verb = mode === 'replace' ? '已替换' : '已向末尾追加'
+  return {
+    success: true,
+    message: `${verb}第 ${updated.chapterNo} 章正文（${text.length} 字）`,
+    data: { chapterId: updated.id, chapterNo: updated.chapterNo },
+  }
+}
+
+function execUpdateChapterSummary(
+  novelId: string,
+  args: Record<string, any>,
+  ctx: AiToolExecutionContext,
+): AiToolResult {
+  const chapter = resolveChapter(novelId, args.chapterId, ctx)
+  if (!chapter) return { success: false, message: '未找到目标章节' }
+  const summary = n(args.summary)
+  if (!summary) return { success: false, message: '章总结不能为空' }
+  const updated = updateChapter({ id: chapter.id, annotation: summary })
+  if (!updated) return { success: false, message: '更新章总结失败' }
+  return {
+    success: true,
+    message: `已更新第 ${updated.chapterNo} 章总结`,
+    data: { chapterId: updated.id, chapterNo: updated.chapterNo },
   }
 }
 

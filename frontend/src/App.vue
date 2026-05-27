@@ -364,7 +364,7 @@
               <div class="cursor-shell__assistant-card">
                 <p class="cursor-shell__assistant-eyebrow">Workspace AI</p>
                 <h3>把 AI 侧栏带到整个工作台</h3>
-                <p class="muted">这里不再只服务写作页。你可以从任意工作台界面直接跳去 AI 设置、继续写作，或先查看当前作品的结构规模。</p>
+                <p class="muted">这里不再只服务写作页。你可以从任意工作台界面继续写作，或先查看当前作品的结构规模。</p>
               </div>
 
               <div class="cursor-shell__chapter-entities-grid cursor-shell__chapter-entities-grid--section">
@@ -373,9 +373,6 @@
                   <div class="cursor-shell__right-panel-actions">
                     <button type="button" class="cursor-shell__right-panel-btn cursor-shell__right-panel-btn--primary" @click="goWriting">
                       去写作区
-                    </button>
-                    <button type="button" class="cursor-shell__right-panel-btn" @click="goWorkspaceTab('ai')">
-                      打开 AI 设置
                     </button>
                   </div>
                 </div>
@@ -958,7 +955,7 @@ watch(
   { immediate: true },
 )
 
-type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues' | 'ai'
+type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues'
 const workspaceTabs = [
   { key: 'write' as const, label: '写作' },
   { key: 'outline' as const, label: '大纲' },
@@ -967,7 +964,6 @@ const workspaceTabs = [
   { key: 'factions' as const, label: '势力' },
   { key: 'categories' as const, label: '分类' },
   { key: 'issues' as const, label: '伏笔' },
-  { key: 'ai' as const, label: 'AI' },
 ]
 const currentWorkspaceTabLabel = computed(
   () => workspaceTabs.find((tab) => tab.key === currentWorkspaceTabKey.value)?.label ?? '写作',

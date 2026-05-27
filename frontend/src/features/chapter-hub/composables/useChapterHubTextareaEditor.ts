@@ -11,6 +11,7 @@ import {
 import { updateChapter } from '../../../lib/storage'
 import type { CharacterChangeEvent, FactionChangeEvent } from '../../../lib/storage'
 import { buildEntityPreviewLines } from '../entityPreview'
+import { planQuoteAutoPairEdit } from '../lib/chapterQuoteAutoPair'
 import { scrollCaretIntoView } from '../caretGeometry'
 import type { Chapter, Character, Faction, ForeshadowPlant, Item } from '../../../types'
 
@@ -41,6 +42,7 @@ export function useChapterHubTextareaEditor(deps: {
   openCtxMenuAtPoint: (selStart: number, selEnd: number, x: number, y: number) => void
   closeCtxMenu: () => void
   onEntityNameLeave: () => void
+  hasPinnedQuoteSelection?: () => boolean
 }) {
   const {
     selectedChapterId,
@@ -65,12 +67,15 @@ export function useChapterHubTextareaEditor(deps: {
     openCtxMenuAtPoint,
     closeCtxMenu,
     onEntityNameLeave,
+    hasPinnedQuoteSelection,
   } = deps
 
   const INDENT = CHAPTER_HUB_FIRST_LINE_INDENT
 
   const isChapterTextareaFocused = ref(false)
   const hasTextareaSelection = ref(false)
+  let chapterPaperPointerUntil = 0
+  let aiStudioPointerUntil = 0
 
   const entityPreviewLines = computed(() =>
     buildEntityPreviewLines(
@@ -136,7 +141,72 @@ export function useChapterHubTextareaEditor(deps: {
     void ensureFirstLineIndent(false)
   })
 
+  function applyChapterContentWithCaret(nextValue: string, caretPos: number): void {
+    const chapter = selectedChapter.value
+    if (!chapter) return
+    updateChapter({ id: chapter.id, content: nextValue })
+    const i = chapters.value.findIndex((c) => c.id === chapter.id)
+    if (i >= 0) {
+      chapters.value = chapters.value.map((c, j) => (j === i ? { ...c, content: nextValue } : c))
+    }
+    void nextTick(() => {
+      const ta = chapterTextareaRef.value
+      if (!ta) return
+      ta.setSelectionRange(caretPos, caretPos)
+      ta.focus()
+      scrollCaretIntoView(ta, caretPos)
+    })
+  }
+
+  function applyQuoteAutoPairEditToTextarea(edit: ReturnType<typeof planQuoteAutoPairEdit>): boolean {
+    if (!edit) return false
+    const ta = chapterTextareaRef.value
+    if (!ta) return false
+    if (edit.kind === 'skip-close') {
+      ta.setSelectionRange(edit.caret, edit.caret)
+      return true
+    }
+    applyChapterContentWithCaret(edit.text, edit.caret)
+    return true
+  }
+
+  function tryAutoPairQuote(char: string): boolean {
+    if (!char || char.length !== 1) return false
+    if (!selectedChapter.value) return false
+
+    const ta = chapterTextareaRef.value
+    if (!ta) return false
+
+    const edit = planQuoteAutoPairEdit(char, ta.value, ta.selectionStart ?? 0, ta.selectionEnd ?? 0)
+    return applyQuoteAutoPairEditToTextarea(edit)
+  }
+
+  function tryAutoPairQuoteOnKeydown(e: KeyboardEvent): boolean {
+    if (e.isComposing || e.defaultPrevented) return false
+    if (e.ctrlKey || e.metaKey || e.altKey) return false
+    if (e.key.length !== 1) return false
+
+    if (!tryAutoPairQuote(e.key)) return false
+    e.preventDefault()
+    return true
+  }
+
+  function tryAutoPairQuoteOnBeforeInput(e: InputEvent): boolean {
+    if (e.isComposing || e.defaultPrevented) return false
+    if (e.inputType !== 'insertText' || !e.data || e.data.length !== 1) return false
+
+    if (!tryAutoPairQuote(e.data)) return false
+    e.preventDefault()
+    return true
+  }
+
+  function onChapterTextareaBeforeInput(e: InputEvent): void {
+    tryAutoPairQuoteOnBeforeInput(e)
+  }
+
   function onChapterTextareaKeydown(e: KeyboardEvent) {
+    if (tryAutoPairQuoteOnKeydown(e)) return
+
     if (e.ctrlKey && e.key.toLowerCase() === ' ') {
       e.preventDefault()
       forceSuggest.value = true
@@ -191,20 +261,7 @@ export function useChapterHubTextareaEditor(deps: {
     const nextValue = current.slice(0, start) + insert + current.slice(end)
 
     e.preventDefault()
-
-    updateChapter({ id: selectedChapter.value.id, content: nextValue })
-
-    const i = chapters.value.findIndex((c) => c.id === selectedChapter.value!.id)
-    if (i >= 0) {
-      chapters.value = chapters.value.map((c, j) => (j === i ? { ...c, content: nextValue } : c))
-    }
-
-    const newPos = start + insert.length
-    void nextTick(() => {
-      ta.setSelectionRange(newPos, newPos)
-      ta.focus()
-      scrollCaretIntoView(ta, newPos)
-    })
+    applyChapterContentWithCaret(nextValue, start + insert.length)
   }
 
   function onGlobalKeydownCapture(e: KeyboardEvent): void {
@@ -219,8 +276,32 @@ export function useChapterHubTextareaEditor(deps: {
     }
   }
 
-  function onChapterTextareaFocus(): void {
+  function isFocusInsideAiStudio(target: EventTarget | null | undefined): boolean {
+    if (typeof document === 'undefined') return false
+    const studio = document.getElementById('chapter-hub-ai-studio')
+    if (!studio || !(target instanceof Node)) return false
+    return studio.contains(target)
+  }
+
+  function markChapterPaperInteraction(): void {
+    chapterPaperPointerUntil = Date.now() + 280
+  }
+
+  function engageChapterWritingView(): void {
     isChapterTextareaFocused.value = true
+  }
+
+  function onChapterPaperPointerDown(): void {
+    markChapterPaperInteraction()
+  }
+
+  function onAiStudioPointerDown(): void {
+    aiStudioPointerUntil = Date.now() + 400
+    engageChapterWritingView()
+  }
+
+  function onChapterTextareaFocus(): void {
+    engageChapterWritingView()
     void (async () => {
       await nextTick()
       await ensureFirstLineIndent(true)
@@ -241,23 +322,17 @@ export function useChapterHubTextareaEditor(deps: {
     }
     updateNameSuggestion(ta)
 
-    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-      window.setTimeout(() => openCtxMenuForExplicitSelection(), 0)
-    }
   }
 
-  function onChapterTextareaMouseup(e: MouseEvent): void {
+  function onChapterTextareaMouseup(): void {
     const ta = chapterTextareaRef.value
     if (!ta || !selectedChapter.value) return
 
     window.setTimeout(() => {
       const start = ta.selectionStart ?? 0
       const end = ta.selectionEnd ?? start
-      if (end <= start) {
-        closeCtxMenu()
-        return
-      }
-      openCtxMenuAtPoint(start, end, e.clientX + 6, e.clientY + 6)
+      hasTextareaSelection.value = end > start
+      if (end <= start) closeCtxMenu()
     }, 0)
   }
 
@@ -265,16 +340,38 @@ export function useChapterHubTextareaEditor(deps: {
     const ta = chapterTextareaRef.value
     if (ta) hasTextareaSelection.value = (ta.selectionStart ?? 0) !== (ta.selectionEnd ?? 0)
     if (hasTextareaSelection.value) onEntityNameLeave()
-    window.setTimeout(() => openCtxMenuForExplicitSelection(), 0)
   }
 
-  function onChapterTextareaBlur(): void {
+  function finishChapterTextareaBlur(): void {
     isChapterTextareaFocused.value = false
     hasTextareaSelection.value = false
+    resetNameSuggest()
+    closeCtxMenu()
+    onEntityNameLeave()
+  }
+
+  function onChapterTextareaBlur(e?: FocusEvent): void {
+    if (hasPinnedQuoteSelection?.()) {
+      engageChapterWritingView()
+      return
+    }
+    if (isFocusInsideAiStudio(e?.relatedTarget)) {
+      engageChapterWritingView()
+      return
+    }
     window.setTimeout(() => {
-      resetNameSuggest()
-      closeCtxMenu()
-      onEntityNameLeave()
+      if (hasPinnedQuoteSelection?.()) {
+        engageChapterWritingView()
+        return
+      }
+      if (isFocusInsideAiStudio(document.activeElement)) {
+        engageChapterWritingView()
+        return
+      }
+      if (Date.now() < chapterPaperPointerUntil) return
+      if (Date.now() < aiStudioPointerUntil) return
+      if (document.activeElement === chapterTextareaRef.value) return
+      finishChapterTextareaBlur()
     }, 80)
   }
 
@@ -312,10 +409,15 @@ export function useChapterHubTextareaEditor(deps: {
     shouldShowEntityOverlay,
     wordCount,
     onChapterTextareaKeydown,
+    onChapterTextareaBeforeInput,
     onChapterTextareaKeyup,
+    engageChapterWritingView,
+    onChapterPaperPointerDown,
+    onAiStudioPointerDown,
     onChapterTextareaFocus,
     onChapterTextareaBlur,
     onChapterTextareaMouseup,
     onChapterTextareaSelect,
+    exitChapterWritingView: finishChapterTextareaBlur,
   }
 }

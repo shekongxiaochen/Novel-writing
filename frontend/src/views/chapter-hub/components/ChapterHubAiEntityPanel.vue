@@ -123,6 +123,7 @@
           <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--hint chapter-hub-ai-message__body--empty">
             <p class="chapter-hub-ai-message__empty-title">从当前章节开始提问</p>
             <p>可询问人物关系、伏笔回收、信息冲突，或先点「整理」生成本章档案建议。</p>
+            <p>也可让 AI 修改正文、章总结、大纲、角色、势力、伏笔等，侧栏会列出方案，你确认「采用」后才写入。</p>
             <p>选中正文后，引用内容会自动带到输入区上方。</p>
           </div>
         </article>
@@ -133,60 +134,9 @@
         >
           <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--hint chapter-hub-ai-message__body--empty">
             <p class="chapter-hub-ai-message__empty-title">AI 写作台</p>
-            <p>描述续写方向、场景与字数，AI 将基于当前章与档案生成正文草稿。</p>
-            <p>生成后可预览，确认后再写入稿纸。选中正文可作为引用上下文。</p>
+            <p>直接说明需求即可，例如「按大纲写下一章」「续写本章末尾」「在光标处写 800 字」。</p>
+            <p>说「写下一章」会自动新建章节、绑定大纲并起标题；生成后在「续写草稿」预览，采用后写入稿纸并更新章总结与人物档案。</p>
           </div>
-        </article>
-
-        <article
-          v-if="deskMode === 'write' && (continueDraft.loading || continueDraft.text || continueDraft.status !== 'idle')"
-          class="chapter-hub-ai-card chapter-hub-ai-card--continue"
-        >
-          <header class="chapter-hub-ai-card__head">
-            <div class="chapter-hub-ai-card__title-wrap">
-              <h4 class="chapter-hub-ai-card__title">续写草稿</h4>
-              <p class="chapter-hub-ai-card__subtitle">
-                {{ continueDraft.position === 'end' ? '章末续写' : '光标处续写' }} · 约 {{ continueDraft.targetChars }} 字
-              </p>
-            </div>
-            <span v-if="continueDraft.status === 'applied'" class="chapter-hub-ai-card__state">已采用</span>
-            <span v-else-if="continueDraft.status === 'ignored'" class="chapter-hub-ai-card__state">已忽略</span>
-          </header>
-          <div v-if="continueDraft.loading && !continueDraft.text" class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
-            <div class="chapter-hub-ai-streaming">
-              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
-                <span></span><span></span><span></span>
-              </div>
-              <p class="chapter-hub-ai-streaming__title">正在生成续写草稿…</p>
-            </div>
-          </div>
-          <pre v-else class="chapter-hub-ai-continue__preview">{{ continueDraft.text }}</pre>
-          <p
-            v-if="continueDraft.usedLayers.length > 0 || continueDraft.droppedLayers.length > 0"
-            class="chapter-hub-ai-continue__context-meta"
-          >
-            <span v-if="continueDraft.usedChars > 0">上下文约 {{ continueDraft.usedChars }} 字</span>
-            <span v-if="continueDraft.usedLayers.length > 0"> · 已用：{{ formatContinueLayers(continueDraft.usedLayers) }}</span>
-            <span v-if="continueDraft.droppedLayers.length > 0"> · 已省略：{{ formatContinueLayers(continueDraft.droppedLayers) }}</span>
-          </p>
-          <details v-if="continueDraft.ragHits.length > 0" class="chapter-hub-ai-continue__rag">
-            <summary>旧章检索 {{ continueDraft.ragHits.length }} 段</summary>
-            <article v-for="hit in continueDraft.ragHits" :key="`${hit.chapterId}-${hit.excerpt.slice(0, 24)}`" class="chapter-hub-ai-continue__rag-item">
-              <p class="chapter-hub-ai-continue__rag-meta">
-                第 {{ hit.chapterNo }} 章 · {{ ragSourceLabel(hit.source) }} · {{ hit.matchedTerms.join('、') }}
-              </p>
-              <p class="chapter-hub-ai-continue__rag-excerpt">{{ hit.excerpt }}</p>
-            </article>
-          </details>
-          <p v-for="warning in continueDraft.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
-          <footer v-if="continueDraft.status === 'ready' && !continueDraft.loading" class="chapter-hub-ai-card__footer">
-            <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('continue-adopt')">采用</button>
-            <button type="button" class="chapter-hub-ai-action" @click="$emit('continue-ignore')">忽略</button>
-            <button type="button" class="chapter-hub-ai-action" @click="regenerateContinue">重新生成</button>
-          </footer>
-          <footer v-else-if="continueDraft.loading" class="chapter-hub-ai-card__footer">
-            <button type="button" class="chapter-hub-ai-action" @click="$emit('continue-stop')">终止</button>
-          </footer>
         </article>
 
         <article
@@ -215,7 +165,7 @@
         </article>
 
         <article
-          v-for="message in chatMessages"
+          v-for="message in chatMessagesBeforeExtract"
           v-show="deskMode === 'ask' || message.role === 'user' || message.content.length < 400"
           :key="message.id"
           class="chapter-hub-ai-message"
@@ -258,64 +208,9 @@
           </div>
         </article>
 
-        <article v-if="deskMode === 'ask' && loading" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
-          <div class="chapter-hub-ai-message__meta">
-            <span class="chapter-hub-ai-message__author">Assistant</span>
-          </div>
-          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
-            <div class="chapter-hub-ai-streaming">
-              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-              <p class="chapter-hub-ai-streaming__title">正在整理...</p>
-              <p class="chapter-hub-ai-streaming__desc">人物、势力、物品、关系、伏笔和章节分类会整理到当前会话里。</p>
-              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
-                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
-                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
-                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article v-if="deskMode === 'ask' && chatThinking && !hasLiveAssistantMessage" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
-          <div class="chapter-hub-ai-message__meta">
-            <span class="chapter-hub-ai-message__author">Assistant</span>
-          </div>
-          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
-            <div class="chapter-hub-ai-streaming">
-              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-              <p class="chapter-hub-ai-streaming__title">正在回答你的问题...</p>
-              <p class="chapter-hub-ai-streaming__desc">我会结合当前章节、上下文和已整理信息来组织回答。</p>
-              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
-                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
-                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
-                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article v-if="error" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
-          <div class="chapter-hub-ai-message__meta">
-            <span class="chapter-hub-ai-message__author">Assistant</span>
-            <span class="chapter-hub-ai-message__tag chapter-hub-ai-message__tag--error">Error</span>
-          </div>
-          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--error">
-            <p>{{ error }}</p>
-          </div>
-        </article>
-
         <article
-          v-for="(run, runIdx) in extractRuns"
+          v-for="(run, runIdx) in inlineExtractRuns"
           :key="run.id"
-          v-show="deskMode === 'ask' && hasRun && !loading"
           class="chapter-hub-ai-message chapter-hub-ai-message--assistant"
         >
           <div class="chapter-hub-ai-message__meta">
@@ -858,6 +753,188 @@
             </div>
           </div>
         </article>
+
+        <article
+          v-for="message in chatMessagesAfterExtract"
+          v-show="deskMode === 'ask' || message.role === 'user' || message.content.length < 400"
+          :key="message.id"
+          class="chapter-hub-ai-message"
+          :class="[
+            message.role === 'user' ? 'chapter-hub-ai-message--user' : 'chapter-hub-ai-message--assistant',
+            { 'chapter-hub-ai-message--live': isLiveAssistantMessage(message) },
+          ]"
+        >
+          <div class="chapter-hub-ai-message__meta">
+            <span class="chapter-hub-ai-message__author">{{ message.role === 'user' ? 'You' : 'Assistant' }}</span>
+          </div>
+          <div
+            v-if="isLiveAssistantMessage(message) && !message.content.trim()"
+            class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming"
+          >
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">{{ deskMode === 'write' ? '正在生成写作草稿...' : '正在回答你的问题...' }}</p>
+              <p class="chapter-hub-ai-streaming__desc">
+                {{ deskMode === 'write' ? '我会结合当前章节正文、章总结与档案信息续写。' : '我会结合当前章节、上下文和已整理信息来组织回答。' }}
+              </p>
+              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else
+            class="chapter-hub-ai-message__body chapter-hub-ai-message__body--markdown"
+            :class="{ 'chapter-hub-ai-message__body--live-markdown': isLiveAssistantMessage(message) }"
+          >
+            <div v-html="renderMessageMarkdown(message.content)" />
+            <span v-if="isLiveAssistantMessage(message)" class="chapter-hub-ai-message__caret" aria-hidden="true"></span>
+          </div>
+        </article>
+
+        <article
+          v-if="deskMode === 'write' && (continueDraft.loading || continueDraft.text || continueDraft.status !== 'idle')"
+          class="chapter-hub-ai-card chapter-hub-ai-card--continue"
+        >
+          <header class="chapter-hub-ai-card__head">
+            <div class="chapter-hub-ai-card__title-wrap">
+              <h4 class="chapter-hub-ai-card__title">续写草稿</h4>
+              <p class="chapter-hub-ai-card__subtitle">采用后写入稿纸，并自动更新章总结与人物档案</p>
+            </div>
+            <span v-if="continueDraft.status === 'applied'" class="chapter-hub-ai-card__state">已采用</span>
+            <span v-else-if="continueDraft.status === 'ignored'" class="chapter-hub-ai-card__state">已忽略</span>
+          </header>
+          <div v-if="continueDraft.loading && !continueDraft.text" class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">
+                {{ continueThinkingText ? '正在思考并准备正文…' : '正在生成续写草稿…' }}
+              </p>
+              <p v-if="continueThinkingText" class="chapter-hub-ai-streaming__desc chapter-hub-ai-continue__thinking">
+                {{ continueThinkingExcerpt }}
+              </p>
+            </div>
+          </div>
+          <pre v-else class="chapter-hub-ai-continue__preview">{{ continueDraft.text }}</pre>
+          <p
+            v-if="continueDraft.usedLayers.length > 0 || continueDraft.droppedLayers.length > 0"
+            class="chapter-hub-ai-continue__context-meta"
+          >
+            <span v-if="continueDraft.usedChars > 0">上下文约 {{ continueDraft.usedChars }} 字</span>
+            <span v-if="continueDraft.usedLayers.length > 0"> · 已用：{{ formatContinueLayers(continueDraft.usedLayers) }}</span>
+            <span v-if="continueDraft.droppedLayers.length > 0"> · 已省略：{{ formatContinueLayers(continueDraft.droppedLayers) }}</span>
+          </p>
+          <details v-if="continueDraft.ragHits.length > 0" class="chapter-hub-ai-continue__rag">
+            <summary>旧章检索 {{ continueDraft.ragHits.length }} 段</summary>
+            <article v-for="hit in continueDraft.ragHits" :key="`${hit.chapterId}-${hit.excerpt.slice(0, 24)}`" class="chapter-hub-ai-continue__rag-item">
+              <p class="chapter-hub-ai-continue__rag-meta">
+                第 {{ hit.chapterNo }} 章 · {{ ragSourceLabel(hit.source) }} · {{ hit.matchedTerms.join('、') }}
+              </p>
+              <p class="chapter-hub-ai-continue__rag-excerpt">{{ hit.excerpt }}</p>
+            </article>
+          </details>
+          <p v-for="warning in continueDraft.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
+          <footer v-if="continueDraft.status === 'ready' && !continueDraft.loading" class="chapter-hub-ai-card__footer">
+            <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('continue-adopt')">采用</button>
+            <button type="button" class="chapter-hub-ai-action" @click="$emit('continue-ignore')">忽略</button>
+            <button type="button" class="chapter-hub-ai-action" @click="regenerateContinue">重新生成</button>
+          </footer>
+          <footer v-else-if="continueDraft.loading" class="chapter-hub-ai-card__footer">
+            <button type="button" class="chapter-hub-ai-action" @click="$emit('continue-stop')">终止</button>
+          </footer>
+        </article>
+
+        <article v-if="deskMode === 'ask' && loading" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
+          <div class="chapter-hub-ai-message__meta">
+            <span class="chapter-hub-ai-message__author">Assistant</span>
+          </div>
+          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">正在整理...</p>
+              <p class="chapter-hub-ai-streaming__desc">人物、势力、物品、关系、伏笔和章节分类会整理到当前会话里。</p>
+              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article v-if="deskMode === 'ask' && chatThinking && !hasLiveAssistantMessage" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
+          <div class="chapter-hub-ai-message__meta">
+            <span class="chapter-hub-ai-message__author">Assistant</span>
+          </div>
+          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--streaming">
+            <div class="chapter-hub-ai-streaming">
+              <div class="chapter-hub-ai-streaming__dots" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p class="chapter-hub-ai-streaming__title">正在回答你的问题...</p>
+              <p class="chapter-hub-ai-streaming__desc">我会结合当前章节、上下文和已整理信息来组织回答。</p>
+              <div class="chapter-hub-ai-streaming__lines" aria-hidden="true">
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--lg"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--md"></span>
+                <span class="chapter-hub-ai-streaming__line chapter-hub-ai-streaming__line--sm"></span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article v-if="error" class="chapter-hub-ai-message chapter-hub-ai-message--assistant">
+          <div class="chapter-hub-ai-message__meta">
+            <span class="chapter-hub-ai-message__author">Assistant</span>
+            <span class="chapter-hub-ai-message__tag chapter-hub-ai-message__tag--error">Error</span>
+          </div>
+          <div class="chapter-hub-ai-message__body chapter-hub-ai-message__body--error">
+            <p>{{ error }}</p>
+          </div>
+        </article>
+
+        <article
+          v-if="deskMode === 'ask' && pendingToolActions.length > 0"
+          class="chapter-hub-ai-card chapter-hub-ai-card--pending-tools"
+        >
+          <header class="chapter-hub-ai-card__head">
+            <div class="chapter-hub-ai-card__title-wrap">
+              <h4 class="chapter-hub-ai-card__title">待确认的修改</h4>
+              <p class="chapter-hub-ai-card__subtitle">采用后才会新建章节、写入正文、章总结、大纲、角色、势力、伏笔或时间线</p>
+            </div>
+          </header>
+          <ul class="chapter-hub-ai-pending-tools__list">
+            <li v-for="action in pendingToolActions" :key="action.id" class="chapter-hub-ai-pending-tools__item">
+              <div class="chapter-hub-ai-pending-tools__main">
+                <span class="chapter-hub-ai-pending-tools__label">{{ action.label }}</span>
+                <p v-if="action.previewText" class="chapter-hub-ai-pending-tools__preview muted">
+                  {{ action.previewText }}
+                </p>
+              </div>
+              <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('pending-tool-adopt-one', action.id)">
+                采用
+              </button>
+            </li>
+          </ul>
+          <footer class="chapter-hub-ai-card__footer">
+            <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('pending-tool-adopt-all')">全部采用</button>
+            <button type="button" class="chapter-hub-ai-action" @click="$emit('pending-tool-ignore-all')">全部忽略</button>
+          </footer>
+        </article>
+
       </div>
 
       <footer class="chapter-hub-ai-panel__composer">
@@ -868,97 +945,6 @@
             <button type="button" class="chapter-hub-ai-panel__selection-clear" @click="$emit('clear-selection-quote')">清除</button>
           </div>
 
-          <div v-if="deskMode === 'write'" class="chapter-hub-ai-continue__options">
-            <div class="chapter-hub-ai-continue__option-row">
-              <span class="chapter-hub-ai-continue__label">位置</span>
-              <div class="chapter-hub-ai-continue__chips">
-                <button
-                  type="button"
-                  class="chapter-hub-ai-continue__chip"
-                  :class="{ 'is-active': continueDraft.position === 'end' }"
-                  @click="$emit('update-continue-position', 'end')"
-                >
-                  章末
-                </button>
-                <button
-                  type="button"
-                  class="chapter-hub-ai-continue__chip"
-                  :class="{ 'is-active': continueDraft.position === 'cursor' }"
-                  @click="$emit('update-continue-position', 'cursor')"
-                >
-                  光标处
-                </button>
-              </div>
-            </div>
-            <div class="chapter-hub-ai-continue__option-row">
-              <span class="chapter-hub-ai-continue__label">字数</span>
-              <div class="chapter-hub-ai-continue__chips">
-                <button
-                  v-for="size in continueSizeOptions"
-                  :key="size"
-                  type="button"
-                  class="chapter-hub-ai-continue__chip"
-                  :class="{ 'is-active': continueDraft.targetChars === size }"
-                  @click="$emit('update-continue-target-chars', size)"
-                >
-                  {{ size }} 字
-                </button>
-              </div>
-            </div>
-            <div class="chapter-hub-ai-continue__option-row">
-              <span class="chapter-hub-ai-continue__label">前情</span>
-              <div class="chapter-hub-ai-continue__chips">
-                <button
-                  v-for="count in continuePrevSummaryOptions"
-                  :key="count"
-                  type="button"
-                  class="chapter-hub-ai-continue__chip"
-                  :class="{ 'is-active': continueDraft.prevSummaryCount === count }"
-                  @click="$emit('update-continue-prev-summary-count', count)"
-                >
-                  前 {{ count }} 章
-                </button>
-              </div>
-            </div>
-            <div class="chapter-hub-ai-continue__option-row chapter-hub-ai-continue__option-row--checks">
-              <label class="chapter-hub-ai-continue__check">
-                <input
-                  type="checkbox"
-                  :checked="continueDraft.afterAdoptSummary"
-                  @change="$emit('update-continue-after-adopt-summary', ($event.target as HTMLInputElement).checked)"
-                />
-                采用后生成章总结
-              </label>
-              <label class="chapter-hub-ai-continue__check">
-                <input
-                  type="checkbox"
-                  :checked="continueDraft.afterAdoptExtract"
-                  @change="$emit('update-continue-after-adopt-extract', ($event.target as HTMLInputElement).checked)"
-                />
-                采用后整理档案
-              </label>
-              <label class="chapter-hub-ai-continue__check">
-                <input
-                  type="checkbox"
-                  :checked="continueDraft.enableRag"
-                  @change="$emit('update-continue-enable-rag', ($event.target as HTMLInputElement).checked)"
-                />
-                检索旧章正文（按出场人物）
-              </label>
-            </div>
-            <div class="chapter-hub-ai-continue__option-row chapter-hub-ai-continue__option-row--brief">
-              <button
-                type="button"
-                class="chapter-hub-ai-continue__brief-btn"
-                :disabled="continuityBriefLoading || loading"
-                @click="$emit('generate-continuity-brief')"
-              >
-                {{ continuityBriefLoading ? '生成中…' : continuityBrief ? '更新全书摘要' : '生成全书摘要' }}
-              </button>
-              <span v-if="continuityBrief" class="chapter-hub-ai-continue__brief-hint">已保存 {{ continuityBrief.length }} 字</span>
-            </div>
-          </div>
-
           <div class="chapter-hub-ai-panel__input-wrap">
             <textarea
               ref="composerInputRef"
@@ -966,36 +952,40 @@
               class="chapter-hub-ai-panel__input"
               rows="1"
               maxlength="500"
-              :placeholder="deskMode === 'write' ? '描述续写方向（可选），如：两人争吵后陈平安独自离开…' : '询问当前章的人物、伏笔、冲突……'"
+              :placeholder="deskMode === 'write' ? '说明写作需求，如：按大纲写下一章 / 续写本章争吵后的场景…' : '询问当前章的人物、伏笔、冲突……'"
               @keydown="onComposerKeydown"
               @input="syncComposerHeight"
             />
           </div>
 
-          <div
-            v-if="deskMode === 'ask' && (askContextMeta.usedChars > 0 || askContextMeta.warnings.length > 0)"
+          <details
+            v-if="deskMode === 'ask' && askContextFoldVisible"
             class="chapter-hub-ai-ask-context"
           >
-            <p v-if="askContextMeta.usedChars > 0" class="chapter-hub-ai-continue__context-meta">
-              上下文约 {{ askContextMeta.usedChars }} 字
-              <span v-if="askContextMeta.usedLayers.length > 0"> · 已用：{{ formatAskLayers(askContextMeta.usedLayers) }}</span>
-              <span v-if="askContextMeta.droppedLayers.length > 0"> · 已省略：{{ formatAskLayers(askContextMeta.droppedLayers) }}</span>
-            </p>
-            <details v-if="askContextMeta.ragHits.length > 0" class="chapter-hub-ai-continue__rag">
-              <summary>旧章检索 {{ askContextMeta.ragHits.length }} 段</summary>
-              <article
-                v-for="hit in askContextMeta.ragHits"
-                :key="`ask-rag-${hit.chapterId}-${hit.excerpt.slice(0, 20)}`"
-                class="chapter-hub-ai-continue__rag-item"
-              >
-                <p class="chapter-hub-ai-continue__rag-meta">
-                  第 {{ hit.chapterNo }} 章 · {{ ragSourceLabel(hit.source) }} · {{ hit.matchedTerms.join('、') }}
-                </p>
-                <p class="chapter-hub-ai-continue__rag-excerpt">{{ hit.excerpt }}</p>
-              </article>
-            </details>
-            <p v-for="warning in askContextMeta.warnings" :key="`ask-w-${warning}`" class="chapter-hub-ai-warning">{{ warning }}</p>
-          </div>
+            <summary class="chapter-hub-ai-ask-context__summary">{{ askContextSummary }}</summary>
+            <div class="chapter-hub-ai-ask-context__body">
+              <p v-if="askContextMeta.usedLayers.length > 0 || askContextMeta.droppedLayers.length > 0" class="chapter-hub-ai-ask-context__layers">
+                <span v-if="askContextMeta.usedLayers.length > 0">已纳入：{{ formatAskLayers(askContextMeta.usedLayers) }}</span>
+                <span v-if="askContextMeta.droppedLayers.length > 0"> · 已省略：{{ formatAskLayers(askContextMeta.droppedLayers) }}</span>
+              </p>
+              <ul v-if="askContextMeta.warnings.length > 0" class="chapter-hub-ai-ask-context__warnings">
+                <li v-for="warning in askContextMeta.warnings" :key="`ask-w-${warning}`">{{ warning }}</li>
+              </ul>
+              <details v-if="askContextMeta.ragHits.length > 0" class="chapter-hub-ai-continue__rag">
+                <summary>旧章检索 {{ askContextMeta.ragHits.length }} 段</summary>
+                <article
+                  v-for="hit in askContextMeta.ragHits"
+                  :key="`ask-rag-${hit.chapterId}-${hit.excerpt.slice(0, 20)}`"
+                  class="chapter-hub-ai-continue__rag-item"
+                >
+                  <p class="chapter-hub-ai-continue__rag-meta">
+                    第 {{ hit.chapterNo }} 章 · {{ ragSourceLabel(hit.source) }} · {{ hit.matchedTerms.join('、') }}
+                  </p>
+                  <p class="chapter-hub-ai-continue__rag-excerpt">{{ hit.excerpt }}</p>
+                </article>
+              </details>
+            </div>
+          </details>
 
           <div class="chapter-hub-ai-panel__composer-bar">
             <span class="chapter-hub-ai-panel__hint">{{ composerHint }}</span>
@@ -1046,8 +1036,6 @@ import type {
   AiAskContextMeta,
   AiChapterSummaryDraft,
   AiContinueDraft,
-  AiContinuePrevSummaryCount,
-  AiContinueTargetChars,
   ContinueRagSnippetHit,
   AiDeskMode,
   Chapter,
@@ -1092,10 +1080,15 @@ const props = defineProps<{
   selectionQuote?: string
   deskMode: AiDeskMode
   continueDraft: AiContinueDraft
-  continuityBrief: string
-  continuityBriefLoading: boolean
+  continueThinkingText?: string
   chapterSummaryDraft: AiChapterSummaryDraft
   askContextMeta: AiAskContextMeta
+  pendingToolActions: Array<{
+    id: string
+    label: string
+    previewText?: string
+    status: 'pending' | 'applied' | 'ignored'
+  }>
 }>()
 
 const emit = defineEmits<{
@@ -1106,13 +1099,6 @@ const emit = defineEmits<{
   'continue-stop': []
   'continue-adopt': []
   'continue-ignore': []
-  'update-continue-position': [value: 'cursor' | 'end']
-  'update-continue-target-chars': [value: AiContinueTargetChars]
-  'update-continue-prev-summary-count': [value: AiContinuePrevSummaryCount]
-  'update-continue-after-adopt-summary': [value: boolean]
-  'update-continue-after-adopt-extract': [value: boolean]
-  'update-continue-enable-rag': [value: boolean]
-  'generate-continuity-brief': []
   'chapter-summary-adopt': []
   'chapter-summary-ignore': []
   'chapter-summary-stop': []
@@ -1125,6 +1111,9 @@ const emit = defineEmits<{
   stopAsk: []
   apply: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' | 'reopen' }]
   openEditor: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations'; index: number }]
+  'pending-tool-adopt-all': []
+  'pending-tool-adopt-one': [actionId: string]
+  'pending-tool-ignore-all': []
 }>()
 
 const { balance, refresh: refreshAuth } = useAuth()
@@ -1166,9 +1155,6 @@ const scrollRef = ref<HTMLElement | null>(null)
 const composerInputRef = ref<HTMLTextAreaElement | null>(null)
 const historyOpen = ref(false)
 const expandedRunIds = ref<string[]>([])
-const continueSizeOptions: AiContinueTargetChars[] = [800, 1500, 3000]
-const continuePrevSummaryOptions: AiContinuePrevSummaryCount[] = [2, 3, 5]
-
 function formatContinueLayers(keys: string[]): string {
   return keys.map((key) => CONTINUE_CONTEXT_LAYER_LABELS[key] ?? key).join('、')
 }
@@ -1191,6 +1177,9 @@ const composerHint = computed(() => {
   if (props.deskMode === 'write') {
     return writeComposerBusy.value ? 'Enter 终止，Shift+Enter 换行' : 'Enter 生成，Shift+Enter 换行'
   }
+  if (props.pendingToolActions.length > 0) {
+    return '请先确认上方「待确认的修改」，或全部忽略后再继续提问'
+  }
   return askComposerBusy.value ? 'Enter 终止，Shift+Enter 换行' : 'Enter 发送，Shift+Enter 换行'
 })
 const hasLiveAssistantMessage = computed(() =>
@@ -1198,6 +1187,49 @@ const hasLiveAssistantMessage = computed(() =>
   props.chatMessages.length > 0 &&
   props.chatMessages[props.chatMessages.length - 1]?.role === 'assistant',
 )
+
+const continueThinkingExcerpt = computed(() => {
+  const text = String(props.continueThinkingText ?? '').trim()
+  if (!text) return ''
+  return text.length > 240 ? `${text.slice(-240)}…` : text
+})
+
+const askContextFoldVisible = computed(
+  () => props.askContextMeta.usedChars > 0 || props.askContextMeta.warnings.length > 0 || props.askContextMeta.ragHits.length > 0,
+)
+
+const askContextSummary = computed(() => {
+  const parts: string[] = []
+  if (props.askContextMeta.usedChars > 0) parts.push(`上下文约 ${props.askContextMeta.usedChars} 字`)
+  if (props.askContextMeta.warnings.length > 0) parts.push(`${props.askContextMeta.warnings.length} 条打包说明`)
+  if (props.askContextMeta.ragHits.length > 0) parts.push(`旧章检索 ${props.askContextMeta.ragHits.length} 段`)
+  return parts.length > 0 ? parts.join(' · ') : '查看上下文打包'
+})
+
+const latestExtractAnchorAt = computed(() => {
+  if (props.deskMode !== 'ask' || !props.hasRun || props.extractRuns.length === 0) return null
+  return props.extractRuns[0].createdAt
+})
+
+const chatMessagesBeforeExtract = computed(() => {
+  const anchor = latestExtractAnchorAt.value
+  if (!anchor) return props.chatMessages
+  const anchorTs = new Date(anchor).getTime()
+  return props.chatMessages.filter((message) => new Date(message.createdAt).getTime() <= anchorTs)
+})
+
+const chatMessagesAfterExtract = computed(() => {
+  const anchor = latestExtractAnchorAt.value
+  if (!anchor) return []
+  const anchorTs = new Date(anchor).getTime()
+  return props.chatMessages.filter((message) => new Date(message.createdAt).getTime() > anchorTs)
+})
+
+const inlineExtractRuns = computed(() => {
+  if (props.deskMode !== 'ask' || !props.hasRun || props.loading) return []
+  const run = props.extractRuns[0]
+  return run ? [run] : []
+})
 
 function isLiveAssistantMessage(message: AiDeskChatMessage): boolean {
   return Boolean(
@@ -1265,9 +1297,54 @@ function scrollToBottom(smooth = false): void {
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' as ScrollBehavior })
 }
 
+function shouldAutoScrollToBottom(): boolean {
+  if (props.loading || props.chatLoading || props.chatThinking || props.continueDraft.loading) return true
+  const el = scrollRef.value
+  return el ? isNearBottom(el) : true
+}
+
+function restoreAiPanelScrollTop(scrollTop: number): void {
+  const el = scrollRef.value
+  if (!el) return
+  const top = Math.max(0, scrollTop)
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      el.scrollTop = top
+    })
+  })
+}
+
+const extractUiFingerprint = computed(() => {
+  const run = props.extractRuns[0]
+  if (!run) return ''
+  const r = run.result
+  const suggestionStates = [
+    ...r.characters.map((item) => item.uiState?.status ?? ''),
+    ...r.factions.map((item) => item.uiState?.status ?? ''),
+    ...r.items.map((item) => item.uiState?.status ?? ''),
+    ...r.memberships.map((item) => item.uiState?.status ?? ''),
+    ...r.relations.map((item) => item.uiState?.status ?? ''),
+    ...(run.foreshadowResult?.newPlants ?? []).map((item) => item.uiState?.status ?? ''),
+    run.classificationResult?.uiState?.status ?? '',
+  ].join('|')
+  return `${run.appliedActions.length}|${suggestionStates}`
+})
+
 watch(
   () => props.chatMessages.length,
-  () => { void nextTick(() => scrollToBottom()) },
+  () => {
+    if (!shouldAutoScrollToBottom()) return
+    void nextTick(() => scrollToBottom())
+  },
+)
+
+watch(
+  () => props.loading,
+  (loading, wasLoading) => {
+    if (wasLoading && !loading) {
+      void nextTick(() => scrollToBottom(true))
+    }
+  },
 )
 
 watch(
@@ -1276,11 +1353,33 @@ watch(
     return msgs.length > 0 ? msgs[msgs.length - 1].content : ''
   },
   () => {
+    if (!shouldAutoScrollToBottom()) return
     const el = scrollRef.value
     if (!el) return
     void nextTick(() => {
       if (isNearBottom(el)) scrollToBottom()
     })
+  },
+)
+
+let extractUiScrollSnapshot: number | null = null
+
+watch(
+  extractUiFingerprint,
+  (_next, prev) => {
+    if (!prev || props.loading) return
+    const el = scrollRef.value
+    extractUiScrollSnapshot = el ? el.scrollTop : null
+  },
+  { flush: 'pre' },
+)
+
+watch(
+  extractUiFingerprint,
+  (_next, prev) => {
+    if (!prev || props.loading || extractUiScrollSnapshot == null) return
+    restoreAiPanelScrollTop(extractUiScrollSnapshot)
+    extractUiScrollSnapshot = null
   },
 )
 
@@ -2448,6 +2547,57 @@ function relationSummary(item: ExtractedRelation): string {
   border-color: color-mix(in srgb, var(--color-primary) 22%, var(--color-border) 78%);
 }
 
+.chapter-hub-ai-card--pending-tools {
+  border-color: color-mix(in srgb, var(--color-warning, #c9a227) 35%, var(--color-border) 65%);
+}
+
+.chapter-hub-ai-pending-tools__list {
+  margin: 0;
+  padding: 0 10px 8px;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.chapter-hub-ai-pending-tools__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface-muted) 40%, transparent);
+}
+
+.chapter-hub-ai-pending-tools__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.chapter-hub-ai-pending-tools__label {
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-pending-tools__preview {
+  margin: 0;
+  font-size: 0.62rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 5.5rem;
+  overflow: hidden;
+}
+
+.chapter-hub-ai-continue__thinking {
+  max-height: 4.5rem;
+  overflow: hidden;
+  opacity: 0.85;
+}
+
 .chapter-hub-ai-card--summary {
   border-color: color-mix(in srgb, var(--color-primary) 16%, var(--color-border) 84%);
 }
@@ -2563,9 +2713,55 @@ function relationSummary(item: ExtractedRelation): string {
 }
 
 .chapter-hub-ai-ask-context {
+  margin: 0 10px 4px;
+  padding: 0;
+  font-size: 0.58rem;
+  color: var(--color-text-muted);
+}
+
+.chapter-hub-ai-ask-context__summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 0;
+  line-height: 1.4;
+  user-select: none;
+}
+
+.chapter-hub-ai-ask-context__summary::-webkit-details-marker {
+  display: none;
+}
+
+.chapter-hub-ai-ask-context__summary::before {
+  content: '▸ ';
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.chapter-hub-ai-ask-context[open] .chapter-hub-ai-ask-context__summary::before {
+  transform: rotate(90deg);
+}
+
+.chapter-hub-ai-ask-context__body {
   display: grid;
-  gap: 6px;
-  padding: 0 10px 8px;
+  gap: 4px;
+  padding: 0 0 6px 0.85em;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.chapter-hub-ai-ask-context__layers {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.chapter-hub-ai-ask-context__warnings {
+  margin: 0;
+  padding-left: 1.1em;
+  line-height: 1.45;
+}
+
+.chapter-hub-ai-ask-context__warnings li {
+  margin: 2px 0;
 }
 
 .chapter-hub-ai-continue__rag {

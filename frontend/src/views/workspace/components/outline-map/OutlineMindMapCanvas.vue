@@ -43,6 +43,7 @@
             <OutlineMindMapNode
               :node="node"
               :active="node.id === activeOutlineId"
+              :dimmed="node.isDimmed"
               :linked-to-active-chapter="linkedOutlineIdSet.has(node.id)"
               :mode="mode"
               @select="onSelectNode"

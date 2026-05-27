@@ -18,8 +18,8 @@ use config::Config;
 use handlers::{ai, auth, billing, health, novels};
 use middleware::{auth_middleware, cors_layer};
 use services::{
-    AiService, AppState, AuthService, CacheService, CardKeyService, NovelService, SettingsService,
-    WalletService,
+    AiProviderService, AiService, AppState, AuthService, CacheService, CardKeyService, NovelService,
+    SettingsService, WalletService,
 };
 use std::sync::Arc;
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
@@ -61,6 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let wallet = Arc::new(WalletService::new(db.clone()));
     let card_keys = Arc::new(CardKeyService::new(db.clone(), (*wallet).clone()));
+    let providers = Arc::new(AiProviderService::new(db.clone()));
     let state = Arc::new(AppState {
         auth: Arc::new(AuthService::new(
             db.clone(),
@@ -72,10 +73,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         settings: settings.clone(),
         wallet: wallet.clone(),
         card_keys,
+        providers: providers.clone(),
         ai: Arc::new(AiService::new(
             config.clone(),
             (*settings).clone(),
             (*wallet).clone(),
+            (*providers).clone(),
         )),
     });
 
@@ -126,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.admin_sync_password,
             &config.deepseek_api_key,
             &config.deepseek_base_url,
+            (*providers).clone(),
         )
         .await?;
         app = app.merge(admin_router);

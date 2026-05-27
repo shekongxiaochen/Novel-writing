@@ -16,7 +16,7 @@ mod user_ops;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::entities::AiWalletLedgerEntity;
-use crate::services::{SettingsService, WalletService};
+use crate::services::{AiProviderService, WalletService};
 use labels::{apply_field_labels, AI_WALLET_LEDGER_FIELDS};
 
 async fn separate_app_session_table(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
@@ -185,6 +185,7 @@ pub async fn build_router(
     admin_sync_password: bool,
     env_deepseek_api_key: &str,
     env_deepseek_base_url: &str,
+    providers_service: AiProviderService,
 ) -> Result<Router, Box<dyn std::error::Error>> {
     let db = Database::connect(database_url).await?;
 
@@ -231,7 +232,6 @@ pub async fn build_router(
         .max_connections(5)
         .connect(database_url)
         .await?;
-    let settings_service = SettingsService::new(sqlx_pool.clone());
     let wallet_service = WalletService::new(sqlx_pool.clone());
     let auth_for_admin: Arc<dyn axum_admin::auth::AdminAuth> =
         Arc::new(axum_admin::SeaOrmAdminAuth::new(db.clone()).await?);
@@ -255,7 +255,7 @@ pub async fn build_router(
             auth: auth_for_admin.clone(),
         }))
         .merge(ai_config::routes(ai_config::AiConfigState {
-            settings: settings_service,
+            providers: providers_service,
             auth: auth_for_admin,
             env_api_key: env_deepseek_api_key.to_string(),
             env_base_url: env_deepseek_base_url.to_string(),

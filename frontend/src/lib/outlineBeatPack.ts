@@ -1,4 +1,4 @@
-import type { OutlineItem } from '../types'
+import type { Chapter, OutlineItem } from '../types'
 
 type CharacterRef = { id: string; name: string; goal?: string; arc?: string }
 
@@ -95,6 +95,8 @@ function formatBeat(
     s(item.twist) && `转折：${s(item.twist)}`,
     s(item.result) && `结果：${s(item.result)}`,
     s(item.suspense) && `悬念/钩子：${s(item.suspense)}`,
+    s(item.emotionalTurn) && `情绪转折：${s(item.emotionalTurn)}`,
+    s(item.proseHint) && `写作提示：${s(item.proseHint)}`,
     s(item.location) && `地点：${s(item.location)}`,
     s(item.timeLabel) && `时间：${s(item.timeLabel)}`,
     typeof item.tension === 'number' && `张力：${item.tension}/5`,
@@ -128,7 +130,7 @@ export function buildOutlineBeatPathForChapter(
   if (linkedIds.length === 0) {
     return {
       text: '',
-      warnings: ['本章未绑定大纲节点，续写缺少节拍约束；请在大纲或章节关联里绑定当前要写的情节点。'],
+      warnings: ['本章未绑定大纲节点，AI 可能缺少节拍路径；请在大纲或章节关联里绑定当前情节点。'],
       outlineCharacterIds: [],
     }
   }
@@ -213,5 +215,75 @@ export function buildOutlineBeatPathForChapter(
     text: sections.filter(Boolean).join('\n\n'),
     warnings,
     outlineCharacterIds,
+  }
+}
+
+export type NextChapterOutlineSuggestion = {
+  title: string
+  outlineItemIds: string[]
+  suggestedDirection: string
+  beatLine: string
+}
+
+function isWritableOutlineLevel(level: unknown): boolean {
+  const value = s(level)
+  return value === 'scene' || value === 'chapter'
+}
+
+function buildSuggestedDirectionFromOutline(item: OutlineItem): string {
+  const parts = [s(item.goal), s(item.conflict), s(item.suspense)].filter(Boolean)
+  if (parts.length > 0) return parts.join('；').slice(0, 160)
+  return s(item.summary).slice(0, 120)
+}
+
+function buildBeatLineFromOutline(item: OutlineItem): string {
+  const level = item.level === 'chapter' ? '章' : item.level === 'scene' ? '场' : '节点'
+  const focus = s(item.goal) || s(item.summary) || s(item.title)
+  return focus ? `${level} · ${s(item.title)}：${focus}` : `${level} · ${s(item.title)}`
+}
+
+/** 为「写下一章」推荐尚未绑定到章节的大纲节拍（优先接在当前章节拍之后）。 */
+export function suggestNextChapterOutlineBinding(
+  outline: OutlineItem[],
+  chapters: Array<Pick<Chapter, 'outlineItemIds'>>,
+  currentChapter: Pick<Chapter, 'outlineItemIds'> | null | undefined,
+): NextChapterOutlineSuggestion | null {
+  if (!outline.length) return null
+
+  const usedIds = new Set<string>()
+  for (const chapter of chapters) {
+    for (const id of chapter.outlineItemIds ?? []) {
+      const trimmed = s(id)
+      if (trimmed) usedIds.add(trimmed)
+    }
+  }
+
+  const byId = buildById(outline)
+  const childrenMap = buildChildrenMap(outline)
+  const sequence = dfsSequence(childrenMap).filter((row) => isWritableOutlineLevel(row.level))
+
+  const linkedIds = (currentChapter?.outlineItemIds ?? []).map((id) => s(id)).filter(Boolean)
+  let startIndex = 0
+  if (linkedIds.length > 0) {
+    const linkedNodes = linkedIds.map((id) => byId.get(id)).filter((row): row is OutlineItem => Boolean(row))
+    const primary = [...linkedNodes].sort((a, b) => levelRank(b.level) - levelRank(a.level))[0]
+    if (primary) {
+      const idx = sequence.findIndex((row) => s(row.id) === s(primary.id))
+      startIndex = idx >= 0 ? idx + 1 : 0
+    }
+  }
+
+  const candidate =
+    sequence.slice(startIndex).find((row) => !usedIds.has(s(row.id))) ??
+    sequence.find((row) => !usedIds.has(s(row.id)))
+
+  if (!candidate) return null
+
+  const title = s(candidate.title)
+  return {
+    title,
+    outlineItemIds: [s(candidate.id)],
+    suggestedDirection: buildSuggestedDirectionFromOutline(candidate),
+    beatLine: buildBeatLineFromOutline(candidate),
   }
 }

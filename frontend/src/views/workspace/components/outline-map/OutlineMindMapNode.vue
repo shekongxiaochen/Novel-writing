@@ -7,6 +7,7 @@
       `outline-map-node--stage-${node.plotStage ?? 'idea'}`,
       {
         'is-active': active,
+        'is-dimmed': dimmed,
         'is-linked': linkedToActiveChapter,
         'is-chapter': mode === 'chapter',
       },
@@ -15,7 +16,8 @@
     <button type="button" class="outline-map-node__main" @click="emit('select', node.id)">
       <span class="outline-map-node__kicker">#{{ node.order }} · {{ outlineLevelText(node.level) }}</span>
       <strong>{{ node.title || '未命名情节点' }}</strong>
-      <p>{{ node.summary || '暂无简介' }}</p>
+      <p class="outline-map-node__subtitle">{{ node.subtitle || node.summary || '暂无节拍说明' }}</p>
+      <p v-if="node.summary && node.summary !== node.subtitle" class="outline-map-node__summary-muted">{{ node.summary }}</p>
       <div class="outline-map-node__meta">
         <span class="outline-map-node__meta-pill outline-map-node__meta-pill--status">{{ outlineStatusText(node.status) }}</span>
         <span class="outline-map-node__meta-pill outline-map-node__meta-pill--stage">{{ plotStageText(node.plotStage) }}</span>
@@ -50,10 +52,12 @@ import type { OutlineMindMapNodeView } from '../../../../features/outline-map/co
 withDefaults(defineProps<{
   node: OutlineMindMapNodeView
   active?: boolean
+  dimmed?: boolean
   linkedToActiveChapter?: boolean
   mode?: 'workspace' | 'chapter'
 }>(), {
   active: false,
+  dimmed: false,
   linkedToActiveChapter: false,
   mode: 'workspace',
 })
@@ -84,3 +88,25 @@ function plotStageText(stage?: OutlinePlotStage): string {
   return '待构思'
 }
 </script>
+
+<style scoped>
+.outline-map-node__subtitle {
+  margin: 0.2rem 0 0;
+}
+
+.outline-map-node__summary-muted {
+  margin: 0.15rem 0 0;
+  font-size: 0.76rem;
+  opacity: 0.72;
+  line-height: 1.35;
+}
+
+.outline-map-node.is-dimmed {
+  opacity: 0.38;
+  filter: grayscale(0.15);
+}
+
+.outline-map-node.is-dimmed .outline-map-node__main {
+  pointer-events: none;
+}
+</style>

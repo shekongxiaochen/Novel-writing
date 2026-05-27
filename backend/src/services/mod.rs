@@ -1,4 +1,5 @@
 pub mod ai_service;
+pub mod ai_provider_service;
 pub mod card_key_service;
 pub mod deepseek_client;
 pub mod app_state;
@@ -10,6 +11,7 @@ pub mod wallet_service;
 pub mod wallet_units;
 
 pub use ai_service::AiService;
+pub use ai_provider_service::AiProviderService;
 pub use app_state::AppState;
 pub use auth_service::AuthService;
 pub use cache_service::CacheService;
