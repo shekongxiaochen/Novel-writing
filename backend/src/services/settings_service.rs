@@ -6,8 +6,10 @@ use sqlx::{MySql, Pool};
 pub struct BillingSettings {
     pub consumption_multiplier: f64,
     pub deepseek_model: String,
-    /// 每百万 input token 的单价（元人民币）
-    pub price_per_1m_input_yuan: f64,
+    /// 每百万 input token（未命中缓存）的单价（元人民币）
+    pub price_per_1m_input_miss_yuan: f64,
+    /// 每百万 input token（命中缓存）的单价（元人民币）
+    pub price_per_1m_input_hit_yuan: f64,
     /// 每百万 output token 的单价（元人民币）
     pub price_per_1m_output_yuan: f64,
 }
@@ -137,6 +139,7 @@ impl SettingsService {
             .get_optional_f64("price_per_1m_output_tokens")
             .await?
             .unwrap_or(2.0);
+        let input_price = normalize_price_per_1m_yuan(raw_in);
         Ok(BillingSettings {
             consumption_multiplier: self
                 .get_optional_f64("consumption_multiplier")
@@ -147,7 +150,8 @@ impl SettingsService {
                 .await?
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| "deepseek-chat".to_string()),
-            price_per_1m_input_yuan: normalize_price_per_1m_yuan(raw_in),
+            price_per_1m_input_miss_yuan: input_price,
+            price_per_1m_input_hit_yuan: input_price,
             price_per_1m_output_yuan: normalize_price_per_1m_yuan(raw_out),
         })
     }
@@ -168,12 +172,15 @@ impl SettingsService {
 pub fn charge_units_for_call(
     prompt_tokens: u32,
     completion_tokens: u32,
+    cached_tokens: u32,
     billing: &BillingSettings,
 ) -> i64 {
     super::wallet_units::charge_units_from_usage(
         prompt_tokens,
         completion_tokens,
-        billing.price_per_1m_input_yuan,
+        cached_tokens,
+        billing.price_per_1m_input_miss_yuan,
+        billing.price_per_1m_input_hit_yuan,
         billing.price_per_1m_output_yuan,
         billing.consumption_multiplier,
     )

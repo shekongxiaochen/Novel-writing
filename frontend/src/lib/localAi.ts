@@ -1,8 +1,10 @@
 import type {
   AiExtractMode,
   AiMessage,
+  AiPendingToolAction,
   AiToolCall,
   AiToolDefinition,
+  AiToolExecutionContext,
   EntityMatch,
   EntityMatchType,
   ContinueChapterResult,
@@ -10,11 +12,13 @@ import type {
   NovelChapterClassificationResult,
   NovelEntityExtractResult,
   NovelForeshadowAnalysisResult,
+  Novel,
   OutlineItem,
   OutlineStorylineType,
 } from '../types'
 import type { AiToolResult } from '../types'
 import { assertAiReady, postAiCompletion, postAiCompletionStream } from './backendAi'
+import { buildPendingToolActions } from '../features/chapter-hub/lib/aiPendingToolActions'
 import { AI_WRITE_TOOLS, executeToolCall } from './aiTools'
 import type { WorkspaceSnapshotPayload } from './storage'
 import {
@@ -25,6 +29,7 @@ import {
 } from './askContext'
 import { buildContinueRagHits, formatContinueRagSnippetsForPrompt, type ContinueRagSnippet } from './continueRag'
 import { buildOutlineBeatPathForChapter } from './outlineBeatPack'
+import { buildOutlineAiContextPack } from './outlineContextPack'
 
 export type { AskPromptBuildResult } from './askContext'
 export { ASK_CONTEXT_LAYER_LABELS } from './askContext'
@@ -159,17 +164,20 @@ const CHAPTER_SUMMARY_SYSTEM_PROMPT = [
 const OUTLINE_DESIGN_OPTIONS_SYSTEM_PROMPT = [
   '你是中文小说大纲策划助手，擅长把作者的回答整理成可选择的故事方案。',
   '你会先通过多轮对话收集信息，再基于整段访谈记录提出 3 个差异明显、但都可写的方案。',
-  '三个方案必须在结构形态、主角代价、反派/阻力类型、情感线权重上明显不同，禁止三个方案只是换皮同一套路。',
+  '三个方案必须在 narrativeShape（叙事形状）、coreQuestion（全书核心问题）、主角代价、反派/阻力类型、情感线权重上明显不同，禁止三个方案只是换皮同一套路。',
   '禁止空泛套话与公式化梗概（如泛泛的“废柴逆袭”“平凡少年获得力量”），要写出具体的世界规则、独特代价与人物动机。',
   '输出必须是单个 JSON 对象，顶层只包含：brief, options。',
   'brief 是 1 到 2 句中文，总结你理解到的创作方向。',
-  'options 是长度 3 的数组；每项字段仅包含：id, title, premise, structure, highlights, endingTone, beats, characterRoster。',
+  'options 是长度 3 的数组；每项字段仅包含：id, title, premise, structure, narrativeShape, coreQuestion, forbiddenCliche, highlights, endingTone, beats, characterRoster。',
   'title 是方案名，简短中文。',
   'premise 是一句话故事概念，必须具体，含独特钩子。',
   'structure 是这个方案的推进方式（可非升级流），说明叙事如何展开。',
+  'narrativeShape 是叙事形状，如“双线交叉”“倒叙框”“单地点悬疑”“线性成长”等，必须具体。',
+  'coreQuestion 是全书核心问题（一句），读者读完全书应能回答的问题。',
+  'forbiddenCliche 是本书刻意避开的俗套（一句），展开细纲时不得违背。',
   'highlights 是 2 到 4 条字符串数组，写这个方案最有写头的点。',
   'endingTone 是结局气质，例如“圆满收束”“苦涩反转”“开放余波”。',
-  'beats 是 4 到 6 条字符串数组，概括这一方案的大致推进节拍。',
+  'beats 是 4 到 6 条字符串数组，概括这一方案的大致推进节拍，禁止每条都是“主角遇到困难→逆袭”同构句。',
   'characterRoster 是 3 到 6 个对象的数组，每项仅含：name, role, hook；name 为角色名，role 为叙事功能（主角/对手/导师等），hook 为一句让人想写下去的性格或秘密。',
 ].join('\n')
 
@@ -189,11 +197,22 @@ const OUTLINE_DESIGN_FOLLOWUP_SYSTEM_PROMPT = [
 
 const OUTLINE_DESIGN_EXPAND_SYSTEM_PROMPT = [
   '你是中文小说大纲策划助手，擅长把故事方案展开成作者可直接写作、并可驱动 AI 续写的细纲。',
-  '结构必须贴合方案本身：可以是线性、双线交叉、倒叙、单地点悬疑等，禁止机械套用“一卷五幕每幕四章”的固定模板。',
-  '每个 chapter 节点下必须有 2 到 4 个 scene 子节点；scene 是写作最小节拍，必须写清本场戏的目标、冲突、结果与悬念。',
-  '角色要多样：性格、欲望、恐惧、秘密不能雷同；禁止全员工具人。',
-  '输出必须是单个 JSON 对象，顶层只包含：title, summary, storylines, characterCast, items。',
-  'characterCast 是 4 到 8 个对象的数组，每项仅含：name, role, voice, desire, fear, secret, arc。',
+  '结构必须贴合选中方案的 structure、narrativeShape 与 forbiddenCliche：可以是线性、双线交叉、倒叙、单地点悬疑等，禁止机械套用“一卷五幕每幕四章”或为了凑层级而注水。',
+  '节点数量由叙事形态与篇幅合理决定；总 scene 数建议在 12 到 40 之间，禁止无意义重复场次。',
+  '层级与必填字段（未列出的字段可留空字符串，禁止为填空而写套话）：',
+  '- volume / act：写阶段命题（summary + goal），不要填 conflict/twist/suspense，除非该卷/幕本身承担重大转折。',
+  '- chapter：写本章读者承诺（goal + summary），result 可写本章结束时读者必须知道/感受到什么；conflict/twist/suspense 仅在本章承担转折职责时填写。',
+  '- scene（写作最小节拍）：必须有 goal；result 或 summary 至少其一写清本场变化；conflict、twist、suspense 仅在本场承担对应职责时填写，日常/过渡戏可留空，用 proseHint 描述氛围与信息推进。',
+  'chapter 下的 scene 数量由戏的需要决定，通常 1 到 4 个，不要机械每个 chapter 都凑满 4 场。',
+  '必须先阅读上下文中的【已有角色档案】【人物关系】【势力归属】；大纲场次必须体现人物性格差异与关系张力，禁止只写情节不管人。',
+  '若已有角色档案非空：characterCast 须覆盖大纲出场的所有已有角色（同名），在保留原人设前提下补全 voice/personality/desire/fear/secret/arc；可新增 0 到 3 个新角色。',
+  '若尚无角色档案：characterCast 输出 4 到 8 个差异明显的核心角色。',
+  '角色要多样：性格、说话方式、欲望、恐惧、秘密不能雷同；禁止全员工具人。',
+  'relationCast 输出 4 到 12 条关键人物关系（含对立/秘密/利益绑定），供写入角色关系图；已有关系可深化 note，勿无故推翻。',
+  '张力 tension 应有起伏，禁止全部 scene 都是 3。',
+  '输出必须是单个 JSON 对象，顶层只包含：title, summary, storylines, characterCast, relationCast, items。',
+  'characterCast 每项仅含：name, role, voice, personality, desire, fear, secret, arc。personality 是一句性格速写（含缺陷与习惯）。',
+  'relationCast 每项仅含：fromName, toName, relationType, note, dynamic。dynamic 写关系在本大纲阶段如何变化（一句，可空）。',
   'storylines 是数组，每项字段仅包含：name, type, description, colorHint。',
   'type 只能是：main, subplot, character, romance, antagonist, world, custom。',
   'items 是数组，顺序必须保证父节点在前、子节点在后。',
@@ -201,12 +220,49 @@ const OUTLINE_DESIGN_EXPAND_SYSTEM_PROMPT = [
   'level 只能是：volume, act, chapter, scene。',
   'plotStage 只能是：idea, drafted, written, resolved。',
   'characterNames 是本场出场角色中文名数组；povCharacterName 是本场视角人物名（可空）。',
-  'emotionalTurn 是本场情绪转折（一句）；proseHint 是写作提示（语气、意象、禁忌，一句）。',
+  'emotionalTurn 是本场情绪转折（一句，可空）；proseHint 是写作提示（语气、意象、禁忌，一句，可空）。',
   'tension 用 1 到 5 的整数。',
   'tempId 必须唯一；根节点的 parentTempId 为空字符串。',
 ].join('\n')
 
+const OUTLINE_DESIGN_SKELETON_SYSTEM_PROMPT = [
+  '你是中文小说大纲策划助手。作者要先确认全书章节骨架，再决定是否补充场景细节。',
+  '只输出结构层：volume、act、chapter，禁止输出 scene。',
+  '结构贴合方案的 structure、narrativeShape；禁止机械套模板；节点数量合理，chapter 总数建议在 8 到 30。',
+  'chapter 节点写清本章读者承诺（title + summary + goal），卷/幕写阶段命题。',
+  '输出必须是单个 JSON 对象，顶层只包含：title, summary, storylines, items。',
+  'storylines 每项仅含：name, type, description, colorHint；type 同展开细纲规则。',
+  'items 每项仅含：tempId, parentTempId, title, summary, level, goal, storylineNames。',
+  'level 只能是 volume, act, chapter；父节点在前；根节点 parentTempId 为空字符串。',
+].join('\n')
+
+const OUTLINE_DESIGN_FILL_SCENES_SYSTEM_PROMPT = [
+  '你是中文小说大纲策划助手。作者已确认章节骨架，请只为每个 chapter 节点补充 scene 子节点。',
+  '必须结合上下文中的角色档案与人物关系：每场 scene 的 characterNames 要体现谁在场，冲突/情感转折要符合人设与关系张力。',
+  '不要修改或重复输出已有骨架节点；只输出 scene 级别的 items。',
+  '每个 chapter 下 scene 数量 1 到 4，按戏需要决定；scene 必须有 goal；conflict/twist/suspense 按需填写，禁止套话填满。',
+  'scene 的 parentTempId 必须指向输入骨架里 level=chapter 的 tempId。',
+  '输出必须是单个 JSON 对象，顶层只包含：items, characterCast, relationCast。',
+  'characterCast 是 0 到 6 人的数组（字段同展开细纲）；仅当需要新角色或补全人设时使用，否则返回空数组。',
+  'relationCast 是 0 到 6 条的数组（字段同展开细纲）；仅当场景会改变或凸显某条关系时使用，否则返回空数组。',
+  'items 每项字段同展开细纲的 scene 字段：tempId, parentTempId, title, summary, level, goal, conflict, twist, result, suspense, plotStage, storylineNames, tension, location, timeLabel, characterNames, povCharacterName, emotionalTurn, proseHint。',
+  'level 必须全是 scene。',
+].join('\n')
+
 const OUTLINE_DESIGN_JSON_TEMPERATURE = 0.72
+
+const OUTLINE_EXPAND_EXISTING_SYSTEM_PROMPT = [
+  '你是中文小说大纲策划助手。作者已有大纲，需要在指定位置扩展更多情节点，供后续 AI 续写使用。',
+  '你必须严格衔接【上下文包】中的作品设定、角色档案、人物关系、已有大纲与锚点路径，禁止推翻已写设定，禁止重复已有节点标题。',
+  '新增场次须体现核心角色的性格与关系变化，禁止只堆情节。',
+  '只输出新增节点，不要重复输出锚点或已有子节点；新增内容应能直接驱动续写（scene 级需可执行的 goal/变化）。',
+  '层级与字段规则同展开细纲：scene 必有 goal；conflict/twist/suspense 按需填写，禁止套话。',
+  '第一层新增节点的 parentTempId 必须为 "anchor"；更深节点用 tempId 互相引用，父在前子在后。',
+  '输出必须是单个 JSON 对象，顶层仅包含：brief, items。',
+  'brief 是 1 到 2 句中文，说明扩展方向与如何衔接现有大纲。',
+  'items 每项字段：tempId, parentTempId, title, summary, level, goal, conflict, twist, result, suspense, plotStage, storylineNames, tension, location, timeLabel, characterNames, povCharacterName, emotionalTurn, proseHint。',
+  'level 只能是 volume, act, chapter, scene；plotStage 只能是 idea, drafted, written, resolved。',
+].join('\n')
 
 const OUTLINE_DESIGN_REFINE_OPTIONS_SYSTEM_PROMPT = [
   '你是中文小说大纲策划助手。作者正在从 3 套备选方案中挑选和调整，直到满意为止。',
@@ -215,9 +271,9 @@ const OUTLINE_DESIGN_REFINE_OPTIONS_SYSTEM_PROMPT = [
   '保留作者明确喜欢的部分；禁止忽视修改意见，也不要把三套方案改成几乎一样。',
   '输出必须是单个 JSON 对象，顶层只包含：brief, options。',
   'brief 是 1 到 2 句中文，说明本轮如何根据作者意见调整。',
-  'options 是长度 3 的数组；每项字段仅包含：id, title, premise, structure, highlights, endingTone, beats, characterRoster。',
+  'options 是长度 3 的数组；每项字段仅包含：id, title, premise, structure, narrativeShape, coreQuestion, forbiddenCliche, highlights, endingTone, beats, characterRoster。',
   'id 请重新生成唯一短 id（如 option-a），不要沿用旧 id。',
-  'title 是方案名，premise 是一句话概念，structure 是推进方式，highlights 2 到 4 条，endingTone 是结局气质，beats 4 到 6 条。',
+  'title 是方案名，premise 是一句话概念，structure 是推进方式，narrativeShape/coreQuestion/forbiddenCliche 同方案阶段定义，highlights 2 到 4 条，endingTone 是结局气质，beats 4 到 6 条。',
   'characterRoster 是 3 到 6 个对象，每项仅含 name, role, hook。',
 ].join('\n')
 
@@ -226,6 +282,9 @@ export type OutlineDesignOption = {
   title: string
   premise: string
   structure: string
+  narrativeShape: string
+  coreQuestion: string
+  forbiddenCliche: string
   highlights: string[]
   endingTone: string
   beats: string[]
@@ -241,6 +300,9 @@ function parseOutlineDesignOptionsPayload(parsed: JsonRecord): { brief: string; 
           title: s(item.title) || `方案 ${index + 1}`,
           premise: s(item.premise),
           structure: s(item.structure),
+          narrativeShape: s(item.narrativeShape),
+          coreQuestion: s(item.coreQuestion),
+          forbiddenCliche: s(item.forbiddenCliche),
           highlights: stringList(item.highlights).slice(0, 4),
           endingTone: s(item.endingTone),
           beats: stringList(item.beats).slice(0, 6),
@@ -279,41 +341,36 @@ const QA_SYSTEM_PROMPT = [
 ].join('\n')
 
 const QA_WITH_TOOLS_SYSTEM_PROMPT = [
-  '你是中文小说写作助手。你不仅能回答问题，更能直接操作数据。',
+  '你是中文小说写作助手。你既能回答问题，也能通过工具修改作品数据。',
   '',
-  '【核心原则 —— 优先行动】',
-  '当用户的请求涉及以下意图时，你必须调用对应的函数，而不是只给文字说明：',
-  '- "创建"/"新建"/"添加"/"加一个" → 调用 create_xxx',
-  '- "删除"/"清空"/"移除"/"去掉"/"删掉" → 调用 delete_xxx',
-  '- "修改"/"改"/"更新"/"设置"/"调整" → 调用 update_xxx',
-  '宁可多调用一次工具，也不要在能操作的情况下只给文字建议。',
+  '【核心原则 —— 需要改数据就调工具】',
+  '当用户希望你创建、修改、删除、写入、整理档案或改正文/章总结时，必须调用对应函数提出修改方案，不要只给口头步骤。',
+  '纯咨询、讨论剧情、分析人物关系且不要求落库时，可直接文字回答，不必调工具。',
   '',
-  '【绝对禁止】',
-  '- 严禁说"已完成"但实际没有调用函数',
-  '- 严禁说"我无法执行"或"建议你手动操作"——你有工具，用工具',
-  '- 严禁在有匹配工具的情况下只做文字分析而不调用',
+  '【确认机制】',
+  '工具调用会先变成「待作者确认」的提案，不会立刻写入。说明你会提交哪些修改即可，不要说已经改完。',
   '',
-  '【你可以做的操作】',
-  '- 大纲：创建/修改/删除情节点 (create_outline_item, update_outline_item, delete_outline_item)',
-  '- 角色：创建/修改/删除角色 (create_character, update_character, delete_character)',
-  '- 势力：创建势力 (create_faction)',
-  '- 角色关系：创建两个角色之间的关系 (create_character_relation)',
-  '- 伏笔：创建伏笔记录 (create_foreshadow_plant)',
-  '- 时间线：创建时间线事件 (create_timeline_event)',
+  '【可操作的区域】',
+  '- 章节：create_chapter（在作品末尾新建一章；写下一章时优先用此工具，再配合 update_chapter_content 写入正文）',
+  '- 正文：update_chapter_content（append 追加 / replace 整章替换）',
+  '- 章总结：update_chapter_summary',
+  '- 大纲：create_outline_item / update_outline_item / delete_outline_item',
+  '- 角色：create_character / update_character / delete_character',
+  '- 势力：create_faction',
+  '- 角色关系：create_character_relation',
+  '- 伏笔：create_foreshadow_plant',
+  '- 时间线：create_timeline_event',
   '',
   '【操作规则】',
-  '1. 执行操作前，简短说明你打算做什么（一句即可）',
-  '2. 操作完成后，用自然语言总结结果',
-  '3. 修改或删除前确认目标 ID 存在于上下文中；模糊时先问',
-  '4. "清空所有"等批量操作要对每个目标分别调用删除函数',
-  '5. 创建角色时填充丰富画像：性格、气质、目标、秘密、年龄等',
-  '6. 只基于输入上下文操作，不编造不存在的信息',
-  '7. 先执行操作再回应，不要在还没操作的情况下说"已完成"',
+  '1. 调用工具前用一句话说明打算改什么',
+  '2. 修改或删除前确认目标 ID 在上下文中；chapterId 可省略表示当前章',
+  '3. 批量删除要对每个目标分别调用',
+  '4. 创建角色时尽量补全画像字段',
+  '5. 只基于上下文，不编造不存在的信息',
   '',
   '【回答规范】',
-  '- 回答写给小说作者看，不是程序员',
-  '- 不要输出内部 ID、英文字段名、数据结构术语',
-  '- 用自然中文叙述表达所有信息',
+  '- 写给小说作者，不要输出内部 ID、英文字段名、JSON 等',
+  '- 用自然中文叙述',
 ].join('\n')
 
 function s(value: unknown): string {
@@ -876,12 +933,18 @@ function buildContinueUserPrompt(
     warnings.push('旧章中未找到与当前人物/伏笔/地点匹配的正文片段。')
   }
 
+  const beatTaskLine =
+    beatPack.text && outlineIds.length > 0
+      ? '必须落实【写作任务】与【大纲节拍路径】中的目标与悬念，禁止跳节或提前写完【后续节拍预告】。'
+      : ''
+
   const parts: Record<string, string> = {
     instruction: [
       '【续写要求】',
       `目标字数约 ${targetChars} 字（可略有浮动）。`,
       input.position === 'end' ? '续写位置：本章末尾之后。' : `续写位置：本章第 ${offset} 字处（光标处）之后。`,
-      s(input.direction) ? `作者方向：${s(input.direction)}` : '作者未额外指定方向，请自然推进当前场景。',
+      beatTaskLine,
+      s(input.direction) ? `作者方向：${s(input.direction)}` : outlineIds.length > 0 ? '作者未额外指定方向，请严格按大纲节拍自然推进。' : '作者未额外指定方向，请自然推进当前场景。',
       s(input.selectionQuote) ? `引用片段：${s(input.selectionQuote)}` : '',
     ]
       .filter(Boolean)
@@ -925,11 +988,12 @@ function buildContinueUserPrompt(
     rag_snippets: formatContinueRagSnippetsForPrompt(ragHits),
   }
 
-  const { pack, dropped } = trimContinuePack(
-    parts,
-    ['novel_brief', 'outline_beat_path', 'bible_compact', 'continuity_brief', 'prev_tail', 'prev_summaries', 'rag_snippets'],
-    CONTINUE_INPUT_CHAR_BUDGET,
-  )
+  const trimOrder =
+    beatPack.text && outlineIds.length > 0
+      ? ['outline_beat_path', 'novel_brief', 'bible_compact', 'continuity_brief', 'prev_tail', 'prev_summaries', 'rag_snippets']
+      : ['novel_brief', 'outline_beat_path', 'bible_compact', 'continuity_brief', 'prev_tail', 'prev_summaries', 'rag_snippets']
+
+  const { pack, dropped } = trimContinuePack(parts, trimOrder, CONTINUE_INPUT_CHAR_BUDGET)
   if (dropped.length > 0) {
     warnings.push(`上下文过长，已省略：${dropped.join('、')}`)
   }
@@ -965,7 +1029,11 @@ export async function continueChapterFromWorkspaceStream(
     prevSummaryCount?: number
     enableRag?: boolean
   },
-  callbacks: { onChunk: (text: string) => void; onError: (err: Error) => void },
+  callbacks: {
+    onChunk: (text: string) => void
+    onError: (err: Error) => void
+    onReasoningChunk?: (text: string) => void
+  },
   signal?: AbortSignal,
 ): Promise<ContinueChapterResult> {
   const { prompt, warnings, droppedLayers, usedLayers, usedChars, ragHits } = buildContinueUserPrompt(payload, input)
@@ -1273,7 +1341,11 @@ async function callAiText(systemPrompt: string, userPrompt: string): Promise<str
 async function callAiTextStream(
   systemPrompt: string,
   userPrompt: string,
-  callbacks: { onChunk: (text: string) => void; onError: (err: Error) => void },
+  callbacks: {
+    onChunk: (text: string) => void
+    onError: (err: Error) => void
+    onReasoningChunk?: (text: string) => void
+  },
   signal?: AbortSignal,
 ): Promise<string> {
   assertAiReady()
@@ -1970,13 +2042,27 @@ export async function askAiWithToolsStream(
   },
   existingHistory?: AiMessage[],
   signal?: AbortSignal,
-): Promise<{ text: string; history: AiMessage[]; contextMeta: AskPromptBuildResult }> {
+  options: {
+    alwaysEnableTools?: boolean
+    confirmBeforeApply?: boolean
+    toolContext?: AiToolExecutionContext
+  } = {},
+): Promise<{
+  text: string
+  history: AiMessage[]
+  contextMeta: AskPromptBuildResult
+  pendingToolActions?: AiPendingToolAction[]
+}> {
   const question = s(input.question)
   const actionKeywords =
-    /(创建|新建|添加|增加|补充|生成|删除|移除|清空|修改|更新|编辑|调整|设为|绑定|关联|整理|总结|提取|归纳|采用|确认|写入|保存)/
-  const shouldUseTools = actionKeywords.test(question)
+    /(创建|新建|添加|增加|补充|生成|删除|移除|清空|修改|更新|编辑|调整|设为|绑定|关联|整理|总结|提取|归纳|采用|确认|写入|保存|续写|改正文|改大纲)/
+  const shouldUseTools = options.alwaysEnableTools === true || actionKeywords.test(question)
+  const confirmBeforeApply = options.confirmBeforeApply === true
+  const toolContext = options.toolContext ?? {}
   const actionHint = shouldUseTools
-    ? '【重要提示】如果作者是在要求你直接创建、修改、删除、绑定、整理或写入数据，你必须优先调用工具完成操作，而不是只给文字建议。'
+    ? confirmBeforeApply
+      ? '【重要提示】若需要改数据，请调用工具提交修改提案；作者会在侧栏确认后才真正写入。'
+      : '【重要提示】如果作者是在要求你直接创建、修改、删除、绑定、整理或写入数据，你必须优先调用工具完成操作，而不是只给文字建议。'
     : ''
 
   const askInput = {
@@ -2032,6 +2118,18 @@ export async function askAiWithToolsStream(
       return { text: finalText, history: messages, contextMeta }
     }
 
+    if (confirmBeforeApply) {
+      const pendingToolActions = buildPendingToolActions(toolCalls)
+      const intro = s(content) || '我整理了以下修改方案，请你在侧栏确认是否采用：'
+      messages.push({
+        role: 'assistant',
+        content: intro,
+        tool_calls: toolCalls,
+        ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+      })
+      return { text: intro, history: messages, contextMeta, pendingToolActions }
+    }
+
     messages.push({
       role: 'assistant',
       content: content || null,
@@ -2040,7 +2138,7 @@ export async function askAiWithToolsStream(
     })
 
     for (const tc of toolCalls) {
-      const result = executeToolCall(input.novelId, tc)
+      const result = executeToolCall(input.novelId, tc, toolContext)
       messages.push({
         role: 'tool',
         tool_call_id: tc.id,
@@ -2078,11 +2176,30 @@ export async function expandOutlineItemByAi(
   }
 }
 
+type OutlineAiNovelBrief = Pick<Novel, 'title' | 'summary' | 'continuityBrief' | 'genre' | 'perspective' | 'tone'>
+
+function resolveOutlineAiNovelBrief(input: {
+  novelTitle: string
+  novelSummary?: string
+  novel?: OutlineAiNovelBrief
+}): OutlineAiNovelBrief {
+  if (input.novel) return input.novel
+  return {
+    title: s(input.novelTitle),
+    summary: s(input.novelSummary),
+    continuityBrief: '',
+    genre: '',
+    perspective: '',
+    tone: '',
+  }
+}
+
 export async function designOutlineOptionsByAi(
   payload: WorkspaceSnapshotPayload,
   input: {
     novelTitle: string
     novelSummary?: string
+    novel?: OutlineAiNovelBrief
     history: Array<{ label: string; prompt: string; answer: string }>
   },
 ): Promise<{
@@ -2097,7 +2214,9 @@ export async function designOutlineOptionsByAi(
     beats: string[]
   }>
 }> {
+  const contextPack = buildOutlineAiContextPack(payload, resolveOutlineAiNovelBrief(input))
   const prompt = [
+    contextPack.text,
     `作品名：${s(input.novelTitle) || '未命名作品'}`,
     `现有简介：${s(input.novelSummary) || '暂无'}`,
     `访谈记录：${stableStringify(input.history.map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
@@ -2228,6 +2347,7 @@ export async function expandOutlineDesignByAi(
   input: {
     novelTitle: string
     novelSummary?: string
+    novel?: OutlineAiNovelBrief
     history: Array<{ label: string; prompt: string; answer: string }>
     selectedOption: {
       title: string
@@ -2250,15 +2370,8 @@ export async function expandOutlineDesignByAi(
     description: string
     colorHint: string
   }>
-  characterCast: Array<{
-    name: string
-    role: string
-    voice: string
-    desire: string
-    fear: string
-    secret: string
-    arc: string
-  }>
+  characterCast: OutlineAiCharacterCastRow[]
+  relationCast: OutlineAiRelationCastRow[]
   items: Array<{
     tempId: string
     parentTempId: string
@@ -2277,33 +2390,21 @@ export async function expandOutlineDesignByAi(
     timeLabel: string
     characterNames: string[]
     povCharacterName: string
+    emotionalTurn: string
+    proseHint: string
   }>
 }> {
+  const contextPack = buildOutlineAiContextPack(payload, resolveOutlineAiNovelBrief(input))
   const prompt = [
-    `作品名：${s(input.novelTitle) || '未命名作品'}`,
-    `现有简介：${s(input.novelSummary) || '暂无'}`,
-    `访谈记录：${stableStringify(input.history.map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
-    `作者选中的方案：${stableStringify({
-      title: s(input.selectedOption.title),
-      premise: s(input.selectedOption.premise),
-      structure: s(input.selectedOption.structure),
-      highlights: input.selectedOption.highlights ?? [],
-      endingTone: s(input.selectedOption.endingTone),
-      beats: input.selectedOption.beats ?? [],
-    })}`,
-    s(input.optionRefinement)
-      ? `作者对该方案的补充调整意见：${s(input.optionRefinement)}`
-      : '',
-    input.optionRevisionHistory && input.optionRevisionHistory.length > 0
-      ? `方案调整历史：${stableStringify(input.optionRevisionHistory)}`
-      : '',
+    contextPack.text,
+    buildOutlineDesignSelectedOptionContext(input),
     `已有故事线：${stableStringify((payload.outlineStorylines ?? []).map((item) => ({
       name: item.name,
       type: item.type,
       description: item.description,
     })))}`,
     '请把这一方案展开成一个可直接写入写作工具的大纲结构。',
-  ].join('\n')
+  ].join('\n\n')
 
   const parsed = await callAiJson(prompt, OUTLINE_DESIGN_EXPAND_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
   const storylineTypeSet = new Set<OutlineStorylineType>(['main', 'subplot', 'character', 'romance', 'antagonist', 'world', 'custom'])
@@ -2331,19 +2432,8 @@ export async function expandOutlineDesignByAi(
           })
           .filter((item) => item.name)
       : [],
-    characterCast: Array.isArray(parsed.characterCast)
-      ? parsed.characterCast
-          .map((item: JsonRecord) => ({
-            name: s(item.name),
-            role: s(item.role),
-            voice: s(item.voice),
-            desire: s(item.desire),
-            fear: s(item.fear),
-            secret: s(item.secret),
-            arc: s(item.arc),
-          }))
-          .filter((item) => item.name)
-      : [],
+    characterCast: parseOutlineCharacterCast(parsed.characterCast),
+    relationCast: parseOutlineRelationCast(parsed.relationCast),
     items: Array.isArray(parsed.items)
       ? parsed.items
           .map((item: JsonRecord, index: number) => {
@@ -2351,16 +2441,13 @@ export async function expandOutlineDesignByAi(
             const rawPlotStage = s(item.plotStage)
             const emotionalTurn = s(item.emotionalTurn)
             const proseHint = s(item.proseHint)
-            const summaryParts = [
-              s(item.summary),
-              emotionalTurn && `情绪：${emotionalTurn}`,
-              proseHint && `写作提示：${proseHint}`,
-            ].filter(Boolean)
             return {
               tempId: s(item.tempId) || `node-${index + 1}`,
               parentTempId: s(item.parentTempId),
               title: s(item.title) || `节点 ${index + 1}`,
-              summary: summaryParts.join('；'),
+              summary: s(item.summary),
+              emotionalTurn,
+              proseHint,
               level: (levelSet.has(rawLevel) ? rawLevel : 'scene') as 'volume' | 'act' | 'chapter' | 'scene',
               goal: s(item.goal),
               conflict: s(item.conflict),
@@ -2378,5 +2465,348 @@ export async function expandOutlineDesignByAi(
           })
           .filter((item) => item.title)
       : [],
+  }
+}
+
+type OutlineAiCharacterCastRow = {
+  name: string
+  role: string
+  voice: string
+  personality: string
+  desire: string
+  fear: string
+  secret: string
+  arc: string
+}
+
+type OutlineAiRelationCastRow = {
+  fromName: string
+  toName: string
+  relationType: string
+  note: string
+  dynamic: string
+}
+
+function parseOutlineCharacterCast(raw: unknown): OutlineAiCharacterCastRow[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item: JsonRecord) => ({
+      name: s(item.name),
+      role: s(item.role),
+      voice: s(item.voice),
+      personality: s(item.personality),
+      desire: s(item.desire),
+      fear: s(item.fear),
+      secret: s(item.secret),
+      arc: s(item.arc),
+    }))
+    .filter((item) => item.name)
+}
+
+function parseOutlineRelationCast(raw: unknown): OutlineAiRelationCastRow[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item: JsonRecord) => ({
+      fromName: s(item.fromName),
+      toName: s(item.toName),
+      relationType: s(item.relationType),
+      note: [s(item.note), s(item.dynamic)].filter(Boolean).join('；'),
+      dynamic: s(item.dynamic),
+    }))
+    .filter((item) => item.fromName && item.toName && item.relationType)
+}
+
+function buildOutlineDesignSelectedOptionContext(input: {
+  novelTitle: string
+  novelSummary?: string
+  history: Array<{ label: string; prompt: string; answer: string }>
+  selectedOption: {
+    title: string
+    premise: string
+    structure: string
+    highlights: string[]
+    endingTone: string
+    beats: string[]
+  }
+  optionRefinement?: string
+  optionRevisionHistory?: Array<{ selectedOptionId: string; selectedTitle: string; note: string }>
+}): string {
+  return [
+    `作品名：${s(input.novelTitle) || '未命名作品'}`,
+    `现有简介：${s(input.novelSummary) || '暂无'}`,
+    `访谈记录：${stableStringify(input.history.map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
+    `作者选中的方案：${stableStringify({
+      title: s(input.selectedOption.title),
+      premise: s(input.selectedOption.premise),
+      structure: s(input.selectedOption.structure),
+      narrativeShape: s((input.selectedOption as OutlineDesignOption).narrativeShape),
+      coreQuestion: s((input.selectedOption as OutlineDesignOption).coreQuestion),
+      forbiddenCliche: s((input.selectedOption as OutlineDesignOption).forbiddenCliche),
+      highlights: input.selectedOption.highlights ?? [],
+      endingTone: s(input.selectedOption.endingTone),
+      beats: input.selectedOption.beats ?? [],
+    })}`,
+    s(input.optionRefinement) ? `作者对该方案的补充调整意见：${s(input.optionRefinement)}` : '',
+    input.optionRevisionHistory && input.optionRevisionHistory.length > 0
+      ? `方案调整历史：${stableStringify(input.optionRevisionHistory)}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export async function expandOutlineSkeletonByAi(
+  payload: WorkspaceSnapshotPayload,
+  input: Parameters<typeof expandOutlineDesignByAi>[1],
+): Promise<{
+  title: string
+  summary: string
+  storylines: Array<{
+    name: string
+    type: OutlineStorylineType
+    description: string
+    colorHint: string
+  }>
+  items: Array<{
+    tempId: string
+    parentTempId: string
+    title: string
+    summary: string
+    level: 'volume' | 'act' | 'chapter'
+    goal: string
+    storylineNames: string[]
+  }>
+}> {
+  const contextPack = buildOutlineAiContextPack(payload, resolveOutlineAiNovelBrief(input))
+  const prompt = [
+    contextPack.text,
+    buildOutlineDesignSelectedOptionContext(input),
+    `已有故事线：${stableStringify((payload.outlineStorylines ?? []).map((item) => ({
+      name: item.name,
+      type: item.type,
+      description: item.description,
+    })))}`,
+    '请只生成卷/幕/章骨架，不要生成场景；章节 goal 须考虑核心角色动机与关系走向。',
+  ].join('\n\n')
+
+  const parsed = await callAiJson(prompt, OUTLINE_DESIGN_SKELETON_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
+  const storylineTypeSet = new Set<OutlineStorylineType>(['main', 'subplot', 'character', 'romance', 'antagonist', 'world', 'custom'])
+  const skeletonLevels = new Set(['volume', 'act', 'chapter'])
+
+  return {
+    title: s(parsed.title),
+    summary: s(parsed.summary),
+    storylines: Array.isArray(parsed.storylines)
+      ? parsed.storylines
+          .map((item: JsonRecord) => {
+            const rawType = s(item.type) as OutlineStorylineType
+            return {
+              name: s(item.name),
+              type: storylineTypeSet.has(rawType) ? rawType : 'custom',
+              description: s(item.description),
+              colorHint: s(item.colorHint),
+            }
+          })
+          .filter((item) => item.name)
+      : [],
+    items: Array.isArray(parsed.items)
+      ? parsed.items
+          .map((item: JsonRecord, index: number) => {
+            const rawLevel = s(item.level)
+            const level = (skeletonLevels.has(rawLevel) ? rawLevel : 'chapter') as 'volume' | 'act' | 'chapter'
+            return {
+              tempId: s(item.tempId) || `sk-${index + 1}`,
+              parentTempId: s(item.parentTempId),
+              title: s(item.title) || `节点 ${index + 1}`,
+              summary: s(item.summary),
+              level,
+              goal: s(item.goal),
+              storylineNames: stringList(item.storylineNames),
+            }
+          })
+          .filter((item) => item.title)
+      : [],
+  }
+}
+
+export async function expandOutlineScenesForSkeletonByAi(
+  payload: WorkspaceSnapshotPayload,
+  input: Parameters<typeof expandOutlineDesignByAi>[1] & {
+    skeletonItems: Array<{
+      tempId: string
+      parentTempId: string
+      title: string
+      summary: string
+      level: 'volume' | 'act' | 'chapter'
+      goal: string
+      storylineNames: string[]
+    }>
+    characterCast?: Array<{ name: string; role: string }>
+  },
+): Promise<{
+  items: Awaited<ReturnType<typeof expandOutlineDesignByAi>>['items']
+  characterCast: OutlineAiCharacterCastRow[]
+  relationCast: OutlineAiRelationCastRow[]
+}> {
+  const chapterNodes = input.skeletonItems.filter((row) => row.level === 'chapter')
+  const contextPack = buildOutlineAiContextPack(payload, resolveOutlineAiNovelBrief(input))
+  const prompt = [
+    contextPack.text,
+    buildOutlineDesignSelectedOptionContext(input),
+    `已确认章节骨架：${stableStringify(chapterNodes)}`,
+    input.characterCast && input.characterCast.length > 0
+      ? `角色表：${stableStringify(input.characterCast)}`
+      : '',
+    '请只为上述 chapter 节点补充 scene 子节点；每场须体现出场人物的性格差异与关系张力。',
+  ].join('\n\n')
+
+  const parsed = await callAiJson(prompt, OUTLINE_DESIGN_FILL_SCENES_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
+  const levelSet = new Set(['scene'])
+  const plotStageSet = new Set(['idea', 'drafted', 'written', 'resolved'])
+  const normalizeTension = (value: unknown): 1 | 2 | 3 | 4 | 5 => {
+    const raw = i(value)
+    if (raw === 1 || raw === 2 || raw === 3 || raw === 4 || raw === 5) return raw
+    return 3
+  }
+
+  const sceneItems = Array.isArray(parsed.items)
+    ? parsed.items
+        .map((item: JsonRecord, index: number) => {
+          const rawLevel = s(item.level)
+          const rawPlotStage = s(item.plotStage)
+          return {
+            tempId: s(item.tempId) || `sc-${index + 1}`,
+            parentTempId: s(item.parentTempId),
+            title: s(item.title) || `场景 ${index + 1}`,
+            summary: s(item.summary),
+            emotionalTurn: s(item.emotionalTurn),
+            proseHint: s(item.proseHint),
+            level: (levelSet.has(rawLevel) ? rawLevel : 'scene') as 'scene',
+            goal: s(item.goal),
+            conflict: s(item.conflict),
+            twist: s(item.twist),
+            result: s(item.result),
+            suspense: s(item.suspense),
+            plotStage: (plotStageSet.has(rawPlotStage) ? rawPlotStage : 'idea') as 'idea' | 'drafted' | 'written' | 'resolved',
+            storylineNames: stringList(item.storylineNames),
+            tension: normalizeTension(item.tension),
+            location: s(item.location),
+            timeLabel: s(item.timeLabel),
+            characterNames: stringList(item.characterNames).slice(0, 8),
+            povCharacterName: s(item.povCharacterName),
+          }
+        })
+        .filter((item) => item.title && item.parentTempId)
+    : []
+
+  return {
+    items: sceneItems,
+    characterCast: parseOutlineCharacterCast(parsed.characterCast),
+    relationCast: parseOutlineRelationCast(parsed.relationCast),
+  }
+}
+
+function parseOutlineDesignItemRows(parsed: JsonRecord): Array<{
+  tempId: string
+  parentTempId: string
+  title: string
+  summary: string
+  level: 'volume' | 'act' | 'chapter' | 'scene'
+  goal: string
+  conflict: string
+  twist: string
+  result: string
+  suspense: string
+  plotStage: 'idea' | 'drafted' | 'written' | 'resolved'
+  storylineNames: string[]
+  tension: 1 | 2 | 3 | 4 | 5
+  location: string
+  timeLabel: string
+  characterNames: string[]
+  povCharacterName: string
+  emotionalTurn: string
+  proseHint: string
+}> {
+  const levelSet = new Set(['volume', 'act', 'chapter', 'scene'])
+  const plotStageSet = new Set(['idea', 'drafted', 'written', 'resolved'])
+  const normalizeTension = (value: unknown): 1 | 2 | 3 | 4 | 5 => {
+    const raw = i(value)
+    if (raw === 1 || raw === 2 || raw === 3 || raw === 4 || raw === 5) return raw
+    return 3
+  }
+  if (!Array.isArray(parsed.items)) return []
+  return parsed.items
+    .map((item: JsonRecord, index: number) => {
+      const rawLevel = s(item.level)
+      const rawPlotStage = s(item.plotStage)
+      return {
+        tempId: s(item.tempId) || `node-${index + 1}`,
+        parentTempId: s(item.parentTempId),
+        title: s(item.title) || `节点 ${index + 1}`,
+        summary: s(item.summary),
+        emotionalTurn: s(item.emotionalTurn),
+        proseHint: s(item.proseHint),
+        level: (levelSet.has(rawLevel) ? rawLevel : 'scene') as 'volume' | 'act' | 'chapter' | 'scene',
+        goal: s(item.goal),
+        conflict: s(item.conflict),
+        twist: s(item.twist),
+        result: s(item.result),
+        suspense: s(item.suspense),
+        plotStage: (plotStageSet.has(rawPlotStage) ? rawPlotStage : 'idea') as 'idea' | 'drafted' | 'written' | 'resolved',
+        storylineNames: stringList(item.storylineNames),
+        tension: normalizeTension(item.tension),
+        location: s(item.location),
+        timeLabel: s(item.timeLabel),
+        characterNames: stringList(item.characterNames).slice(0, 8),
+        povCharacterName: s(item.povCharacterName),
+      }
+    })
+    .filter((item) => item.title)
+}
+
+export async function expandOutlineFromExistingByAi(
+  payload: WorkspaceSnapshotPayload,
+  input: {
+    novel: {
+      title: string
+      summary?: string
+      continuityBrief?: string
+      genre?: string
+      perspective?: string
+      tone?: string
+    }
+    anchorOutlineId: string
+    expandNote?: string
+    expandPreset?: 'auto' | 'next_chapters' | 'split_scenes' | 'subplot'
+  },
+): Promise<{
+  brief: string
+  items: ReturnType<typeof parseOutlineDesignItemRows>
+}> {
+  const presetHint =
+    input.expandPreset === 'next_chapters'
+      ? '优先在锚点后新增若干 chapter 节点（每条含简要 goal），必要时再拆 scene。'
+      : input.expandPreset === 'split_scenes'
+        ? '若锚点是 chapter，为其下拆 2 到 4 个 scene；若已是 scene，可在同级补充衔接场。'
+        : input.expandPreset === 'subplot'
+          ? '围绕锚点补一条支线走向（chapter/scene），与主线形成交叉但勿抢戏。'
+          : '根据作者说明与现有缺口自行判断扩展 chapter 或 scene。'
+
+  const context = buildOutlineAiContextPack(payload, input.novel, {
+    anchorOutlineId: input.anchorOutlineId,
+  })
+
+  const prompt = [
+    context.text,
+    `扩展锚点节点 id：${s(input.anchorOutlineId)}`,
+    `扩展要求：${s(input.expandNote) || '沿现有大纲自然往后推进'}`,
+    presetHint,
+    '请只输出新增节点 JSON。',
+  ].join('\n\n')
+
+  const parsed = await callAiJson(prompt, OUTLINE_EXPAND_EXISTING_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
+  return {
+    brief: s(parsed.brief),
+    items: parseOutlineDesignItemRows(parsed),
   }
 }

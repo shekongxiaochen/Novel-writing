@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, onUnmounted, ref, watch, type ComputedRef, type Ref } from 'vue'
 import {
   createCharacter,
   createCharacterFactionMembership,
@@ -61,6 +61,29 @@ export function useChapterHubCtxMenu(deps: {
     ctxMenuNotice.value = ''
     ctxMenuRange.value = null
   }
+
+  function onDocumentPointerDownForCtxMenu(e: PointerEvent): void {
+    if (!ctxMenuOpen.value) return
+    const menu = document.querySelector('.chapter-hub__ctx-menu')
+    if (menu?.contains(e.target as Node)) return
+    closeCtxMenu()
+  }
+
+  watch(ctxMenuOpen, (open) => {
+    if (typeof window === 'undefined') return
+    if (open) {
+      window.setTimeout(() => {
+        document.addEventListener('pointerdown', onDocumentPointerDownForCtxMenu, true)
+      }, 0)
+      return
+    }
+    document.removeEventListener('pointerdown', onDocumentPointerDownForCtxMenu, true)
+  })
+
+  onUnmounted(() => {
+    if (typeof window === 'undefined') return
+    document.removeEventListener('pointerdown', onDocumentPointerDownForCtxMenu, true)
+  })
 
   function collapseSelectionAndBlurTextarea(): void {
     const ta = chapterTextareaRef.value

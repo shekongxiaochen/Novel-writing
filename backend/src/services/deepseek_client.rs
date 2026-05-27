@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 pub struct DeepSeekUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    pub cached_tokens: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -46,6 +47,14 @@ pub(crate) struct AssistantMessage {
 struct UsageDto {
     prompt_tokens: u32,
     completion_tokens: u32,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,13 +168,21 @@ pub async fn chat_completion(
     let usage = parsed.usage.unwrap_or(UsageDto {
         prompt_tokens: 0,
         completion_tokens: 0,
+        prompt_tokens_details: None,
     });
+
+    let cached_tokens = usage
+        .prompt_tokens_details
+        .as_ref()
+        .map(|d| d.cached_tokens)
+        .unwrap_or(0);
 
     Ok(CompletionResult {
         choices: parsed.choices,
         usage: DeepSeekUsage {
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
+            cached_tokens,
         },
         model: parsed.model,
     })
@@ -244,6 +261,11 @@ pub fn usage_from_sse_buffer(buffer: &str) -> DeepSeekUsage {
                     .get("completion_tokens")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as u32;
+                usage.cached_tokens = u
+                    .get("prompt_tokens_details")
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
             }
         }
     }
@@ -256,6 +278,104 @@ pub fn append_balance_meta_event(balance_units: i64) -> String {
         "data: {}\n\n",
         json!({ "novel_meta": { "balance_yuan": balance_yuan } })
     )
+}
+
+/// 查询提供商账户余额（兼容 DeepSeek /user/balance 接口）
+pub async fn check_balance(api_key: &str, base_url: &str) -> Result<BalanceInfo, String> {
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err("未配置 API 密钥".to_string());
+    }
+    // /user/balance 不带 /v1 前缀
+    let base = base_url.trim().trim_end_matches('/');
+    let url = if base.ends_with("/v1") {
+        format!("{}/user/balance", &base[..base.len() - 3])
+    } else {
+        format!("{}/user/balance", base)
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败：{e}"))?;
+
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败：{e}"))?;
+
+    if !status.is_success() {
+        if status.as_u16() == 404 {
+            return Err("该提供商不支持余额查询".to_string());
+        }
+        let detail = parse_error_message(&text);
+        return Err(format!("API 返回 {}：{}", status.as_u16(), detail));
+    }
+
+    let parsed: Value =
+        serde_json::from_str(&text).map_err(|_| format!("余额响应解析失败: {}", &text[..text.len().min(200)]))?;
+
+    let is_available = parsed
+        .get("is_available")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    // DeepSeek 格式: { "balance_infos": [{ "currency": "CNY", "total_balance": "2.73" }] }
+    // 通用格式: { "balance": "10.50", "currency": "CNY" }
+    let (balance, currency) = if let Some(infos) = parsed.get("balance_infos").and_then(|v| v.as_array()) {
+        let first = infos.first();
+        let bal = first
+            .and_then(|i| i.get("total_balance"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .to_string();
+        let cur = first
+            .and_then(|i| i.get("currency"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("CNY")
+            .to_string();
+        (bal, cur)
+    } else {
+        let bal = parsed
+            .get("balance")
+            .and_then(|v| v.as_str())
+            .or_else(|| parsed.get("balance").and_then(|v| v.as_f64()).map(|_| ""))
+            .unwrap_or("0")
+            .to_string();
+        // 如果 balance 是数字，转成字符串
+        let bal = if bal.is_empty() {
+            parsed
+                .get("balance")
+                .and_then(|v| v.as_f64())
+                .map(|f| format!("{:.2}", f))
+                .unwrap_or_else(|| "0".to_string())
+        } else {
+            bal
+        };
+        let cur = parsed
+            .get("currency")
+            .and_then(|v| v.as_str())
+            .unwrap_or("CNY")
+            .to_string();
+        (bal, cur)
+    };
+
+    Ok(BalanceInfo {
+        balance,
+        currency,
+        is_available,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct BalanceInfo {
+    pub balance: String,
+    pub currency: String,
+    pub is_available: bool,
 }
 
 fn completions_url(base_url: &str) -> String {

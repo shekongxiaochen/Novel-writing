@@ -14,6 +14,7 @@ use crate::{
         AiChatChoice, AiChatMessageOut, AiChatRequest, AiChatResponse, AiUsageInfo,
     },
     services::{
+        ai_provider_service::AiProviderService,
         deepseek_client::{
             self, append_balance_meta_event, chat_completion, chat_completion_stream,
             usage_from_sse_buffer, CompletionOptions,
@@ -30,15 +31,48 @@ pub struct AiService {
     config: Config,
     settings: SettingsService,
     wallet: WalletService,
+    providers: AiProviderService,
 }
 
 impl AiService {
-    pub fn new(config: Config, settings: SettingsService, wallet: WalletService) -> Self {
+    pub fn new(
+        config: Config,
+        settings: SettingsService,
+        wallet: WalletService,
+        providers: AiProviderService,
+    ) -> Self {
         Self {
             config,
             settings,
             wallet,
+            providers,
         }
+    }
+
+    async fn resolve_billing(&self) -> Result<(String, String, String, BillingSettings)> {
+        if let Some(p) = self.providers.active_provider().await? {
+            let billing = BillingSettings {
+                deepseek_model: p.model.clone(),
+                consumption_multiplier: p.consumption_multiplier,
+                price_per_1m_input_miss_yuan: p.price_per_1m_input_miss_yuan,
+                price_per_1m_input_hit_yuan: p.price_per_1m_input_hit_yuan,
+                price_per_1m_output_yuan: p.price_per_1m_output_yuan,
+            };
+            return Ok((p.api_key, p.base_url, p.model, billing));
+        }
+
+        // Fallback to legacy system_settings
+        let api_key = self
+            .settings
+            .deepseek_api_key(&self.config.deepseek_api_key)
+            .await?;
+        let base_url = self
+            .settings
+            .deepseek_base_url(&self.config.deepseek_base_url)
+            .await?;
+        let billing = self.settings.billing_settings().await?;
+        let model = billing.deepseek_model.clone();
+        Ok((api_key, base_url, model, billing))
     }
 
     pub async fn chat(&self, user_id: &str, req: AiChatRequest) -> Result<AiChatResponse> {
@@ -46,15 +80,7 @@ impl AiService {
             return Err(AppError::Validation("messages 不能为空".to_string()));
         }
 
-        let api_key = self
-            .settings
-            .deepseek_api_key(&self.config.deepseek_api_key)
-            .await?;
-        let base = self
-            .settings
-            .deepseek_base_url(&self.config.deepseek_base_url)
-            .await?;
-        let billing = self.settings.billing_settings().await?;
+        let (api_key, base_url, model, billing) = self.resolve_billing().await?;
 
         let balance = self.wallet.balance(user_id).await?;
         if balance <= 0 {
@@ -62,19 +88,14 @@ impl AiService {
         }
 
         let options = completion_options_from_request(&req);
-        let result = chat_completion(
-            &api_key,
-            &base,
-            &billing.deepseek_model,
-            req.messages,
-            &options,
-        )
-        .await
-        .map_err(AppError::Internal)?;
+        let result = chat_completion(&api_key, &base_url, &model, req.messages, &options)
+            .await
+            .map_err(AppError::Internal)?;
 
         let charge = charge_units_for_call(
             result.usage.prompt_tokens,
             result.usage.completion_tokens,
+            result.usage.cached_tokens,
             &billing,
         );
         if charge > balance {
@@ -95,15 +116,7 @@ impl AiService {
             return Err(AppError::Validation("messages 不能为空".to_string()));
         }
 
-        let api_key = self
-            .settings
-            .deepseek_api_key(&self.config.deepseek_api_key)
-            .await?;
-        let base = self
-            .settings
-            .deepseek_base_url(&self.config.deepseek_base_url)
-            .await?;
-        let billing = self.settings.billing_settings().await?;
+        let (api_key, base_url, model, billing) = self.resolve_billing().await?;
 
         let balance = self.wallet.balance(user_id).await?;
         if balance <= 0 {
@@ -111,15 +124,9 @@ impl AiService {
         }
 
         let options = completion_options_from_request(&req);
-        let upstream = chat_completion_stream(
-            &api_key,
-            &base,
-            &billing.deepseek_model,
-            req.messages,
-            &options,
-        )
-        .await
-        .map_err(AppError::Internal)?;
+        let upstream = chat_completion_stream(&api_key, &base_url, &model, req.messages, &options)
+            .await
+            .map_err(AppError::Internal)?;
 
         let user_id = user_id.to_string();
         let wallet = self.wallet.clone();
@@ -159,6 +166,7 @@ impl AiService {
             let charge = charge_units_for_call(
                 usage.prompt_tokens,
                 usage.completion_tokens,
+                usage.cached_tokens,
                 &billing_clone,
             );
 

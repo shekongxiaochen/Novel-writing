@@ -1,7 +1,11 @@
 import { onUnmounted, ref, unref, watchEffect, type Ref } from 'vue'
 import { setChromeAnchor } from '../../../composables/useChromeAnchor'
 
-export type ChapterHubPaperExpose = { textareaRef: Ref<HTMLTextAreaElement | null> }
+export type ChapterHubPaperExpose = {
+  textareaRef: Ref<HTMLTextAreaElement | null>
+  goToSearchMatch: (index: number, options?: { focus?: boolean }) => boolean
+  getSearchMatchCount: () => number
+}
 export type ChapterHubHeaderExpose = { rootRef: Ref<HTMLElement | null> }
 
 export function useChapterHubDomRefs() {
