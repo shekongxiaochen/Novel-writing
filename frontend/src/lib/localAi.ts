@@ -5,6 +5,8 @@ import type {
   AiToolCall,
   AiToolDefinition,
   AiToolExecutionContext,
+  ArcSummary,
+  Chapter,
   EntityMatch,
   EntityMatchType,
   ContinueChapterResult,
@@ -17,6 +19,7 @@ import type {
   OutlineStorylineType,
 } from '../types'
 import type { AiToolResult } from '../types'
+import { matchGenreProfiles, buildGenrePromptInjection } from './genreProfiles'
 import { assertAiReady, postAiCompletion, postAiCompletionStream } from './backendAi'
 import { buildPendingToolActions } from '../features/chapter-hub/lib/aiPendingToolActions'
 import { AI_WRITE_TOOLS, executeToolCall } from './aiTools'
@@ -63,7 +66,7 @@ const EXTRACT_SYSTEM_PROMPT = [
   '【角色界面字段 —— characters[]】',
   'name, aliases[], gender, age, goal, secret, arc（角色弧光/成长线）, notes, attributes[], categoryNames[]（分类名称，须来自档案 categories）, firstAppearanceChapterNo, identityStatus, confidence, evidences, warnings。',
   'attributes[] 每项 { key, value }；画像类（性格、气质、说话风格、习惯、立场等）放 attributes，不要塞进 notes。',
-  'notes 写客观履历与本章增量（身份、经历、处境）；goal/secret/arc 各填对应字段，不要把所有信息挤进 notes 一行。',
+  'notes 写成传记体短文：按时间顺序概述该角色的关键经历、身份变化、重要处境，像读一本简短传记，不需要细节描写，只记事实脉络。每章整理时在末尾追加本章增量。goal/secret/arc 各填对应字段，不要把所有信息挤进 notes 一行。',
   '',
   '【势力界面字段 —— factions[]】',
   'name, leader, notes, attributes[], categoryNames[], confidence, evidences, warnings。',
@@ -125,7 +128,7 @@ const CONTINUE_SYSTEM_PROMPT = [
   '若信息不足，宁可少写、写细，也不要胡编乱造。',
 ].join('\n')
 
-const CONTINUE_INPUT_CHAR_BUDGET = 28000
+const CONTINUE_INPUT_CHAR_BUDGET = 32000
 
 export const CONTINUE_CONTEXT_LAYER_LABELS: Record<string, string> = {
   instruction: '续写要求',
@@ -137,6 +140,7 @@ export const CONTINUE_CONTEXT_LAYER_LABELS: Record<string, string> = {
   outline_beat_path: '大纲节拍路径',
   novel_brief: '作品信息',
   continuity_brief: '全书连续性',
+  arc_context: '篇章弧线',
   rag_snippets: '旧章检索',
 }
 
@@ -165,29 +169,41 @@ const OUTLINE_DESIGN_OPTIONS_SYSTEM_PROMPT = [
   '你是中文小说大纲策划助手，擅长把作者的回答整理成可选择的故事方案。',
   '你会先通过多轮对话收集信息，再基于整段访谈记录提出 3 个差异明显、但都可写的方案。',
   '三个方案必须在 narrativeShape（叙事形状）、coreQuestion（全书核心问题）、主角代价、反派/阻力类型、情感线权重上明显不同，禁止三个方案只是换皮同一套路。',
-  '禁止空泛套话与公式化梗概（如泛泛的“废柴逆袭”“平凡少年获得力量”），要写出具体的世界规则、独特代价与人物动机。',
+  '如果上下文中包含【类型指导】，至少一个方案应贴合该类型的读者期待结构，至少一个方案应刻意颠覆或重构该类型的常见模式。',
+  '禁止空泛套话与公式化梗概（如泛泛的”废柴逆袭””平凡少年获得力量”），要写出具体的世界规则、独特代价与人物动机。',
   '输出必须是单个 JSON 对象，顶层只包含：brief, options。',
   'brief 是 1 到 2 句中文，总结你理解到的创作方向。',
   'options 是长度 3 的数组；每项字段仅包含：id, title, premise, structure, narrativeShape, coreQuestion, forbiddenCliche, highlights, endingTone, beats, characterRoster。',
   'title 是方案名，简短中文。',
   'premise 是一句话故事概念，必须具体，含独特钩子。',
   'structure 是这个方案的推进方式（可非升级流），说明叙事如何展开。',
-  'narrativeShape 是叙事形状，如“双线交叉”“倒叙框”“单地点悬疑”“线性成长”等，必须具体。',
+  'narrativeShape 是叙事形状，如”双线交叉””倒叙框””单地点悬疑””线性成长”等，必须具体。',
   'coreQuestion 是全书核心问题（一句），读者读完全书应能回答的问题。',
   'forbiddenCliche 是本书刻意避开的俗套（一句），展开细纲时不得违背。',
   'highlights 是 2 到 4 条字符串数组，写这个方案最有写头的点。',
-  'endingTone 是结局气质，例如“圆满收束”“苦涩反转”“开放余波”。',
-  'beats 是 4 到 6 条字符串数组，概括这一方案的大致推进节拍，禁止每条都是“主角遇到困难→逆袭”同构句。',
+  'endingTone 是结局气质，例如”圆满收束””苦涩反转””开放余波”。',
+  'beats 是 4 到 6 条字符串数组，概括这一方案的大致推进节拍，禁止每条都是”主角遇到困难→逆袭”同构句。',
   'characterRoster 是 3 到 6 个对象的数组，每项仅含：name, role, hook；name 为角色名，role 为叙事功能（主角/对手/导师等），hook 为一句让人想写下去的性格或秘密。',
 ].join('\n')
 
 const OUTLINE_DESIGN_FOLLOWUP_SYSTEM_PROMPT = [
   '你是中文小说大纲策划助手，正在像编辑一样和作者做一轮大纲访谈。',
-  '你要从第一问开始，按当前信息判断是否还需要再问 1 个关键问题。',
-  '如果信息已经足够生成大纲方案，就不要硬问。',
-  '输出必须是单个 JSON 对象，顶层只包含：shouldAsk, rationale, question。',
+  '',
+  '【访谈维度清单 — 必须覆盖以下每个维度才能结束追问】',
+  '1. 核心概念：故事的独特钩子、一句话概念、与同类作品的差异点',
+  '2. 角色深度：主角欲望/缺陷/成长方向、对手/阻力类型、关键关系',
+  '3. 世界规则：设定约束、力量/技术/社会体系、不可违反的底层规则',
+  '4. 冲突结构：中心冲突类型、升级模式、赌注/代价、可能的转折点',
+  '5. 气质与结局：情感基调、结局方向（圆满/苦涩/开放）、主题想表达什么',
+  '',
+  '每轮追问应聚焦一个尚未充分覆盖的维度。优先追问信息最薄弱的维度。',
+  '至少完成 3 轮追问后才能结束（shouldAsk=false），除非作者在第 1-2 轮已主动提供了极其详尽的回答覆盖所有维度。',
+  '硬上限 6 轮。',
+  '',
+  '输出必须是单个 JSON 对象，顶层只包含：shouldAsk, rationale, question, coveredDimensions。',
   'shouldAsk 是布尔值。',
   'rationale 是 1 句中文，说明为什么要问，或为什么信息已够。',
+  'coveredDimensions 是字符串数组，列出当前已充分覆盖的维度编号（如 ["1","3"]）。',
   '如果 shouldAsk 为 true，question 必须是对象，且只包含：label, prompt, options, placeholder。',
   'label 是问题标题，prompt 是你真正想问作者的话，options 是 2 到 5 个简短中文建议选项数组。',
   'placeholder 是输入框提示语，要鼓励作者直接自由回答。',
@@ -197,7 +213,8 @@ const OUTLINE_DESIGN_FOLLOWUP_SYSTEM_PROMPT = [
 
 const OUTLINE_DESIGN_EXPAND_SYSTEM_PROMPT = [
   '你是中文小说大纲策划助手，擅长把故事方案展开成作者可直接写作、并可驱动 AI 续写的细纲。',
-  '结构必须贴合选中方案的 structure、narrativeShape 与 forbiddenCliche：可以是线性、双线交叉、倒叙、单地点悬疑等，禁止机械套用“一卷五幕每幕四章”或为了凑层级而注水。',
+  '结构必须贴合选中方案的 structure、narrativeShape 与 forbiddenCliche：可以是线性、双线交叉、倒叙、单地点悬疑等，禁止机械套用”一卷五幕每幕四章”或为了凑层级而注水。',
+  '如果上下文包含【类型指导】，结构与节奏必须参照其中的结构指导和张力曲线偏好。',
   '节点数量由叙事形态与篇幅合理决定；总 scene 数建议在 12 到 40 之间，禁止无意义重复场次。',
   '层级与必填字段（未列出的字段可留空字符串，禁止为填空而写套话）：',
   '- volume / act：写阶段命题（summary + goal），不要填 conflict/twist/suspense，除非该卷/幕本身承担重大转折。',
@@ -250,10 +267,12 @@ const OUTLINE_DESIGN_FILL_SCENES_SYSTEM_PROMPT = [
 ].join('\n')
 
 const OUTLINE_DESIGN_JSON_TEMPERATURE = 0.72
+const OUTLINE_CRITIQUE_TEMPERATURE = 0.3
 
 const OUTLINE_EXPAND_EXISTING_SYSTEM_PROMPT = [
   '你是中文小说大纲策划助手。作者已有大纲，需要在指定位置扩展更多情节点，供后续 AI 续写使用。',
   '你必须严格衔接【上下文包】中的作品设定、角色档案、人物关系、已有大纲与锚点路径，禁止推翻已写设定，禁止重复已有节点标题。',
+  '如果上下文包含【类型指导】，新增节点的节奏与结构应参照其中的指导。',
   '新增场次须体现核心角色的性格与关系变化，禁止只堆情节。',
   '只输出新增节点，不要重复输出锚点或已有子节点；新增内容应能直接驱动续写（scene 级需可执行的 goal/变化）。',
   '层级与字段规则同展开细纲：scene 必有 goal；conflict/twist/suspense 按需填写，禁止套话。',
@@ -275,6 +294,19 @@ const OUTLINE_DESIGN_REFINE_OPTIONS_SYSTEM_PROMPT = [
   'id 请重新生成唯一短 id（如 option-a），不要沿用旧 id。',
   'title 是方案名，premise 是一句话概念，structure 是推进方式，narrativeShape/coreQuestion/forbiddenCliche 同方案阶段定义，highlights 2 到 4 条，endingTone 是结局气质，beats 4 到 6 条。',
   'characterRoster 是 3 到 6 个对象，每项仅含 name, role, hook。',
+].join('\n')
+
+const OUTLINE_CRITIQUE_SYSTEM_PROMPT = [
+  '你是中文小说大纲审读编辑。你将收到一份大纲草案和原始创作要求。',
+  '请检查以下问题并输出修正后的大纲：',
+  '1. 叙事节奏：张力曲线是否合理？是否有过长的平淡段或无缓冲的连续高潮？',
+  '2. 角色弧光：核心角色是否有可见的成长/变化轨迹？是否有角色出场后无作用？',
+  '3. 结构完整性：开头是否有钩子？中段是否有转折？结尾是否有收束？',
+  '4. 类型契合：是否符合给定类型的读者期待？是否有类型内的常见俗套？',
+  '5. 可执行性：场景级节点是否都有明确的目标和变化？是否有重复或空洞的场次？',
+  '只输出修正后的完整 JSON，格式与输入相同。',
+  '同时在顶层输出一个 critiqueNotes 字段（字符串），用 2 到 3 句中文概述主要修改内容；若无需修改则写"无需调整"。',
+  '不要输出额外字段，不要解释修改理由。',
 ].join('\n')
 
 export type OutlineDesignOption = {
@@ -343,12 +375,21 @@ const QA_SYSTEM_PROMPT = [
 const QA_WITH_TOOLS_SYSTEM_PROMPT = [
   '你是中文小说写作助手。你既能回答问题，也能通过工具修改作品数据。',
   '',
-  '【核心原则 —— 需要改数据就调工具】',
-  '当用户希望你创建、修改、删除、写入、整理档案或改正文/章总结时，必须调用对应函数提出修改方案，不要只给口头步骤。',
+  '【核心原则 —— 需要改数据就必须调工具】',
+  '当用户要求创建、修改、删除、设为、标记、绑定、整理任何档案数据时，你必须调用对应工具提交修改方案。',
+  '严禁在应该调工具时只给文字建议、分析或续写正文。调工具是你完成数据操作的唯一方式。',
   '纯咨询、讨论剧情、分析人物关系且不要求落库时，可直接文字回答，不必调工具。',
   '',
   '【确认机制】',
   '工具调用会先变成「待作者确认」的提案，不会立刻写入。说明你会提交哪些修改即可，不要说已经改完。',
+  '',
+  '【伏笔创建 —— 极重要】',
+  '当用户选中了正文片段并要求"设为伏笔""标记为伏笔""创建伏笔""埋伏笔"时，必须调用 create_foreshadow_plant 工具：',
+  '- title：用一句话概括该伏笔的核心悬念',
+  '- description：说明伏笔的意图和预期回收方式',
+  '- plantText：填入用户选中的原文片段',
+  '- plantChapterId：使用当前章节 ID',
+  '不得跳过工具调用、改为分析正文或续写小说。',
   '',
   '【可操作的区域】',
   '- 章节：create_chapter（在作品末尾新建一章；写下一章时优先用此工具，再配合 update_chapter_content 写入正文）',
@@ -375,6 +416,11 @@ const QA_WITH_TOOLS_SYSTEM_PROMPT = [
 
 function s(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+/** 清除 DeepSeek DSML 格式的 tool call 标记（代理未解析时的降级处理） */
+function stripDsmlToolCalls(text: string): string {
+  return String(text ?? '').replace(/<｜｜DSML｜｜[^>]*>[\s\S]*?<｜｜DSML｜｜[^>]*>/g, '').trim()
 }
 
 function i(value: unknown): number | null {
@@ -743,6 +789,7 @@ function buildContinueUserPrompt(
       title?: string
       summary?: string
       continuityBrief?: string
+      arcSummaries?: ArcSummary[]
       genre?: string
       perspective?: string
       tone?: string
@@ -784,16 +831,13 @@ function buildContinueUserPrompt(
 
   const prev = currentIndex > 0 ? chapters[currentIndex - 1] : null
   const summaryCount = Math.max(1, Math.min(5, Math.trunc(Number(input.prevSummaryCount ?? 3))))
-  const prevSummaries = chapters
-    .slice(Math.max(0, currentIndex - summaryCount), currentIndex)
-    .map((row) => {
-      const summary = s(row.annotation).trim()
-      return {
-        chapterNo: row.chapterNo,
-        title: s(row.title),
-        summary: summary || sliceTextExcerpt(row.content, 360),
-      }
-    })
+  const prevSummaries = selectRelevantPrevSummaries(
+    chapters,
+    currentIndex,
+    summaryCount,
+    payload.outline ?? [],
+    input.novel?.arcSummaries ?? [],
+  )
 
   const outlineIds = (current.outlineItemIds ?? []).map((id) => s(id)).filter(Boolean)
   const outlineIdSet = new Set(outlineIds)
@@ -824,8 +868,13 @@ function buildContinueUserPrompt(
     name: row.name,
     aliases: row.aliases,
     gender: row.gender,
+    age: row.age,
     goal: row.goal,
+    secret: row.secret,
+    arc: row.arc,
     notes: row.notes,
+    attributes: row.attributes,
+    firstAppearanceChapterNo: row.firstAppearanceChapterNo,
   }))
   const { rows: scopedCharacters, chapterScoped } = pickCharactersForContinueContext(
     characterSource,
@@ -841,13 +890,26 @@ function buildContinueUserPrompt(
 
   const scopedIds = new Set(scopedCharacters.map((row) => s(row.id)))
   const characters = stableSortByKeys(
-    scopedCharacters.map((row) => ({
-      name: s(row.name),
-      aliases: stringList(row.aliases).slice(0, 4),
-      gender: s(row.gender),
-      goal: s(row.goal),
-      notes: s(row.notes).slice(0, 120),
-    })),
+    scopedCharacters.map((row) => {
+      const attrs = Array.isArray(row.attributes)
+        ? (row.attributes as Array<{ key?: string; value?: string }>)
+            .filter((a) => a.key && a.value)
+            .map((a) => `${a.key}:${a.value}`)
+            .join('；')
+        : ''
+      return {
+        name: s(row.name),
+        aliases: stringList(row.aliases).slice(0, 4),
+        gender: s(row.gender),
+        age: s(row.age),
+        goal: s(row.goal),
+        secret: s(row.secret),
+        arc: s(row.arc),
+        notes: s(row.notes).slice(0, 200),
+        attrs: attrs.slice(0, 200),
+        firstCh: typeof row.firstAppearanceChapterNo === 'number' ? row.firstAppearanceChapterNo : undefined,
+      }
+    }),
     ['name'],
   )
 
@@ -866,6 +928,17 @@ function buildContinueUserPrompt(
     }).filter(Boolean) as JsonRecord[],
     ['from', 'to'],
   ).slice(0, 20)
+
+  // 角色势力归属
+  const membershipLines: string[] = []
+  if (payload.characterFactionMemberships?.length && payload.factions?.length) {
+    const factionMap = new Map(payload.factions.map((f) => [s(f.id), s(f.name)]))
+    for (const m of payload.characterFactionMemberships) {
+      const charName = scopedCharacters.find((c) => s(c.id) === s(m.characterId))?.name
+      const facName = factionMap.get(s(m.factionId))
+      if (charName && facName) membershipLines.push(`${s(charName)} → ${s(facName)}`)
+    }
+  }
 
   const outlineForeshadowIds = (payload.outline ?? [])
     .filter((row) => outlineIdSet.has(s(row.id)))
@@ -894,6 +967,9 @@ function buildContinueUserPrompt(
         title: s(row.title),
         description: s(row.description).slice(0, 100),
         status: s(row.status),
+        plantText: s(row.plantText).slice(0, 60),
+        expectedCh: typeof row.expectedFulfillChapterNo === 'number' ? row.expectedFulfillChapterNo : undefined,
+        expectedNotes: s(row.expectedFulfillNotes).slice(0, 60),
       })),
     ['title'],
   ).slice(0, 10)
@@ -966,6 +1042,7 @@ function buildContinueUserPrompt(
     bible_compact: [
       '【作品档案（节选）】',
       characters.length > 0 ? `角色：${stableStringify(characters)}` : '',
+      membershipLines.length > 0 ? `势力归属：${membershipLines.join('；')}` : '',
       relations.length > 0 ? `关系：${stableStringify(relations)}` : '',
       relevantForeshadows.length > 0 ? `伏笔：${stableStringify(relevantForeshadows)}` : '',
     ]
@@ -985,13 +1062,14 @@ function buildContinueUserPrompt(
     continuity_brief: s(novel.continuityBrief).trim()
       ? ['【全书连续性摘要】', s(novel.continuityBrief).trim()].join('\n')
       : '',
+    arc_context: buildArcContext(novel.arcSummaries ?? [], payload.outline ?? [], outlineIds),
     rag_snippets: formatContinueRagSnippetsForPrompt(ragHits),
   }
 
   const trimOrder =
     beatPack.text && outlineIds.length > 0
-      ? ['outline_beat_path', 'novel_brief', 'bible_compact', 'continuity_brief', 'prev_tail', 'prev_summaries', 'rag_snippets']
-      : ['novel_brief', 'outline_beat_path', 'bible_compact', 'continuity_brief', 'prev_tail', 'prev_summaries', 'rag_snippets']
+      ? ['novel_brief', 'arc_context', 'continuity_brief', 'prev_tail', 'prev_summaries', 'rag_snippets', 'bible_compact', 'outline_beat_path']
+      : ['novel_brief', 'outline_beat_path', 'arc_context', 'continuity_brief', 'prev_tail', 'prev_summaries', 'rag_snippets', 'bible_compact']
 
   const { pack, dropped } = trimContinuePack(parts, trimOrder, CONTINUE_INPUT_CHAR_BUDGET)
   if (dropped.length > 0) {
@@ -1022,6 +1100,7 @@ export async function continueChapterFromWorkspaceStream(
       title?: string
       summary?: string
       continuityBrief?: string
+      arcSummaries?: ArcSummary[]
       genre?: string
       perspective?: string
       tone?: string
@@ -1228,9 +1307,9 @@ function buildExtractContext(payload: WorkspaceSnapshotPayload, mode: AiExtractM
       fulfillments: stableSortByKeys(
         Array.isArray(row.fulfillments)
           ? row.fulfillments.map((item) => ({
-              chapterId: item.chapterId,
-              chapterNo: item.chapterNo,
-              text: item.text,
+              chapterId: item.fulfillChapterId,
+              chapterNo: item.fulfillChapterNo,
+              text: item.fulfillText,
             }))
           : [],
         ['chapterNo', 'chapterId', 'text'],
@@ -1275,6 +1354,165 @@ function compactChapterExcerpt(text: string, limit = 360): string {
   if (!normalized) return ''
   if (normalized.length <= limit) return normalized
   return `${normalized.slice(0, Math.max(0, limit - 1)).trim()}...`
+}
+
+function selectRelevantPrevSummaries(
+  chapters: Chapter[],
+  currentIndex: number,
+  maxCount: number,
+  outline: OutlineItem[],
+  arcSummaries: ArcSummary[],
+): Array<{ chapterNo: number; title: string; summary: string }> {
+  if (currentIndex <= 0 || maxCount <= 0) return []
+
+  const current = chapters[currentIndex]
+  const currentOutlineIds = new Set((current.outlineItemIds ?? []).map((id) => s(id)).filter(Boolean))
+
+  // 找到当前章节所属的弧线
+  const currentArcId = findArcForChapter(currentOutlineIds, outline, arcSummaries)
+
+  const result: Array<{ chapterNo: number; title: string; summary: string }> = []
+  const addedChapterNos = new Set<number>()
+
+  // 1. 始终包含前一章摘要
+  if (currentIndex > 0) {
+    const prevChapter = chapters[currentIndex - 1]
+    const summary = s(prevChapter.annotation).trim()
+    result.push({
+      chapterNo: prevChapter.chapterNo,
+      title: s(prevChapter.title),
+      summary: summary || sliceTextExcerpt(prevChapter.content, 360),
+    })
+    addedChapterNos.add(prevChapter.chapterNo)
+  }
+
+  // 2. 如果当前章是新弧线开头，包含上一弧线最后一章
+  if (currentArcId && currentIndex > 1) {
+    const prevChapter = chapters[currentIndex - 1]
+    const prevArcId = findArcForChapter(
+      new Set((prevChapter.outlineItemIds ?? []).map((id) => s(id)).filter(Boolean)),
+      outline,
+      arcSummaries,
+    )
+    if (prevArcId && prevArcId !== currentArcId) {
+      // 找上一弧线的最后一章
+      for (let i = currentIndex - 2; i >= 0; i--) {
+        const ch = chapters[i]
+        const chArcId = findArcForChapter(
+          new Set((ch.outlineItemIds ?? []).map((id) => s(id)).filter(Boolean)),
+          outline,
+          arcSummaries,
+        )
+        if (chArcId === prevArcId && !addedChapterNos.has(ch.chapterNo)) {
+          const summary = s(ch.annotation).trim()
+          result.push({
+            chapterNo: ch.chapterNo,
+            title: s(ch.title),
+            summary: summary || sliceTextExcerpt(ch.content, 360),
+          })
+          addedChapterNos.add(ch.chapterNo)
+          break
+        }
+      }
+    }
+  }
+
+  // 3. 从当前弧线中选择相关章节摘要
+  if (currentArcId && result.length < maxCount) {
+    for (let i = currentIndex - 2; i >= 0 && result.length < maxCount; i--) {
+      const ch = chapters[i]
+      if (addedChapterNos.has(ch.chapterNo)) continue
+      const chArcId = findArcForChapter(
+        new Set((ch.outlineItemIds ?? []).map((id) => s(id)).filter(Boolean)),
+        outline,
+        arcSummaries,
+      )
+      if (chArcId === currentArcId) {
+        const summary = s(ch.annotation).trim()
+        result.push({
+          chapterNo: ch.chapterNo,
+          title: s(ch.title),
+          summary: summary || sliceTextExcerpt(ch.content, 360),
+        })
+        addedChapterNos.add(ch.chapterNo)
+      }
+    }
+  }
+
+  // 4. 如果还不够，从更早的章节补充
+  for (let i = currentIndex - 2; i >= 0 && result.length < maxCount; i--) {
+    const ch = chapters[i]
+    if (addedChapterNos.has(ch.chapterNo)) continue
+    const summary = s(ch.annotation).trim()
+    result.push({
+      chapterNo: ch.chapterNo,
+      title: s(ch.title),
+      summary: summary || sliceTextExcerpt(ch.content, 360),
+    })
+    addedChapterNos.add(ch.chapterNo)
+  }
+
+  // 按章节号排序
+  return result.sort((a, b) => a.chapterNo - b.chapterNo)
+}
+
+function findArcForChapter(
+  chapterOutlineIds: Set<string>,
+  outline: OutlineItem[],
+  arcSummaries: ArcSummary[],
+): string | null {
+  for (const outlineId of chapterOutlineIds) {
+    let current = outline.find((o) => o.id === outlineId)
+    while (current) {
+      const arc = arcSummaries.find((a) => a.arcId === current!.id)
+      if (arc) return arc.arcId
+      current = current.parentId ? outline.find((o) => o.id === current!.parentId) : undefined
+    }
+  }
+  return null
+}
+
+function buildArcContext(
+  arcSummaries: ArcSummary[],
+  outline: OutlineItem[],
+  currentOutlineIds: string[],
+): string {
+  if (arcSummaries.length === 0) return ''
+
+  const outlineIdSet = new Set(currentOutlineIds)
+
+  // 找到当前章节所属的弧线
+  const currentArc = arcSummaries.find((arc) => {
+    // 检查当前大纲节点是否在这个弧线的子节点中
+    return currentOutlineIds.some((id) => {
+      let current = outline.find((o) => o.id === id)
+      while (current) {
+        if (current.id === arc.arcId) return true
+        current = current.parentId ? outline.find((o) => o.id === current!.parentId) : undefined
+      }
+      return false
+    })
+  })
+
+  const lines: string[] = []
+
+  if (currentArc) {
+    lines.push(`【当前篇章：${currentArc.title}】`)
+    lines.push(currentArc.summary)
+  }
+
+  // 其他弧线的一行概要
+  const otherArcs = arcSummaries.filter((arc) => arc.arcId !== currentArc?.arcId)
+  if (otherArcs.length > 0) {
+    lines.push('')
+    lines.push('【其他篇章概览】')
+    for (const arc of otherArcs) {
+      const preview = arc.summary.length > 60 ? `${arc.summary.slice(0, 60)}...` : arc.summary
+      lines.push(`${arc.title}：${preview}`)
+    }
+  }
+
+  return lines.join('\n')
 }
 
 function buildNearbyChapterContext(payload: WorkspaceSnapshotPayload, chapterIds?: string[]) {
@@ -1744,9 +1982,10 @@ export async function analyzeNovelForeshadowsFromWorkspace(
         id: row.id,
         title: row.title,
         summary: row.summary,
-        chapterId: row.chapterId ?? null,
-        happenedAt: row.happenedAt,
-      })), ['happenedAt', 'chapterId', 'title', 'id']),
+        storyLabel: row.storyLabel,
+        chapterNoStart: row.chapterNoStart,
+        chapterNoEnd: row.chapterNoEnd,
+      })), ['storyLabel', 'chapterNoStart', 'title', 'id']),
     })}`,
     `章节正文 JSON：${stableStringify({
       chapters: context.chapters,
@@ -1924,6 +2163,327 @@ export async function summarizeNovelChapterFromWorkspaceStream(
   return callAiTextStream(CHAPTER_SUMMARY_SYSTEM_PROMPT, prompt, callbacks, signal)
 }
 
+// ── 场景级摘要 ──
+
+const SCENE_SUMMARY_SYSTEM_PROMPT = [
+  '你是中文小说场景拆分助手。',
+  '将给定的章节正文拆分为独立场景。每个场景是一个连续的叙事单元（同一地点、同一时间段、同一事件线）。',
+  '输出必须是 JSON 数组，每项包含：sceneIndex（从 0 开始的序号）、title（场景标题，8字以内）、summary（1-2句摘要，说明发生了什么、涉及谁、场景结束状态）。',
+  '不要编造正文中不存在的内容。不要输出 Markdown 代码块标记。',
+].join('\n')
+
+export type SceneSummaryResult = {
+  sceneIndex: number
+  title: string
+  summary: string
+}
+
+export async function summarizeChapterScenesFromWorkspaceStream(
+  payload: WorkspaceSnapshotPayload,
+  chapterId: string,
+  callbacks: { onChunk: (text: string) => void; onError: (err: Error) => void },
+  signal?: AbortSignal,
+): Promise<SceneSummaryResult[]> {
+  const chapters = payload.chapters ?? []
+  const chapter = chapters.find((c) => c.id === chapterId)
+  if (!chapter || !chapter.content?.trim()) return []
+
+  const prompt = [
+    `章节标题：${chapter.title || '无标题'}`,
+    `章节正文：${chapter.content}`,
+  ].join('\n\n')
+
+  const raw = await callAiTextStream(SCENE_SUMMARY_SYSTEM_PROMPT, prompt, callbacks, signal)
+  try {
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    const parsed = JSON.parse(cleaned)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((s: any) => s && typeof s.sceneIndex === 'number' && typeof s.summary === 'string')
+        .map((s: any, i: number) => ({
+          sceneIndex: s.sceneIndex ?? i,
+          title: String(s.title ?? `场景${i + 1}`),
+          summary: String(s.summary ?? ''),
+        }))
+    }
+  } catch {}
+  return []
+}
+
+// ── 篇章弧线级摘要 ──
+
+const ARC_SUMMARY_SYSTEM_PROMPT = [
+  '你是中文长篇小说篇章弧线摘要助手。',
+  '根据一个篇章（卷或幕）内各章的总结，撰写该篇章的整体摘要。',
+  '聚焦：本篇章的核心冲突、主要进展、人物状态变化、悬念落点。',
+  '输出 200～400 字纯中文正文，不要 Markdown，不要标题套话。',
+  '禁止编造各章总结中不存在的重大情节。',
+].join('\n')
+
+export type ArcSummaryResult = {
+  arcId: string
+  level: 'volume' | 'act'
+  title: string
+  summary: string
+  chapterRange: [number, number]
+}
+
+export async function summarizeArcFromWorkspaceStream(
+  payload: WorkspaceSnapshotPayload,
+  arcId: string,
+  level: 'volume' | 'act',
+  title: string,
+  chapterRange: [number, number],
+  callbacks: { onChunk: (text: string) => void; onError: (err: Error) => void },
+  signal?: AbortSignal,
+): Promise<ArcSummaryResult | null> {
+  const chapters = (payload.chapters ?? [])
+    .filter((c) => c.chapterNo >= chapterRange[0] && c.chapterNo <= chapterRange[1])
+    .sort((a, b) => a.chapterNo - b.chapterNo)
+
+  if (chapters.length === 0) return null
+
+  const summaries = chapters.map((c) => ({
+    chapterNo: c.chapterNo,
+    title: c.title,
+    annotation: c.annotation || '(无总结)',
+  }))
+
+  const prompt = [
+    `篇章名称：${title}`,
+    `章节范围：第${chapterRange[0]}章 - 第${chapterRange[1]}章`,
+    `各章总结：${stableStringify(summaries)}`,
+  ].join('\n\n')
+
+  const summary = await callAiTextStream(ARC_SUMMARY_SYSTEM_PROMPT, prompt, callbacks, signal)
+  return {
+    arcId,
+    level,
+    title,
+    summary: summary.trim(),
+    chapterRange,
+  }
+}
+
+export async function rebuildArcSummariesFromWorkspaceStream(
+  payload: WorkspaceSnapshotPayload,
+  novelId: string,
+  callbacks: { onChunk: (text: string) => void; onError: (err: Error) => void },
+  signal?: AbortSignal,
+): Promise<ArcSummaryResult[]> {
+  const outline = payload.outline ?? []
+  const chapters = payload.chapters ?? []
+  if (outline.length === 0 || chapters.length === 0) return []
+
+  const arcNodes = outline.filter((item) => item.level === 'volume' || item.level === 'act')
+  if (arcNodes.length === 0) return []
+
+  const results: ArcSummaryResult[] = []
+
+  for (const arc of arcNodes) {
+    if (signal?.aborted) break
+
+    const childChapters = chapters.filter((c) =>
+      c.outlineItemIds?.some((id) => {
+        let current = outline.find((o) => o.id === id)
+        while (current) {
+          if (current.id === arc.id) return true
+          current = current.parentId ? outline.find((o) => o.id === current!.parentId) : undefined
+        }
+        return false
+      })
+    )
+
+    if (childChapters.length === 0) continue
+
+    const minNo = Math.min(...childChapters.map((c) => c.chapterNo))
+    const maxNo = Math.max(...childChapters.map((c) => c.chapterNo))
+
+    const result = await summarizeArcFromWorkspaceStream(
+      payload,
+      arc.id,
+      arc.level as 'volume' | 'act',
+      arc.title || `篇章${arc.id}`,
+      [minNo, maxNo],
+      callbacks,
+      signal,
+    )
+
+    if (result) results.push(result)
+  }
+
+  return results
+}
+
+// ── 一致性检查 ──
+
+const CONSISTENCY_CHECK_SYSTEM_PROMPT = [
+  '你是中文小说一致性检查助手。',
+  '你的任务是检查新生成的章节正文与已有档案、章总结、大纲、伏笔之间的一致性问题。',
+  '输出必须是单个 JSON 对象，顶层只包含：characterIssues, timelineIssues, foreshadowIssues, settingIssues, warnings。',
+  'characterIssues[]: { characterName, issue, severity, evidence }',
+  '  - 检查角色性格(attrs)、说话风格是否与档案一致',
+  '  - 检查角色目标(goal)、秘密(secret)是否与档案一致',
+  '  - 检查角色秘密是否被不当泄露（除非情节需要）',
+  '  - 检查角色年龄、性别是否与档案一致',
+  '  - 检查角色是否在不该出现的场景出现（参考 firstCh 首出场章节）',
+  '  - 检查角色势力归属是否正确',
+  'timelineIssues[]: { issue, chapters, severity }',
+  '  - 检查时间线是否矛盾（如已死角色复活、已过去的时间被引用为未来）',
+  'foreshadowIssues[]: { foreshadowTitle, issue, suggestion }',
+  '  - 检查伏笔是否被遗忘或不当地回收',
+  '  - 检查伏笔回收方式是否与预期(expectedCh/expectedNotes)一致',
+  'settingIssues[]: { issue, severity }',
+  '  - 检查地点、势力、物品设定是否矛盾',
+  '  - 检查势力领袖、成员关系是否正确',
+  'severity: "error" | "warning" | "info"',
+  '如果没有任何问题，返回空数组。',
+  '不要编造不存在的问题。只报告有明确证据的矛盾。',
+].join('\n')
+
+export type ConsistencyIssue = {
+  characterName?: string
+  foreshadowTitle?: string
+  issue: string
+  severity: 'error' | 'warning' | 'info'
+  evidence?: string
+  chapters?: number[]
+  suggestion?: string
+}
+
+export type ConsistencyCheckResult = {
+  characterIssues: ConsistencyIssue[]
+  timelineIssues: ConsistencyIssue[]
+  foreshadowIssues: ConsistencyIssue[]
+  settingIssues: ConsistencyIssue[]
+  warnings: string[]
+}
+
+export async function checkChapterConsistencyFromWorkspaceStream(
+  payload: WorkspaceSnapshotPayload,
+  chapterId: string,
+  callbacks: { onChunk: (text: string) => void; onError: (err: Error) => void },
+  signal?: AbortSignal,
+): Promise<ConsistencyCheckResult> {
+  const emptyResult: ConsistencyCheckResult = {
+    characterIssues: [],
+    timelineIssues: [],
+    foreshadowIssues: [],
+    settingIssues: [],
+    warnings: [],
+  }
+
+  const chapters = payload.chapters ?? []
+  const chapter = chapters.find((c) => c.id === chapterId)
+  if (!chapter || !chapter.content?.trim()) return emptyResult
+
+  const characters = (payload.characters ?? []).map((row) => {
+    const attrs = Array.isArray(row.attributes)
+      ? (row.attributes as Array<{ key?: string; value?: string }>)
+          .filter((a) => a.key && a.value)
+          .slice(0, 5)
+          .map((a) => `${a.key}:${a.value}`)
+      : []
+    return {
+      name: s(row.name),
+      gender: s(row.gender),
+      age: s(row.age),
+      goal: s(row.goal),
+      secret: s(row.secret),
+      notes: s(row.notes).slice(0, 200),
+      arc: s(row.arc),
+      aliases: Array.isArray(row.aliases) ? row.aliases.slice(0, 5) : [],
+      attrs,
+      firstCh: typeof row.firstAppearanceChapterNo === 'number' ? row.firstAppearanceChapterNo : undefined,
+    }
+  })
+
+  const foreshadows = (payload.foreshadows ?? []).map((row) => ({
+    title: s(row.title),
+    description: s(row.description).slice(0, 150),
+    status: s(row.status),
+    plantText: s(row.plantText).slice(0, 80),
+    expectedCh: typeof row.expectedFulfillChapterNo === 'number' ? row.expectedFulfillChapterNo : undefined,
+    expectedNotes: s(row.expectedFulfillNotes).slice(0, 60),
+  }))
+
+  const factions = (payload.factions ?? []).slice(0, 10).map((row) => ({
+    name: s(row.name),
+    leader: s(row.leader),
+    notes: s(row.notes).slice(0, 100),
+  }))
+
+  const items = (payload.items ?? []).slice(0, 10).map((row) => ({
+    name: s(row.name),
+    summary: s(row.summary).slice(0, 100),
+  }))
+
+  const factionMap = new Map((payload.factions ?? []).map((f) => [s(f.id), s(f.name)]))
+  const charMap = new Map((payload.characters ?? []).map((c) => [s(c.id), s(c.name)]))
+  const memberships = (payload.characterFactionMemberships ?? [])
+    .map((m) => {
+      const charName = charMap.get(s(m.characterId))
+      const facName = factionMap.get(s(m.factionId))
+      return charName && facName ? `${charName} → ${facName}` : ''
+    })
+    .filter(Boolean)
+    .slice(0, 20)
+
+  const timelineEvents = (payload.timelineEvents ?? []).slice(0, 8).map((row) => ({
+    title: s(row.title),
+    summary: s(row.summary).slice(0, 80),
+    storyLabel: s(row.storyLabel),
+    chapterNoStart: row.chapterNoStart,
+  }))
+
+  const outlineBeats = (payload.outline ?? [])
+    .filter((row) => (chapter.outlineItemIds ?? []).includes(s(row.id)))
+    .map((row) => ({
+      title: s(row.title),
+      goal: s(row.goal),
+      conflict: s(row.conflict),
+      twist: s(row.twist),
+      result: s(row.result),
+      suspense: s(row.suspense),
+    }))
+
+  const recentSummaries = chapters
+    .filter((c) => c.chapterNo >= chapter.chapterNo - 5 && c.chapterNo < chapter.chapterNo)
+    .map((c) => ({
+      chapterNo: c.chapterNo,
+      title: c.title,
+      annotation: (c.annotation || '').slice(0, 200),
+    }))
+
+  const prompt = [
+    `检查章节：第${chapter.chapterNo}章《${chapter.title || '未命名'}》`,
+    `章节正文：${chapter.content}`,
+    `角色档案 JSON：${stableStringify(characters)}`,
+    `伏笔档案 JSON：${stableStringify(foreshadows)}`,
+    factions.length > 0 ? `势力 JSON：${stableStringify(factions)}` : '',
+    items.length > 0 ? `物品 JSON：${stableStringify(items)}` : '',
+    memberships.length > 0 ? `势力归属：${memberships.join('；')}` : '',
+    timelineEvents.length > 0 ? `时间线事件 JSON：${stableStringify(timelineEvents)}` : '',
+    outlineBeats.length > 0 ? `大纲节拍 JSON：${stableStringify(outlineBeats)}` : '',
+    `近期章节总结 JSON：${stableStringify(recentSummaries)}`,
+  ].filter(Boolean).join('\n\n')
+
+  const raw = await callAiTextStream(CONSISTENCY_CHECK_SYSTEM_PROMPT, prompt, callbacks, signal)
+  try {
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    const parsed = JSON.parse(cleaned)
+    return {
+      characterIssues: Array.isArray(parsed.characterIssues) ? parsed.characterIssues : [],
+      timelineIssues: Array.isArray(parsed.timelineIssues) ? parsed.timelineIssues : [],
+      foreshadowIssues: Array.isArray(parsed.foreshadowIssues) ? parsed.foreshadowIssues : [],
+      settingIssues: Array.isArray(parsed.settingIssues) ? parsed.settingIssues : [],
+      warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+    }
+  } catch {
+    return emptyResult
+  }
+}
+
 export async function askAiAboutWorkspace(
   payload: WorkspaceSnapshotPayload,
   input: {
@@ -2061,7 +2621,7 @@ export async function askAiWithToolsStream(
   const toolContext = options.toolContext ?? {}
   const actionHint = shouldUseTools
     ? confirmBeforeApply
-      ? '【重要提示】若需要改数据，请调用工具提交修改提案；作者会在侧栏确认后才真正写入。'
+      ? '【重要提示】当作者要求创建、修改、删除、设为、标记数据时，你必须调用对应工具提交修改提案。作者会在侧栏确认后才真正写入。禁止只给文字建议而不调用工具。'
       : '【重要提示】如果作者是在要求你直接创建、修改、删除、绑定、整理或写入数据，你必须优先调用工具完成操作，而不是只给文字建议。'
     : ''
 
@@ -2112,15 +2672,15 @@ export async function askAiWithToolsStream(
   while (maxRounds-- > 0) {
     const { content, toolCalls, reasoningContent } = await callAiWithTools(messages, AI_WRITE_TOOLS, signal)
     if (toolCalls.length === 0) {
-      const text = await callAiMessagesStream(messages, callbacks, signal)
-      const finalText = text || content || '这次没有拿到可展示的回答。'
-      messages.push({ role: 'assistant', content: finalText })
-      return { text: finalText, history: messages, contextMeta }
+      const cleanedContent = stripDsmlToolCalls(content) || '这次没有拿到可展示的回答。'
+      callbacks.onChunk(cleanedContent)
+      messages.push({ role: 'assistant', content: cleanedContent })
+      return { text: cleanedContent, history: messages, contextMeta }
     }
 
     if (confirmBeforeApply) {
       const pendingToolActions = buildPendingToolActions(toolCalls)
-      const intro = s(content) || '我整理了以下修改方案，请你在侧栏确认是否采用：'
+      const intro = stripDsmlToolCalls(s(content)) || '我整理了以下修改方案，请你在侧栏确认是否采用：'
       messages.push({
         role: 'assistant',
         content: intro,
@@ -2148,6 +2708,41 @@ export async function askAiWithToolsStream(
   }
 
   return { text: '这次工具调用轮次过多，未能顺利完成。', history: messages, contextMeta }
+}
+
+/**
+ * Self-critique loop: takes a draft output and the original prompt, asks the AI to review and fix.
+ * Returns the corrected output with an optional critiqueNotes field.
+ */
+async function critiqueAndFixOutlineByAi(
+  originalPrompt: string,
+  draftOutput: JsonRecord,
+): Promise<JsonRecord & { critiqueNotes?: string }> {
+  try {
+    const draftStr = stableStringify(draftOutput)
+    if (draftStr.length > 8000) {
+      // Truncate for token budget
+      draftOutput = JSON.parse(draftStr.slice(0, 8000) + ']}')
+    }
+
+    const critiquePrompt = [
+      '以下是大纲草案和原始创作要求，请审读并修正。',
+      '',
+      '【原始创作要求】',
+      originalPrompt.slice(0, 4000),
+      '',
+      '【大纲草案】',
+      stableStringify(draftOutput),
+    ].join('\n')
+
+    const fixed = await callAiJson(critiquePrompt, OUTLINE_CRITIQUE_SYSTEM_PROMPT, OUTLINE_CRITIQUE_TEMPERATURE)
+    return {
+      ...fixed,
+      critiqueNotes: s(fixed.critiqueNotes) || undefined,
+    }
+  } catch {
+    return draftOutput
+  }
 }
 
 export async function expandOutlineItemByAi(
@@ -2235,8 +2830,13 @@ export async function designOutlineOptionsByAi(
       type: item.type,
       description: item.description,
     })))}`,
+    (() => {
+      const profiles = matchGenreProfiles(s(input.novel?.genre ?? ''))
+      const block = buildGenrePromptInjection(profiles)
+      return block ? `【类型指导】\n${block}` : ''
+    })(),
     '请给出 3 套风格有区别、但都适合当前回答的大纲方向。',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   const parsed = await callAiJson(prompt, OUTLINE_DESIGN_OPTIONS_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
   return parseOutlineDesignOptionsPayload(parsed)
@@ -2289,12 +2889,14 @@ export async function designOutlineInterviewTurnByAi(
   input: {
     novelTitle: string
     novelSummary?: string
+    novel?: OutlineAiNovelBrief
     history?: Array<{ label: string; prompt: string; answer: string }>
     remainingRounds: number
   },
 ): Promise<{
   shouldAsk: boolean
   rationale: string
+  coveredDimensions: string[]
   question: {
     label: string
     prompt: string
@@ -2302,28 +2904,17 @@ export async function designOutlineInterviewTurnByAi(
     placeholder: string
   } | null
 }> {
+  const genreProfiles = matchGenreProfiles(s(input.novel?.genre ?? ''))
+  const genreBlock = buildGenrePromptInjection(genreProfiles)
   const prompt = [
     `作品名：${s(input.novelTitle) || '未命名作品'}`,
+    `类型：${s(input.novel?.genre) || '未指定'}`,
     `现有简介：${s(input.novelSummary) || '暂无'}`,
     `已确认的访谈记录：${stableStringify((input.history ?? []).map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
     `剩余追问轮次：${Math.max(0, i(input.remainingRounds) ?? 0)}`,
-    `已有大纲节点：${stableStringify((payload.outline ?? []).map((item) => ({
-      title: item.title,
-      summary: item.summary,
-      level: item.level,
-      goal: item.goal,
-      conflict: item.conflict,
-      twist: item.twist,
-      result: item.result,
-      suspense: item.suspense,
-    })))}`,
-    `已有故事线：${stableStringify((payload.outlineStorylines ?? []).map((item) => ({
-      name: item.name,
-      type: item.type,
-      description: item.description,
-    })))}`,
+    genreBlock ? `【类型指导】\n${genreBlock}` : '',
     '如果还有一个最该补的关键信息，就提出 1 个问题；如果已经足够，就明确结束追问。',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   const parsed = await callAiJson(prompt, OUTLINE_DESIGN_FOLLOWUP_SYSTEM_PROMPT)
   const shouldAsk = Boolean(parsed.shouldAsk) && (input.remainingRounds > 0)
@@ -2338,6 +2929,7 @@ export async function designOutlineInterviewTurnByAi(
   return {
     shouldAsk: Boolean(question),
     rationale: s(parsed.rationale),
+    coveredDimensions: stringList(parsed.coveredDimensions),
     question,
   }
 }
@@ -2393,6 +2985,7 @@ export async function expandOutlineDesignByAi(
     emotionalTurn: string
     proseHint: string
   }>
+  critiqueNotes?: string
 }> {
   const contextPack = buildOutlineAiContextPack(payload, resolveOutlineAiNovelBrief(input))
   const prompt = [
@@ -2403,8 +2996,13 @@ export async function expandOutlineDesignByAi(
       type: item.type,
       description: item.description,
     })))}`,
+    (() => {
+      const profiles = matchGenreProfiles(s(input.novel?.genre ?? ''))
+      const block = buildGenrePromptInjection(profiles)
+      return block ? `【类型指导】\n${block}` : ''
+    })(),
     '请把这一方案展开成一个可直接写入写作工具的大纲结构。',
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 
   const parsed = await callAiJson(prompt, OUTLINE_DESIGN_EXPAND_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
   const storylineTypeSet = new Set<OutlineStorylineType>(['main', 'subplot', 'character', 'romance', 'antagonist', 'world', 'custom'])
@@ -2414,6 +3012,50 @@ export async function expandOutlineDesignByAi(
     const raw = i(value)
     if (raw === 1 || raw === 2 || raw === 3 || raw === 4 || raw === 5) return raw
     return 3
+  }
+
+  const normalizeItems = (items: JsonRecord[]) =>
+    items
+      .map((item: JsonRecord, index: number) => {
+        const rawLevel = s(item.level)
+        const rawPlotStage = s(item.plotStage)
+        const emotionalTurn = s(item.emotionalTurn)
+        const proseHint = s(item.proseHint)
+        return {
+          tempId: s(item.tempId) || `node-${index + 1}`,
+          parentTempId: s(item.parentTempId),
+          title: s(item.title) || `节点 ${index + 1}`,
+          summary: s(item.summary),
+          emotionalTurn,
+          proseHint,
+          level: (levelSet.has(rawLevel) ? rawLevel : 'scene') as 'volume' | 'act' | 'chapter' | 'scene',
+          goal: s(item.goal),
+          conflict: s(item.conflict),
+          twist: s(item.twist),
+          result: s(item.result),
+          suspense: s(item.suspense),
+          plotStage: (plotStageSet.has(rawPlotStage) ? rawPlotStage : 'idea') as 'idea' | 'drafted' | 'written' | 'resolved',
+          storylineNames: stringList(item.storylineNames),
+          tension: normalizeTension(item.tension),
+          location: s(item.location),
+          timeLabel: s(item.timeLabel),
+          characterNames: stringList(item.characterNames).slice(0, 8),
+          povCharacterName: s(item.povCharacterName),
+        }
+      })
+      .filter((item) => item.title)
+
+  const rawItems = Array.isArray(parsed.items) ? parsed.items : []
+  let resultItems = normalizeItems(rawItems)
+  let critiqueNotes: string | undefined
+
+  // Self-critique loop: run on drafts with 8+ items
+  if (resultItems.length >= 8) {
+    const critiqued = await critiqueAndFixOutlineByAi(prompt, parsed)
+    if (Array.isArray(critiqued.items) && critiqued.items.length >= resultItems.length * 0.5) {
+      resultItems = normalizeItems(critiqued.items)
+      critiqueNotes = s(critiqued.critiqueNotes) || undefined
+    }
   }
 
   return {
@@ -2434,37 +3076,8 @@ export async function expandOutlineDesignByAi(
       : [],
     characterCast: parseOutlineCharacterCast(parsed.characterCast),
     relationCast: parseOutlineRelationCast(parsed.relationCast),
-    items: Array.isArray(parsed.items)
-      ? parsed.items
-          .map((item: JsonRecord, index: number) => {
-            const rawLevel = s(item.level)
-            const rawPlotStage = s(item.plotStage)
-            const emotionalTurn = s(item.emotionalTurn)
-            const proseHint = s(item.proseHint)
-            return {
-              tempId: s(item.tempId) || `node-${index + 1}`,
-              parentTempId: s(item.parentTempId),
-              title: s(item.title) || `节点 ${index + 1}`,
-              summary: s(item.summary),
-              emotionalTurn,
-              proseHint,
-              level: (levelSet.has(rawLevel) ? rawLevel : 'scene') as 'volume' | 'act' | 'chapter' | 'scene',
-              goal: s(item.goal),
-              conflict: s(item.conflict),
-              twist: s(item.twist),
-              result: s(item.result),
-              suspense: s(item.suspense),
-              plotStage: (plotStageSet.has(rawPlotStage) ? rawPlotStage : 'idea') as 'idea' | 'drafted' | 'written' | 'resolved',
-              storylineNames: stringList(item.storylineNames),
-              tension: normalizeTension(item.tension),
-              location: s(item.location),
-              timeLabel: s(item.timeLabel),
-              characterNames: stringList(item.characterNames).slice(0, 8),
-              povCharacterName: s(item.povCharacterName),
-            }
-          })
-          .filter((item) => item.title)
-      : [],
+    items: resultItems,
+    critiqueNotes,
   }
 }
 
@@ -2586,8 +3199,13 @@ export async function expandOutlineSkeletonByAi(
       type: item.type,
       description: item.description,
     })))}`,
+    (() => {
+      const profiles = matchGenreProfiles(s(input.novel?.genre ?? ''))
+      const block = buildGenrePromptInjection(profiles)
+      return block ? `【类型指导】\n${block}` : ''
+    })(),
     '请只生成卷/幕/章骨架，不要生成场景；章节 goal 须考虑核心角色动机与关系走向。',
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 
   const parsed = await callAiJson(prompt, OUTLINE_DESIGN_SKELETON_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
   const storylineTypeSet = new Set<OutlineStorylineType>(['main', 'subplot', 'character', 'romance', 'antagonist', 'world', 'custom'])
@@ -2647,6 +3265,7 @@ export async function expandOutlineScenesForSkeletonByAi(
   items: Awaited<ReturnType<typeof expandOutlineDesignByAi>>['items']
   characterCast: OutlineAiCharacterCastRow[]
   relationCast: OutlineAiRelationCastRow[]
+  critiqueNotes?: string
 }> {
   const chapterNodes = input.skeletonItems.filter((row) => row.level === 'chapter')
   const contextPack = buildOutlineAiContextPack(payload, resolveOutlineAiNovelBrief(input))
@@ -2658,7 +3277,12 @@ export async function expandOutlineScenesForSkeletonByAi(
       ? `角色表：${stableStringify(input.characterCast)}`
       : '',
     '请只为上述 chapter 节点补充 scene 子节点；每场须体现出场人物的性格差异与关系张力。',
-  ].join('\n\n')
+    (() => {
+      const profiles = matchGenreProfiles(s(input.novel?.genre ?? ''))
+      const block = buildGenrePromptInjection(profiles)
+      return block ? `【类型指导】\n${block}` : ''
+    })(),
+  ].filter(Boolean).join('\n\n')
 
   const parsed = await callAiJson(prompt, OUTLINE_DESIGN_FILL_SCENES_SYSTEM_PROMPT, OUTLINE_DESIGN_JSON_TEMPERATURE)
   const levelSet = new Set(['scene'])
@@ -2699,10 +3323,49 @@ export async function expandOutlineScenesForSkeletonByAi(
         .filter((item) => item.title && item.parentTempId)
     : []
 
+  let resultItems = sceneItems
+  let critiqueNotes: string | undefined
+
+  // Self-critique loop: run on drafts with 8+ items
+  if (resultItems.length >= 8) {
+    const critiqued = await critiqueAndFixOutlineByAi(prompt, parsed)
+    if (Array.isArray(critiqued.items) && critiqued.items.length >= resultItems.length * 0.5) {
+      resultItems = critiqued.items
+        .map((item: JsonRecord, index: number) => {
+          const rawLevel = s(item.level)
+          const rawPlotStage = s(item.plotStage)
+          return {
+            tempId: s(item.tempId) || `sc-${index + 1}`,
+            parentTempId: s(item.parentTempId),
+            title: s(item.title) || `场景 ${index + 1}`,
+            summary: s(item.summary),
+            emotionalTurn: s(item.emotionalTurn),
+            proseHint: s(item.proseHint),
+            level: 'scene' as const,
+            goal: s(item.goal),
+            conflict: s(item.conflict),
+            twist: s(item.twist),
+            result: s(item.result),
+            suspense: s(item.suspense),
+            plotStage: (plotStageSet.has(rawPlotStage) ? rawPlotStage : 'idea') as 'idea' | 'drafted' | 'written' | 'resolved',
+            storylineNames: stringList(item.storylineNames),
+            tension: normalizeTension(item.tension),
+            location: s(item.location),
+            timeLabel: s(item.timeLabel),
+            characterNames: stringList(item.characterNames).slice(0, 8),
+            povCharacterName: s(item.povCharacterName),
+          }
+        })
+        .filter((item: { title: string; parentTempId: string }) => item.title && item.parentTempId)
+      critiqueNotes = s(critiqued.critiqueNotes) || undefined
+    }
+  }
+
   return {
-    items: sceneItems,
+    items: resultItems,
     characterCast: parseOutlineCharacterCast(parsed.characterCast),
     relationCast: parseOutlineRelationCast(parsed.relationCast),
+    critiqueNotes,
   }
 }
 
@@ -2801,6 +3464,11 @@ export async function expandOutlineFromExistingByAi(
     `扩展锚点节点 id：${s(input.anchorOutlineId)}`,
     `扩展要求：${s(input.expandNote) || '沿现有大纲自然往后推进'}`,
     presetHint,
+    (() => {
+      const profiles = matchGenreProfiles(s(input.novel?.genre ?? ''))
+      const block = buildGenrePromptInjection(profiles)
+      return block ? `【类型指导】\n${block}` : ''
+    })(),
     '请只输出新增节点 JSON。',
   ].join('\n\n')
 

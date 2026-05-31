@@ -67,11 +67,25 @@
     </a>
 
     <nav class="flex-1 space-y-1">
-      <a href="/admin/ai-config"
-         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100">
-        <i class="fa-solid fa-sliders text-xs w-4"></i>
-        AI 计费配置
+      <a href="/admin/user-ops"
+         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                {% if current_entity == '__user_ops' %}bg-zinc-200/60 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100{% endif %}">
+        <i class="fa-solid fa-users text-xs w-4"></i>
+        用户与余额
       </a>
+      <a href="/admin/ai-config"
+         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                {% if current_entity == '__ai_config' %}bg-zinc-200/60 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100{% endif %}">
+        <i class="fa-solid fa-sliders text-xs w-4"></i>
+        AI 服务配置
+      </a>
+      <a href="/admin/card-keys"
+         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                {% if current_entity == '__card_keys' %}bg-zinc-200/60 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100{% endif %}">
+        <i class="fa-solid fa-key text-xs w-4"></i>
+        卡密管理
+      </a>
+
       {% for item in nav %}
         {% if item.type == "entity" %}
         <a href="/admin/{{ item.name }}/"

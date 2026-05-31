@@ -11,35 +11,18 @@
               'chapter-hub__textarea-wrap--overlay-show': shouldShowEntityOverlay,
               'chapter-hub__textarea-wrap--overlay-ready': shouldShowEntityOverlay && overlayReady,
               'chapter-hub__textarea-wrap--quote-selection': !!pinnedQuoteRange,
-              'chapter-hub__textarea-wrap--search-active': !!searchQuery,
+              'chapter-hub__textarea-wrap--has-selection': textareaHasSelection,
             }"
             @pointerdown.capture="onWrapPointerDownCapture"
           >
             <div
-              v-if="searchQuery"
-              ref="searchBackdropRef"
-              class="chapter-hub__search-backdrop"
-              aria-hidden="true"
-            >
-              <div class="chapter-hub__search-backdrop-inner">
-                <template v-for="(segment, segIdx) in searchSegments" :key="`search-seg-${segIdx}`">
-                  <span
-                    v-if="segment.kind === 'text'"
-                    class="chapter-hub__search-backdrop-plain"
-                  >{{ segment.text }}</span>
-                  <span
-                    v-else
-                    class="chapter-hub__search-backdrop-match"
-                    :class="{ 'chapter-hub__search-backdrop-match--active': segment.matchIndex === searchActiveMatchIndex }"
-                  >{{ segment.text }}</span>
-                </template>
-              </div>
-            </div>
-            <div
               ref="overlayRef"
               class="chapter-hub__entity-overlay"
-              :class="{ 'chapter-hub__entity-overlay--quote-only': showQuoteSelectionOverlay }"
-              v-show="(showPreviewEntityOverlay || showQuoteSelectionOverlay) && !searchQuery"
+              :class="{
+                'chapter-hub__entity-overlay--quote-only': showQuoteSelectionOverlay,
+                'chapter-hub__entity-overlay--search-active': !!searchQuery,
+              }"
+              v-show="showPreviewEntityOverlay || showQuoteSelectionOverlay || !!searchQuery"
               @wheel="onEntityWheel"
               @scroll="onOverlayScroll"
               @mousedown="onOverlayTextMouseDown"
@@ -166,6 +149,7 @@
               @mouseup="onTextareaMouseup"
               @select="onTextareaSelect"
               @mousedown="onTextareaMouseDown"
+              @contextmenu="emit('contextmenu', $event)"
               @focus="onTextareaFocus"
               @blur="onTextareaBlur"
             />
@@ -184,7 +168,6 @@ import {
   type ChapterQuoteSelectionRange,
 } from '../../../features/chapter-hub/lib/chapterQuoteSelection'
 import {
-  buildTextSearchSegments,
   findTextSearchMatches,
   resolveSearchMatchHighlight,
 } from '../../../features/chapter-hub/lib/chapterTextSearch'
@@ -196,6 +179,7 @@ const props = defineProps<{
   entityPreviewLines: EntityToken[][]
   shouldShowEntityOverlay: boolean
   isChapterTextareaFocused: boolean
+  textareaHasSelection?: boolean
   pinnedQuoteRange?: ChapterQuoteSelectionRange | null
   activeFlashFsKey?: string
   readonly?: boolean
@@ -216,7 +200,6 @@ const searchQuery = computed(() => String(props.searchQuery ?? '').trim())
 const searchActiveMatchIndex = computed(() => Math.max(-1, Math.trunc(Number(props.searchActiveMatchIndex ?? -1))))
 
 const searchMatches = computed(() => findTextSearchMatches(props.content ?? '', searchQuery.value))
-const searchSegments = computed(() => buildTextSearchSegments(props.content ?? '', searchMatches.value))
 
 function searchHighlightClass(token: EntityToken): Record<string, boolean> {
   const highlight = resolveSearchMatchHighlight(token.range ?? null, searchMatches.value, searchActiveMatchIndex.value)
@@ -564,19 +547,12 @@ const emit = defineEmits<{
   goCharacter: [character: Character, textRange: { start: number; end: number } | null]
   goFaction: [faction: Faction, textRange: { start: number; end: number } | null]
   goItem: [item: Item, textRange: { start: number; end: number } | null]
+  contextmenu: [event: MouseEvent]
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const overlayRef = ref<HTMLElement | null>(null)
 const overlayInnerRef = ref<HTMLElement | null>(null)
-const searchBackdropRef = ref<HTMLElement | null>(null)
-
-function syncSearchBackdropScroll(): void {
-  const ta = textareaRef.value
-  const backdrop = searchBackdropRef.value
-  if (!ta || !backdrop) return
-  backdrop.scrollTop = ta.scrollTop
-}
 
 function syncEntityOverlayScroll(): void {
   const ta = textareaRef.value
@@ -584,7 +560,6 @@ function syncEntityOverlayScroll(): void {
   if (!ta || !overlay) return
   // 用原生 scrollTop 同步，比 translateY 更稳（可自动 clamped 到底部，避免底部空白）
   overlay.scrollTop = ta.scrollTop
-  syncSearchBackdropScroll()
 }
 
 function onTextareaScroll(e: Event): void {
@@ -604,6 +579,14 @@ function onTextareaMouseup(e: MouseEvent): void {
   emit('mouseup', e)
 }
 
+function onEntityWheel(e: WheelEvent): void {
+  const ta = textareaRef.value
+  if (!ta) return
+  ta.scrollTop += e.deltaY
+  e.preventDefault()
+  syncEntityOverlayScroll()
+}
+
 function onTextareaSelect(): void {
   emit('select')
 }
@@ -616,14 +599,6 @@ function onTextareaBlur(e: FocusEvent): void {
   emit('blur', e)
 }
 
-function onEntityWheel(e: WheelEvent): void {
-  const ta = textareaRef.value
-  if (!ta) return
-  ta.scrollTop += e.deltaY
-  e.preventDefault()
-  syncEntityOverlayScroll()
-}
-
 watch(
   () => [props.content, props.shouldShowEntityOverlay, props.entityPreviewLines],
   () => {
@@ -631,7 +606,6 @@ watch(
       syncEntityOverlayScroll()
     })
   },
-  { deep: true },
 )
 
 watch(
@@ -655,7 +629,7 @@ watch(
   () => [searchQuery.value, searchActiveMatchIndex.value, props.content] as const,
   ([query, activeIndex]) => {
     void nextTick(() => {
-      syncSearchBackdropScroll()
+      syncEntityOverlayScroll()
       if (!query || activeIndex < 0) return
       goToSearchMatch(activeIndex, { focus: false })
     })
@@ -689,7 +663,7 @@ function goToSearchMatch(index: number, options?: { focus?: boolean }): boolean 
   if (shouldFocus) ta.focus({ preventScroll: true })
   ta.setSelectionRange(match.start, match.end)
   scrollCaretIntoView(ta, match.start)
-  syncSearchBackdropScroll()
+  syncSearchOverlayScroll()
   return true
 }
 

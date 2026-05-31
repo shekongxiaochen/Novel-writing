@@ -4,12 +4,16 @@ export type OutlineDraftLintIssue = {
 }
 
 export type OutlineDraftLintItem = {
+  tempId?: string
+  parentTempId?: string
   level?: string
   goal?: string
   conflict?: string
   twist?: string
   suspense?: string
   tension?: number
+  storylineNames?: string[]
+  characterNames?: string[]
 }
 
 function s(value: unknown): string {
@@ -35,6 +39,8 @@ export function lintOutlineDraftItems(items: OutlineDraftLintItem[]): OutlineDra
   if (!items.length) return issues
 
   const scenes = items.filter((row) => s(row.level) === 'scene' || !s(row.level))
+
+  // --- Rule 1: Duplicate conflict ---
   const conflicts = scenes.map((row) => s(row.conflict)).filter(Boolean)
   const duplicateConflicts = [...countByPhrase(conflicts).entries()].filter(([, count]) => count >= 3)
   if (duplicateConflicts.length > 0) {
@@ -44,6 +50,7 @@ export function lintOutlineDraftItems(items: OutlineDraftLintItem[]): OutlineDra
     })
   }
 
+  // --- Rule 2: Twist cliché ---
   const twistCliche = scenes.filter((row) => /没想到|竟然是|原来/.test(s(row.twist))).length
   if (twistCliche >= 3) {
     issues.push({
@@ -52,6 +59,7 @@ export function lintOutlineDraftItems(items: OutlineDraftLintItem[]): OutlineDra
     })
   }
 
+  // --- Rule 3: Flat tension ---
   const sceneTensions = scenes.map((row) => row.tension).filter((value) => typeof value === 'number')
   if (sceneTensions.length >= 5 && sceneTensions.every((value) => value === 3)) {
     issues.push({
@@ -60,12 +68,106 @@ export function lintOutlineDraftItems(items: OutlineDraftLintItem[]): OutlineDra
     })
   }
 
+  // --- Rule 4: Missing goal ---
   const scenesMissingGoal = scenes.filter((row) => !s(row.goal)).length
   if (scenesMissingGoal >= Math.max(3, Math.ceil(scenes.length * 0.4))) {
     issues.push({
       severity: 'info',
       message: `约 ${scenesMissingGoal} 个场景未写目标，不影响写入；需要驱动 AI 续写时再补「目标」即可。`,
     })
+  }
+
+  // --- Rule 5: Orphan nodes (parentId references nonexistent tempId) ---
+  const tempIds = new Set(items.map((row) => s(row.tempId)).filter(Boolean))
+  const orphans = items.filter((row) => {
+    const pid = s(row.parentTempId)
+    return pid && pid !== 'anchor' && !tempIds.has(pid)
+  })
+  if (orphans.length > 0) {
+    issues.push({
+      severity: 'warn',
+      message: `有 ${orphans.length} 个节点的父节点引用不存在，结构可能断裂。`,
+    })
+  }
+
+  // --- Rule 6: Excessive nesting depth (>4 levels) ---
+  const byTempId = new Map(items.map((row) => [s(row.tempId), row]))
+  function getDepth(item: OutlineDraftLintItem, visited = new Set<string>()): number {
+    const pid = s(item.parentTempId)
+    if (!pid || pid === 'anchor' || visited.has(pid)) return 1
+    visited.add(pid)
+    const parent = byTempId.get(pid)
+    if (!parent) return 1
+    return 1 + getDepth(parent, visited)
+  }
+  const deepNodes = items.filter((row) => getDepth(row) > 4)
+  if (deepNodes.length > 0) {
+    issues.push({
+      severity: 'warn',
+      message: `有 ${deepNodes.length} 个节点嵌套超过 4 层，建议合并或调整层级。`,
+    })
+  }
+
+  // --- Rule 7: Storyline coverage gaps ---
+  if (scenes.length >= 4) {
+    const withStoryline = scenes.filter((row) => (row.storylineNames ?? []).length > 0).length
+    const coverage = withStoryline / scenes.length
+    if (coverage < 0.6) {
+      issues.push({
+        severity: 'info',
+        message: `仅 ${Math.round(coverage * 100)}% 的场景关联了故事线，建议为更多场景指定故事线归属。`,
+      })
+    }
+  }
+
+  // --- Rule 8: Tension curve monotonicity ---
+  if (sceneTensions.length >= 8) {
+    let allRising = true
+    let allFalling = true
+    for (let i = 1; i < sceneTensions.length; i++) {
+      if (sceneTensions[i] <= sceneTensions[i - 1]) allRising = false
+      if (sceneTensions[i] >= sceneTensions[i - 1]) allFalling = false
+    }
+    if (allRising || allFalling) {
+      issues.push({
+        severity: 'info',
+        message: allRising
+          ? '张力曲线单调递增，缺少舒缓段落；建议在中段插入低张力过渡场景。'
+          : '张力曲线单调递减，缺少高潮回升；建议在后段加入高张力转折。',
+      })
+    }
+  }
+
+  // --- Rule 9: Missing character presence ---
+  if (scenes.length >= 4) {
+    const hasAnyCharacter = scenes.some((row) => (row.characterNames ?? []).length > 0)
+    if (!hasAnyCharacter) {
+      issues.push({
+        severity: 'info',
+        message: '所有场景均未指定出场角色，建议标注角色以增强人设一致性。',
+      })
+    }
+  }
+
+  // --- Rule 10: Act structure imbalance ---
+  if (sceneTensions.length >= 12) {
+    const quarterLen = Math.ceil(sceneTensions.length / 4)
+    const firstQuarter = sceneTensions.slice(0, quarterLen)
+    const lastQuarter = sceneTensions.slice(-quarterLen)
+    const hasSetup = firstQuarter.some((t) => t <= 2)
+    const hasClimax = lastQuarter.some((t) => t >= 4)
+    if (!hasSetup) {
+      issues.push({
+        severity: 'info',
+        message: '前段缺少低张力铺垫场景（张力 ≤ 2），可能导致读者缺少入戏缓冲。',
+      })
+    }
+    if (!hasClimax) {
+      issues.push({
+        severity: 'info',
+        message: '后段缺少高张力高潮场景（张力 ≥ 4），可能导致结尾缺乏冲击力。',
+      })
+    }
   }
 
   return issues

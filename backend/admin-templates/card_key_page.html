@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>卡密管理 — {{ admin_title }}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="/admin/_static/admin.css" />
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased font-sans min-h-screen">
+  <header class="border-b border-zinc-200 bg-white">
+    <div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="/admin/" class="text-zinc-500 hover:text-zinc-900 text-sm"><i class="fa-solid fa-arrow-left mr-1"></i>控制台</a>
+        <span class="text-zinc-300">/</span>
+        <span class="text-sm font-semibold">卡密管理</span>
+      </div>
+      <span class="text-xs text-zinc-500">{{ admin_title }}</span>
+    </div>
+    <div class="max-w-6xl mx-auto px-6 flex items-center gap-1 text-sm -mb-px">
+      <a href="/admin/user-ops" class="px-3 py-2 border-b-2 border-transparent text-zinc-500 hover:text-zinc-900 hover:border-zinc-300">用户与余额</a>
+      <a href="/admin/ai-config" class="px-3 py-2 border-b-2 border-transparent text-zinc-500 hover:text-zinc-900 hover:border-zinc-300">AI 服务配置</a>
+      <a href="/admin/card-keys" class="px-3 py-2 border-b-2 border-zinc-900 text-zinc-900 font-medium">卡密管理</a>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-8">
+    {% if ok_msg %}
+    <div class="px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
+      <i class="fa-solid fa-circle-check mr-1"></i> {{ ok_msg }}
+    </div>
+    {% endif %}
+    {% if error %}
+    <div class="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{{ error }}</div>
+    {% endif %}
+
+    <!-- 统计卡片 -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-4">
+        <p class="text-xs text-zinc-500 mb-1">总卡密数</p>
+        <p class="text-2xl font-bold tabular-nums">{{ stats.total }}</p>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-4">
+        <p class="text-xs text-zinc-500 mb-1">未使用</p>
+        <p class="text-2xl font-bold tabular-nums text-emerald-600">{{ stats.unused }}</p>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-4">
+        <p class="text-xs text-zinc-500 mb-1">已使用</p>
+        <p class="text-2xl font-bold tabular-nums text-zinc-400">{{ stats.used }}</p>
+      </div>
+      <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-4">
+        <p class="text-xs text-zinc-500 mb-1">未使用总面额</p>
+        <p class="text-2xl font-bold tabular-nums text-amber-600">{{ stats.unused_value }} 元</p>
+      </div>
+    </div>
+
+    <!-- 生成卡密 -->
+    <section class="bg-white rounded-lg border border-zinc-200 shadow-sm p-6">
+      <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+        <i class="fa-solid fa-plus-circle text-zinc-400"></i> 批量生成卡密
+      </h2>
+      <form method="post" action="/admin/card-keys/generate" class="flex flex-wrap items-end gap-3">
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">面额（元）</span>
+          <select name="amount_yuan" required class="rounded-md border-zinc-200 text-sm w-28">
+            <option value="1">1 元</option>
+            <option value="3">3 元</option>
+            <option value="5">5 元</option>
+            <option value="10" selected>10 元</option>
+            <option value="50">50 元</option>
+            <option value="100">100 元</option>
+          </select>
+        </label>
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">数量（1-200）</span>
+          <input name="count" type="number" min="1" max="200" step="1" value="10" required
+                 class="rounded-md border-zinc-200 text-sm w-24" />
+        </label>
+        <button type="submit" class="bg-zinc-900 text-white rounded-md px-5 py-2 text-sm font-semibold hover:bg-zinc-800">
+          <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> 生成
+        </button>
+      </form>
+    </section>
+
+    <!-- 新生成的卡密 -->
+    {% if new_codes %}
+    <section class="bg-white rounded-lg border border-emerald-200 shadow-sm p-6">
+      <h2 class="text-base font-semibold mb-3 flex items-center gap-2">
+        <i class="fa-solid fa-copy text-emerald-500"></i> 新生成的卡密（{{ new_codes_count }} 张 · {{ new_codes_amount }} 元）
+      </h2>
+      <p class="text-xs text-zinc-500 mb-3">一行一张，可直接复制使用。请妥善保存，关闭页面后不再重复显示完整卡密。</p>
+      <div class="relative">
+        <textarea id="new-codes-box" readonly rows="10"
+                  class="w-full rounded-md border-zinc-200 text-sm font-mono bg-zinc-50 p-3 pr-20">{{ new_codes }}</textarea>
+        <button type="button" onclick="copyCodes()"
+                class="absolute top-2 right-2 bg-emerald-600 text-white rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700">
+          <i class="fa-solid fa-clipboard mr-1"></i>复制全部
+        </button>
+      </div>
+      <p id="copy-hint" class="text-xs text-emerald-600 mt-2 hidden"><i class="fa-solid fa-check mr-1"></i>已复制到剪贴板</p>
+    </section>
+    <script>
+      function copyCodes() {
+        const box = document.getElementById('new-codes-box');
+        box.select();
+        navigator.clipboard.writeText(box.value).then(() => {
+          const hint = document.getElementById('copy-hint');
+          hint.classList.remove('hidden');
+          setTimeout(() => hint.classList.add('hidden'), 2000);
+        });
+      }
+    </script>
+    {% endif %}
+
+    <!-- 卡密列表 -->
+    <section class="bg-white rounded-lg border border-zinc-200 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-zinc-100 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-semibold flex items-center gap-2">
+            <i class="fa-solid fa-key text-zinc-400"></i> 全部卡密
+          </h2>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="exportCodes()" id="export-btn"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-zinc-200 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors">
+              <i class="fa-solid fa-download text-xs"></i> 导出筛选结果
+            </button>
+            <span id="export-hint" class="text-xs text-emerald-600 hidden"><i class="fa-solid fa-check mr-1"></i>已复制到剪贴板</span>
+            <span id="export-empty" class="text-xs text-zinc-400 hidden">无匹配卡密</span>
+          </div>
+        </div>
+        <form method="get" action="/admin/card-keys" class="flex items-center gap-2 text-sm">
+          <span class="text-zinc-500">筛选：</span>
+          <select name="status" onchange="this.form.submit()" class="rounded-md border-zinc-200 text-sm py-1.5">
+            <option value="">全部状态</option>
+            <option value="unused" {% if filter_status == 'unused' %}selected{% endif %}>未使用</option>
+            <option value="used" {% if filter_status == 'used' %}selected{% endif %}>已使用</option>
+          </select>
+          <select name="amount" onchange="this.form.submit()" class="rounded-md border-zinc-200 text-sm py-1.5">
+            <option value="">全部面额</option>
+            <option value="1" {% if filter_amount == '1' %}selected{% endif %}>1 元</option>
+            <option value="3" {% if filter_amount == '3' %}selected{% endif %}>3 元</option>
+            <option value="5" {% if filter_amount == '5' %}selected{% endif %}>5 元</option>
+            <option value="10" {% if filter_amount == '10' %}selected{% endif %}>10 元</option>
+            <option value="50" {% if filter_amount == '50' %}selected{% endif %}>50 元</option>
+            <option value="100" {% if filter_amount == '100' %}selected{% endif %}>100 元</option>
+          </select>
+          {% if filter_status or filter_amount %}
+          <a href="/admin/card-keys" class="text-zinc-400 hover:text-zinc-600 text-xs ml-1">清除筛选</a>
+          {% endif %}
+          <noscript><button type="submit" class="text-zinc-600 underline">筛选</button></noscript>
+        </form>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="bg-zinc-50 text-zinc-600">
+            <tr>
+              <th class="px-4 py-3 font-medium">卡密</th>
+              <th class="px-4 py-3 font-medium">面额</th>
+              <th class="px-4 py-3 font-medium">状态</th>
+              <th class="px-4 py-3 font-medium">使用者</th>
+              <th class="px-4 py-3 font-medium">使用时间</th>
+              <th class="px-4 py-3 font-medium">创建时间</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-zinc-100">
+            {% for row in cards %}
+            <tr class="hover:bg-zinc-50/80">
+              <td class="px-4 py-3 font-mono text-xs">{{ row.code }}</td>
+              <td class="px-4 py-3 tabular-nums">{{ row.amount_yuan }} 元</td>
+              <td class="px-4 py-3">
+                {% if row.status == 'unused' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">未使用</span>
+                {% else %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-500">已使用</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 text-zinc-500">{{ row.used_by }}</td>
+              <td class="px-4 py-3 text-zinc-500 whitespace-nowrap">{{ row.used_at }}</td>
+              <td class="px-4 py-3 text-zinc-500 whitespace-nowrap">{{ row.created_at }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="px-4 py-8 text-center text-zinc-400">暂无卡密</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if total_pages > 1 %}
+      <div class="px-6 py-3 border-t border-zinc-100 flex items-center justify-between text-sm">
+        <span class="text-zinc-500">共 {{ total_count }} 条，第 {{ page }} / {{ total_pages }} 页</span>
+        <div class="flex items-center gap-1">
+          {% if page > 1 %}
+          <a href="/admin/card-keys?status={{ filter_status }}&amount={{ filter_amount }}&page={{ page - 1 }}"
+             class="px-3 py-1.5 rounded-md border border-zinc-200 hover:bg-zinc-50">上一页</a>
+          {% endif %}
+          {% if page < total_pages %}
+          <a href="/admin/card-keys?status={{ filter_status }}&amount={{ filter_amount }}&page={{ page + 1 }}"
+             class="px-3 py-1.5 rounded-md border border-zinc-200 hover:bg-zinc-50">下一页</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </section>
+  </main>
+  <script>
+    function exportCodes() {
+      const btn = document.getElementById('export-btn');
+      const hint = document.getElementById('export-hint');
+      const empty = document.getElementById('export-empty');
+      hint.classList.add('hidden');
+      empty.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = '导出中...';
+      const params = new URLSearchParams(window.location.search);
+      fetch('/admin/card-keys/export?' + params.toString())
+        .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+        .then(text => {
+          if (!text.trim()) { empty.classList.remove('hidden'); return; }
+          navigator.clipboard.writeText(text).then(() => {
+            hint.classList.remove('hidden');
+            setTimeout(() => hint.classList.add('hidden'), 3000);
+          });
+        })
+        .catch(() => { empty.textContent = '导出失败'; empty.classList.remove('hidden'); })
+        .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-download text-xs"></i> 导出卡密'; });
+    }
+  </script>
+</body>
+</html>
