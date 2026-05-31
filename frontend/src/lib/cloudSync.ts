@@ -52,6 +52,8 @@ function mapRemoteNovel(novel: RemoteNovel): Novel {
     id: String(novel.id),
     title: String(novel.title ?? ''),
     summary: String(novel.summary ?? ''),
+    continuityBrief: String((novel as any).continuity_brief ?? ''),
+    arcSummaries: Array.isArray((novel as any).arc_summaries) ? (novel as any).arc_summaries : [],
     genre: String(novel.genre ?? ''),
     perspective: String(novel.perspective ?? ''),
     tone: String(novel.tone ?? ''),

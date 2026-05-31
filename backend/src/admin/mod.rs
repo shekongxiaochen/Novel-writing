@@ -10,13 +10,14 @@ use sea_orm::{
 use sea_orm_migration::MigratorTrait;
 
 mod ai_config;
+mod card_key_admin;
 mod labels;
 mod user_ops;
 
 use std::{path::PathBuf, sync::Arc};
 
 use crate::entities::AiWalletLedgerEntity;
-use crate::services::{AiProviderService, WalletService};
+use crate::services::{AiProviderService, CardKeyService, WalletService};
 use labels::{apply_field_labels, AI_WALLET_LEDGER_FIELDS};
 
 async fn separate_app_session_table(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
@@ -232,7 +233,32 @@ pub async fn build_router(
         .max_connections(5)
         .connect(database_url)
         .await?;
+
+    // 确保 card_keys 表存在
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS card_keys (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            code VARCHAR(64) NOT NULL,
+            amount_yuan INT NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'unused',
+            used_by_user_id VARCHAR(36) NULL,
+            used_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            UNIQUE KEY uk_card_keys_code (code),
+            INDEX idx_card_keys_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        "#,
+    )
+    .execute(&sqlx_pool)
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!("ensure card_keys table: {:?}", e);
+        sqlx::mysql::MySqlQueryResult::default()
+    });
+
     let wallet_service = WalletService::new(sqlx_pool.clone());
+    let card_key_service = CardKeyService::new(sqlx_pool.clone(), wallet_service.clone());
     let auth_for_admin: Arc<dyn axum_admin::auth::AdminAuth> =
         Arc::new(axum_admin::SeaOrmAdminAuth::new(db.clone()).await?);
 
@@ -256,13 +282,19 @@ pub async fn build_router(
         }))
         .merge(ai_config::routes(ai_config::AiConfigState {
             providers: providers_service,
-            auth: auth_for_admin,
+            auth: auth_for_admin.clone(),
             env_api_key: env_deepseek_api_key.to_string(),
             env_base_url: env_deepseek_base_url.to_string(),
+        }))
+        .merge(card_key_admin::routes(card_key_admin::CardKeyAdminState {
+            db: sqlx_pool.clone(),
+            card_keys: card_key_service,
+            auth: auth_for_admin,
         }));
 
     tracing::info!("Admin user ops: http://127.0.0.1:8080/admin/user-ops");
     tracing::info!("Admin AI config: http://127.0.0.1:8080/admin/ai-config");
+    tracing::info!("Admin card keys: http://127.0.0.1:8080/admin/card-keys");
 
     Ok(router)
 }

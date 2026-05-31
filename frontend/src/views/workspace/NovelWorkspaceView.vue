@@ -283,6 +283,13 @@
                         <strong>已确认 {{ outlineAiInterviewHistory.length }} 轮</strong>
                         <span class="muted">AI 会根据你的回答决定下一问，不再走固定问卷。</span>
                       </div>
+                      <div class="workspace-outline-ai-dimensions">
+                        <span v-for="(dim, idx) in ['核心概念','角色深度','世界规则','冲突结构','气质与结局']" :key="dim"
+                          class="workspace-outline-ai-dim-tag"
+                          :class="{ 'workspace-outline-ai-dim-tag--done': outlineAiCoveredDimensions.includes(String(idx + 1)) }">
+                          {{ dim }}
+                        </span>
+                      </div>
                       <div v-if="outlineAiInterviewHistory.length > 0" class="workspace-outline-ai-followup-history">
                         <article v-for="(turn, index) in outlineAiInterviewHistory" :key="`${turn.label}-${index}`" class="workspace-outline-ai-followup-turn">
                           <span class="workspace-outline-ai-followup-turn__index">已确认 {{ index + 1 }}</span>
@@ -414,6 +421,9 @@
                           {{ issue.message }}
                         </p>
                         <button type="button" class="workspace-outline-ai-lint__dismiss" @click="outlineAiLintDismissed = true">知道了</button>
+                      </div>
+                      <div v-if="outlineAiDesignerDraft?.critiqueNotes" class="workspace-outline-ai-critique" role="status">
+                        <p>AI 审读：{{ outlineAiDesignerDraft.critiqueNotes }}</p>
                       </div>
                       <div class="workspace-outline-ai-preview-head">
                         <div>
@@ -2874,6 +2884,7 @@ type OutlineAiDraft = {
     emotionalTurn?: string
     proseHint?: string
   }>
+  critiqueNotes?: string
 }
 
 const novelId = computed(() => String(route.params.id ?? ''))
@@ -2925,6 +2936,7 @@ const outlineAiCurrentAnswer = ref('')
 const outlineAiCurrentCustom = ref('')
 const outlineAiOptionNotes = ref<Record<string, string>>({})
 const outlineAiOptionRevisionHistory = ref<Array<{ selectedOptionId: string; selectedTitle: string; note: string }>>([])
+const outlineAiCoveredDimensions = ref<string[]>([])
 const outlineDetailOpenId = ref('')
 const activeOutlineDetailItem = computed(() =>
   outlineItems.value.find((item) => item.id === outlineDetailOpenId.value) ?? null,
@@ -4032,6 +4044,7 @@ function resetOutlineAiDesignerState(): void {
   outlineAiCurrentCustom.value = ''
   outlineAiOptionNotes.value = {}
   outlineAiOptionRevisionHistory.value = []
+  outlineAiCoveredDimensions.value = []
 }
 
 function setOutlineAiOptionNote(optionId: string, value: string): void {
@@ -4117,11 +4130,26 @@ async function requestNextOutlineAiQuestion(): Promise<boolean> {
       {
         novelTitle: novel.value.title,
         novelSummary: novel.value.summary,
+        novel: {
+          title: novel.value.title,
+          summary: novel.value.summary,
+          continuityBrief: novel.value.continuityBrief,
+          genre: novel.value.genre,
+          perspective: novel.value.perspective,
+          tone: novel.value.tone,
+        },
         history: collectOutlineAiInterviewHistory(),
         remainingRounds: Math.max(0, 6 - outlineAiInterviewHistory.value.length),
       },
     )
     outlineAiDesignerRationale.value = result.rationale
+    // Merge covered dimensions
+    const newDims = result.coveredDimensions ?? []
+    for (const d of newDims) {
+      if (!outlineAiCoveredDimensions.value.includes(d)) {
+        outlineAiCoveredDimensions.value.push(d)
+      }
+    }
     if (result.shouldAsk && result.question) {
       outlineAiCurrentQuestion.value = result.question
       outlineAiCurrentAnswer.value = ''
@@ -4187,6 +4215,12 @@ async function submitOutlineAiInterviewAnswer(): Promise<void> {
   outlineAiCurrentAnswer.value = ''
   outlineAiCurrentCustom.value = ''
   if (outlineAiInterviewHistory.value.length >= 6) {
+    await generateOutlineAiOptions()
+    return
+  }
+  // Early exit if all 5 dimensions covered after 3+ rounds
+  const allDimsCovered = outlineAiCoveredDimensions.value.length >= 5
+  if (allDimsCovered && outlineAiInterviewHistory.value.length >= 3) {
     await generateOutlineAiOptions()
     return
   }
@@ -4400,6 +4434,7 @@ async function generateOutlineAiScenesFromSkeleton(): Promise<void> {
       characterCast: result.characterCast.length > 0 ? result.characterCast : draft.characterCast,
       relationCast: [...(draft.relationCast ?? []), ...result.relationCast],
       items: [...skeletonItems, ...result.items],
+      critiqueNotes: result.critiqueNotes ?? draft.critiqueNotes,
     }
     outlineAiDraftIsSkeletonOnly.value = false
     outlineAiDesignerStep.value = 'preview'
@@ -7521,6 +7556,15 @@ onUnmounted(() => {
   padding: 0;
 }
 
+.workspace-outline-ai-critique {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-info, #3b82f6) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-info, #3b82f6) 20%, transparent);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
 .workspace-outline-ai-dialog__link-btn {
   font-size: 13px;
 }
@@ -7603,6 +7647,35 @@ onUnmounted(() => {
   border: 1px solid color-mix(in srgb, var(--color-border-strong) 24%, transparent);
   border-radius: 12px;
   background: color-mix(in srgb, var(--color-primary-soft) 14%, var(--color-surface));
+}
+
+.workspace-outline-ai-dimensions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.workspace-outline-ai-dim-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--color-border) 20%, transparent);
+  color: var(--color-text-muted);
+  transition: all 0.2s;
+}
+
+.workspace-outline-ai-dim-tag--done {
+  background: color-mix(in srgb, var(--color-success, #22c55e) 18%, transparent);
+  color: var(--color-success, #22c55e);
+}
+
+.workspace-outline-ai-dim-tag--done::before {
+  content: '✓';
+  font-size: 11px;
 }
 
 .workspace-outline-ai-question-list,

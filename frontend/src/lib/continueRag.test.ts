@@ -17,6 +17,7 @@ function chapter(no: number, content: string): Chapter {
     annotation: '',
     content,
     outlineItemIds: [],
+    sceneSummaries: [],
     status: 'draft',
     createdAt: '',
     updatedAt: '',
