@@ -1,9 +1,25 @@
+export type SceneSummary = {
+  sceneIndex: number
+  title: string
+  summary: string
+}
+
+export type ArcSummary = {
+  arcId: string
+  level: 'volume' | 'act'
+  title: string
+  summary: string
+  chapterRange: [number, number]
+}
+
 export type Novel = {
   id: string
   title: string
   summary: string
   /** 全书连续性摘要（长篇续写用，作者可一键生成后保存） */
   continuityBrief: string
+  /** 篇章弧线摘要（卷/幕级别，长篇小说用） */
+  arcSummaries: ArcSummary[]
   genre: string
   perspective: string
   tone: string
@@ -33,6 +49,8 @@ export type Chapter = {
   content: string
   outlineItemIds: string[]
   status: ChapterStatus
+  /** 场景级摘要（章节内分场景拆分） */
+  sceneSummaries: SceneSummary[]
   createdAt: string
   updatedAt: string
 }

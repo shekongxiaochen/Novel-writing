@@ -6,45 +6,54 @@
   <p class="text-sm text-zinc-500 mt-1">欢迎使用 {{ admin_title }}。</p>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
   <a href="/admin/user-ops"
-     class="flex items-center gap-4 bg-zinc-900 text-white rounded-lg p-5 shadow-sm hover:bg-zinc-800 transition-colors group">
-    <div class="w-12 h-12 rounded-md bg-white/10 flex items-center justify-center shrink-0">
-      <i class="fa-solid fa-users text-lg"></i>
+     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-md bg-zinc-900 text-white flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-users"></i>
+      </div>
+      <p class="font-semibold text-zinc-900">用户与余额</p>
     </div>
-    <div class="flex-1 min-w-0">
-      <p class="font-semibold text-base">用户与余额</p>
-      <p class="text-sm text-zinc-300 mt-0.5">查看全部用户、充值余额、浏览流水记录</p>
-    </div>
-    <i class="fa-solid fa-chevron-right text-zinc-400 group-hover:text-white"></i>
+    <p class="text-sm text-zinc-500">查看全部用户、充值余额、浏览流水记录</p>
   </a>
 
   <a href="/admin/ai-config"
-     class="flex items-center gap-4 bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 transition-colors group">
-    <div class="w-12 h-12 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
-      <i class="fa-solid fa-sliders text-zinc-600 text-lg"></i>
+     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-sliders text-zinc-600"></i>
+      </div>
+      <p class="font-semibold text-zinc-900">AI 服务配置</p>
     </div>
-    <div class="flex-1 min-w-0">
-      <p class="font-semibold text-base text-zinc-900">AI 服务配置</p>
-      <p class="text-sm text-zinc-500 mt-0.5">DeepSeek 密钥、模型、消耗倍率、测试连接</p>
+    <p class="text-sm text-zinc-500">DeepSeek 密钥、模型、消耗倍率、测试连接</p>
+  </a>
+
+  <a href="/admin/card-keys"
+     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-key text-zinc-600"></i>
+      </div>
+      <p class="font-semibold text-zinc-900">卡密管理</p>
     </div>
-    <i class="fa-solid fa-chevron-right text-zinc-300 group-hover:text-zinc-600"></i>
+    <p class="text-sm text-zinc-500">批量生成卡密、查看使用状态、筛选导出</p>
   </a>
 </div>
 
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+{% if entities %}
+<h2 class="text-sm font-semibold text-zinc-500 mb-3">数据管理</h2>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
   {% for entity in entities %}
   <a href="/admin/{{ entity.name }}/"
-     class="bg-white rounded-md border border-zinc-200 shadow-sm p-6 flex items-center gap-4 hover:shadow-md hover:border-zinc-300 transition-all group">
-    <div class="w-10 h-10 bg-zinc-100 rounded-md flex items-center justify-center group-hover:bg-zinc-200 transition-colors shrink-0">
-      <i class="{{ entity.icon }} text-zinc-500 text-sm"></i>
+     class="bg-white rounded-md border border-zinc-200 shadow-sm px-5 py-4 flex items-center gap-3 hover:border-zinc-300 transition-colors group">
+    <div class="w-8 h-8 bg-zinc-100 rounded flex items-center justify-center group-hover:bg-zinc-200 transition-colors shrink-0">
+      <i class="{{ entity.icon }} text-zinc-500 text-xs"></i>
     </div>
-    <div>
-      <p class="text-sm font-semibold text-zinc-900">{{ entity.label }}</p>
-      <p class="text-xs text-zinc-500 mt-0.5">管理 {{ entity.label }}</p>
-    </div>
+    <span class="text-sm font-medium text-zinc-800">{{ entity.label }}</span>
     <i class="fa-solid fa-chevron-right text-zinc-300 text-xs ml-auto group-hover:text-zinc-500 transition-colors"></i>
   </a>
   {% endfor %}
 </div>
+{% endif %}
 {% endblock %}

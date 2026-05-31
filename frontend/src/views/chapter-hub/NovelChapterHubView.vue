@@ -4,8 +4,8 @@
     :class="{ 'chapter-hub--empty': chapters.length === 0 }"
     v-if="novel"
   >
-    <template v-if="chapters.length > 0">
       <div class="chapter-hub__workspace" :style="aiWorkspaceStyle">
+        <template v-if="chapters.length > 0">
         <section class="chapter-hub__editor-shell" aria-label="正文编辑区">
           <header class="chapter-hub__tabs-region" aria-label="打开的章节">
             <div class="chapter-hub__tabs-left">
@@ -42,7 +42,10 @@
                 :title="'搜索 Ctrl+F'"
                 @click="toggleChapterSearch()"
               >
-                <span class="chapter-hub__search-icon" aria-hidden="true">🔍</span>
+                <svg class="chapter-hub__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
               </button>
             </div>
 
@@ -53,6 +56,10 @@
                 role="search"
                 @submit.prevent
               >
+                <svg class="chapter-hub__search-bar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
                 <input
                   ref="chapterSearchInputRef"
                   v-model="chapterSearchQuery"
@@ -60,35 +67,38 @@
                   type="search"
                   spellcheck="false"
                   autocomplete="off"
-                  placeholder="查找"
+                  placeholder="查找正文…"
                   @keydown.stop
                 />
                 <span v-if="chapterSearchQuery" class="chapter-hub__search-status">{{ chapterSearchStatusLabel }}</span>
-                <button
-                  type="button"
-                  class="chapter-hub__search-btn"
-                  :disabled="!chapterSearchQuery"
-                  @click="jumpChapterSearch(-1)"
-                  title="上一个"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  class="chapter-hub__search-btn"
-                  :disabled="!chapterSearchQuery"
-                  @click="jumpChapterSearch(1)"
-                  title="下一个"
-                >
-                  ↓
-                </button>
+                <div class="chapter-hub__search-nav">
+                  <button
+                    type="button"
+                    class="chapter-hub__search-btn"
+                    :disabled="!chapterSearchQuery"
+                    @click="jumpChapterSearch(-1)"
+                    title="上一个"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="chapter-hub__search-btn"
+                    :disabled="!chapterSearchQuery"
+                    @click="jumpChapterSearch(1)"
+                    title="下一个"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+                  </button>
+                </div>
+                <div class="chapter-hub__search-sep" />
                 <button
                   type="button"
                   class="chapter-hub__search-btn chapter-hub__search-btn--close"
                   @click="hideChapterSearch()"
                   title="关闭"
                 >
-                  ×
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                 </button>
               </form>
             </transition>
@@ -103,6 +113,7 @@
                 :entity-preview-lines="entityPreviewLines"
                 :should-show-entity-overlay="shouldShowEntityOverlay"
                 :is-chapter-textarea-focused="isChapterTextareaFocused"
+                :textarea-has-selection="hasTextareaSelection"
                 :pinned-quote-range="pinnedQuoteRangeForPaper"
                 :active-flash-fs-key="activeFlashFsKey"
                 :readonly="false"
@@ -114,6 +125,7 @@
                 @keyup="onChapterTextareaKeyup"
                 @mouseup="onChapterTextareaMouseup"
                 @select="onChapterTextareaSelect"
+                @contextmenu="onChapterTextareaContextmenu"
                 @paper-interact="onChapterPaperPointerDown"
                 @focus="onChapterTextareaFocus"
                 @blur="onChapterTextareaBlur($event)"
@@ -141,6 +153,8 @@
             </footer>
           </Transition>
         </section>
+        </template>
+        <ChapterHubEmptyChaptersCard v-else />
 
         <aside
           v-if="!focusMode"
@@ -206,9 +220,6 @@
           />
         </aside>
       </div>
-    </template>
-
-    <ChapterHubEmptyChaptersCard v-else />
 
     <ChapterHubNameSuggestTeleport
       :open="nameSuggestOpen && !foreshadowModalOpen"
@@ -242,6 +253,18 @@
       @toggle-faction="toggleFactionMembershipForSelectedCharacter"
       @set-foreshadow="openForeshadowPlantModal"
       @resolve-foreshadow="openForeshadowFulfillModal"
+    />
+
+    <ChapterHubSelectionActionBar
+      :open="selectionActionBarOpen"
+      :x="selectionActionBarX"
+      :y="selectionActionBarY"
+      :can-add-as-faction="selectionActionBarCanAddAsFaction"
+      @add-character="selectionActionAddCharacter"
+      @add-faction="selectionActionAddFaction"
+      @add-foreshadow="selectionActionAddForeshadow"
+      @mouseenter="cancelHideSelectionActionBar"
+      @mouseleave="hideSelectionActionBar"
     />
 
     <ChapterHubEntityTooltipTeleport
@@ -397,6 +420,8 @@ import {
   updateForeshadowPlant,
   updateFaction,
   updateItem,
+  recordCharacterChangeFields,
+  recordFactionChangeFields,
 } from '../../lib/storage'
 import {
   analyzeNovelForeshadowsFromWorkspace,
@@ -407,11 +432,14 @@ import {
   extractNovelEntitiesFromWorkspace,
   summarizeNovelChapterFromWorkspaceStream,
   summarizeNovelContinuityBriefFromWorkspaceStream,
+  summarizeChapterScenesFromWorkspaceStream,
+  checkChapterConsistencyFromWorkspaceStream,
+  type ConsistencyCheckResult,
 } from '../../lib/localAi'
 import { executeToolCall } from '../../lib/aiTools'
 import { formatChapterSummaryText } from '../../lib/chapterSummary'
 import { fetchWalletBalance } from '../../lib/backendAi'
-import { normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
+import { normalizeCharacterAliases, replaceCharacterLabelsInText, someCharacterHasLabel } from '../../lib/characterLabels'
 import { useChapterHubChapterMutations } from '../../features/chapter-hub/composables/useChapterHubChapterMutations'
 import { useChapterHubCtxMenu } from '../../features/chapter-hub/composables/useChapterHubCtxMenu'
 import { useChapterHubData } from '../../features/chapter-hub/composables/useChapterHubData'
@@ -441,10 +469,11 @@ import {
   normalizeQuoteRange,
   type ChapterPinnedQuoteSelection,
 } from '../../features/chapter-hub/lib/chapterQuoteSelection'
-import { scrollCaretIntoView } from '../../features/chapter-hub/caretGeometry'
+import { getCaretPixelOffset, scrollCaretIntoView } from '../../features/chapter-hub/caretGeometry'
 import { findTextSearchMatches } from '../../features/chapter-hub/lib/chapterTextSearch'
 import ChapterHubCharacterGraphModal from './components/ChapterHubCharacterGraphModal.vue'
 import ChapterHubCtxMenuTeleport from './components/ChapterHubCtxMenuTeleport.vue'
+import ChapterHubSelectionActionBar from './components/ChapterHubSelectionActionBar.vue'
 import ChapterHubFactionDetailModal from './components/ChapterHubFactionDetailModal.vue'
 import ChapterHubForeshadowModal from './components/ChapterHubForeshadowModal.vue'
 import ChapterHubForeshadowTooltip from './components/ChapterHubForeshadowTooltip.vue'
@@ -509,6 +538,8 @@ const aiAnalysisKind = ref<AiAnalysisKind>('entities')
 const aiExtractResult = ref<NovelEntityExtractResult>(emptyAiExtractResult())
 const aiForeshadowResult = ref<NovelForeshadowAnalysisResult>(emptyAiForeshadowResult())
 const aiClassificationResult = ref<NovelChapterClassificationResult>(emptyAiClassificationResult())
+const aiConsistencyResult = ref<ConsistencyCheckResult | null>(null)
+const aiConsistencyLoading = ref(false)
 const aiAppliedActions = ref<Array<{ id: string; text: string; tone: 'applied' | 'ignored' }>>([])
 type AiExtractRun = {
   id: string
@@ -1319,6 +1350,36 @@ async function runChapterSummaryAfterContinue(
   }
 }
 
+async function runSceneSummaryAfterContinue(chapterId: string): Promise<void> {
+  const id = novelId.value
+  if (!id || !requestAiAccess()) return
+
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const scenes = await summarizeChapterScenesFromWorkspaceStream(
+      snapshot,
+      chapterId,
+      {
+        onChunk: () => {},
+        onError: (err: Error) => {
+          if (err.name !== 'AbortError') {
+            console.warn('场景摘要生成失败:', err.message)
+          }
+        },
+      },
+    )
+    if (scenes.length > 0) {
+      updateChapter({ id: chapterId, sceneSummaries: scenes })
+      reload()
+      appendAiSystemNote(`已生成 ${scenes.length} 个场景摘要`)
+    }
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name !== 'AbortError') {
+      console.warn('场景摘要生成失败:', e.message)
+    }
+  }
+}
+
 const aiChatSessionSummaries = computed(() =>
   openAiChatSessionIds.value
     .map((id) => aiChatSessions.value.find((session) => session.id === id))
@@ -1593,6 +1654,108 @@ function preferExisting(existing: string, incoming: string): string {
   return left || right
 }
 
+function textSimilarity(a: string, b: string): number {
+  const la = String(a ?? '').trim()
+  const lb = String(b ?? '').trim()
+  if (!la && !lb) return 1
+  if (!la || !lb) return 0
+  if (la === lb) return 1
+  const shorter = Math.min(la.length, lb.length)
+  const longer = Math.max(la.length, lb.length)
+  if (longer === 0) return 1
+  // 快速前缀检查
+  const commonPrefix = [...la].findIndex((ch, i) => ch !== lb[i])
+  const prefixRatio = (commonPrefix === -1 ? shorter : commonPrefix) / longer
+  return prefixRatio
+}
+
+function attrsSimilarity(a: CharacterAttribute[] | undefined, b: CharacterAttribute[] | undefined): number {
+  const la = (a ?? []).filter((x) => x.key && x.value)
+  const lb = (b ?? []).filter((x) => x.key && x.value)
+  if (la.length === 0 && lb.length === 0) return 1
+  if (la.length === 0 || lb.length === 0) return 0
+  const setA = new Set(la.map((x) => `${x.key}::${x.value}`))
+  const setB = new Set(lb.map((x) => `${x.key}::${x.value}`))
+  let overlap = 0
+  for (const k of setA) if (setB.has(k)) overlap++
+  return overlap / Math.max(setA.size, setB.size)
+}
+
+function isNegligibleCharacterUpdate(
+  existing: (typeof characters.value)[number],
+  incoming: { gender?: string; age?: string; goal?: string; secret?: string; arc?: string; notes?: string; aliases?: string[]; attributes?: CharacterAttribute[] },
+): boolean {
+  const THRESHOLD = 0.92
+  const fields: Array<[string, string]> = [
+    [existing.gender ?? '', incoming.gender ?? ''],
+    [existing.age ?? '', incoming.age ?? ''],
+    [existing.goal ?? '', incoming.goal ?? ''],
+    [existing.secret ?? '', incoming.secret ?? ''],
+    [existing.arc ?? '', incoming.arc ?? ''],
+  ]
+  for (const [a, b] of fields) {
+    if (a && b && textSimilarity(a, b) < THRESHOLD) return false
+  }
+  // notes 允许追加，检查 incoming 是否以 existing 开头
+  const existNotes = existing.notes ?? ''
+  const incNotes = incoming.notes ?? ''
+  if (incNotes && existNotes) {
+    if (!incNotes.startsWith(existNotes) && textSimilarity(existNotes, incNotes) < THRESHOLD) return false
+  }
+  // attributes
+  if (attrsSimilarity(existing.attributes, incoming.attributes) < THRESHOLD) return false
+  // aliases
+  const existAliases = new Set((existing.aliases ?? []).map((a) => a.toLowerCase()))
+  const incAliases = (incoming.aliases ?? []).map((a) => a.toLowerCase())
+  const newAliases = incAliases.filter((a) => !existAliases.has(a))
+  if (newAliases.length > 0) return false
+  return true
+}
+
+function isNegligibleFactionUpdate(
+  existing: (typeof factions.value)[number],
+  incoming: { leader?: string; notes?: string; attributes?: CharacterAttribute[] },
+): boolean {
+  const THRESHOLD = 0.92
+  if (existing.leader && incoming.leader && textSimilarity(existing.leader, incoming.leader) < THRESHOLD) return false
+  if (existing.notes && incoming.notes && textSimilarity(existing.notes, incoming.notes) < THRESHOLD) return false
+  if (attrsSimilarity(existing.attributes, incoming.attributes) < THRESHOLD) return false
+  return true
+}
+
+function autoSkipNegligibleExtractUpdates(): void {
+  const result = aiExtractResult.value
+  if (!result) return
+  // 角色
+  if (Array.isArray(result.characters)) {
+    for (let i = 0; i < result.characters.length; i++) {
+      const item = result.characters[i]
+      if (item.uiState?.status || item.match?.type !== 'update') continue
+      const targetId = String(item.match?.targetId ?? '').trim()
+      if (!targetId) continue
+      const existing = characters.value.find((c) => c.id === targetId)
+      if (!existing) continue
+      if (isNegligibleCharacterUpdate(existing, item)) {
+        setAiSuggestionState('characters', i, 'ignored', 'ignore')
+      }
+    }
+  }
+  // 势力
+  if (Array.isArray(result.factions)) {
+    for (let i = 0; i < result.factions.length; i++) {
+      const item = result.factions[i]
+      if (item.uiState?.status || item.match?.type !== 'update') continue
+      const targetId = String(item.match?.targetId ?? '').trim()
+      if (!targetId) continue
+      const existing = factions.value.find((f) => f.id === targetId)
+      if (!existing) continue
+      if (isNegligibleFactionUpdate(existing, item)) {
+        setAiSuggestionState('factions', i, 'ignored', 'ignore')
+      }
+    }
+  }
+}
+
 function mergeAliases(existing: string[] | undefined, incoming: string[] | undefined): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -1796,6 +1959,14 @@ function rewriteCurrentChapterCharacterLabels(oldLabels: string[], nextName: str
   return true
 }
 
+function resolveQuoteAnchor(content: string, quote: string): { start: number; end: number } | undefined {
+  const q = (quote ?? '').trim()
+  if (!q || !content) return undefined
+  const idx = content.indexOf(q)
+  if (idx < 0) return undefined
+  return { start: idx, end: idx + q.length }
+}
+
 function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): void {
   const item = aiExtractResult.value.characters[index]
   if (!item || item.uiState?.status === 'applied') return
@@ -1820,6 +1991,16 @@ function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'i
       aliases: item.aliases,
     })
     nextCharacterId = created.id
+    const _content = selectedChapter.value?.content ?? ''
+    const _ev = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
+    const _anchor = resolveQuoteAnchor(_content, _ev[0]?.quote ?? '')
+    const _fields = ['name', 'age', 'gender', 'goal', 'secret', 'arc', 'notes'].filter((f) => (item as any)[f])
+    recordCharacterChangeFields(nextCharacterId, _fields, {
+      chapterId: selectedChapterId.value,
+      anchorStart: _anchor?.start,
+      anchorEnd: _anchor?.end,
+      fieldValues: { name: item.name, age: item.age, gender: item.gender, goal: item.goal, secret: item.secret, arc: item.arc, notes: item.notes },
+    })
     appendAiSystemNote(`已确认添加角色：${item.name}`)
   } else {
     const targetId = String(item.match.targetId ?? '').trim()
@@ -1841,6 +2022,15 @@ function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'i
       aliases: mergeAliases(current.aliases, [item.name, ...item.aliases]),
       firstAppearanceChapterNo: pickEarlierChapter(current.firstAppearanceChapterNo, item.firstAppearanceChapterNo),
     })
+    const _mergeFields = ['age', 'gender', 'goal', 'secret', 'arc', 'notes'].filter((f) => (item as any)[f])
+    if (_mergeFields.length > 0) {
+      const _c2 = selectedChapter.value?.content ?? ''
+      const _ev2 = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
+      const _a2 = resolveQuoteAnchor(_c2, _ev2[0]?.quote ?? '')
+      const _fv: Record<string, string> = {}
+      for (const f of _mergeFields) _fv[f] = (item as any)[f]
+      recordCharacterChangeFields(nextCharacterId, _mergeFields, { chapterId: selectedChapterId.value, anchorStart: _a2?.start, anchorEnd: _a2?.end, fieldValues: _fv })
+    }
     appendAiSystemNote(`已确认合并角色：${item.name} -> ${current.name}`)
   }
   finishAiSuggestionApply('characters', index, action, { editorEntityType: 'character', editorTargetId: nextCharacterId })
@@ -1864,6 +2054,16 @@ function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ign
       attributes: item.attributes ?? [],
     })
     nextFactionId = created.id
+    const _fc = selectedChapter.value?.content ?? ''
+    const _fev = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
+    const _fa = resolveQuoteAnchor(_fc, _fev[0]?.quote ?? '')
+    const _ff = ['name', 'leader', 'notes'].filter((f) => (item as any)[f])
+    recordFactionChangeFields(nextFactionId, _ff, {
+      chapterId: selectedChapterId.value,
+      anchorStart: _fa?.start,
+      anchorEnd: _fa?.end,
+      fieldValues: { name: item.name, leader: item.leader, notes: item.notes },
+    })
     appendAiSystemNote(`已确认添加势力：${item.name}`)
   } else {
     const targetId = String(item.match.targetId ?? '').trim()
@@ -1877,6 +2077,15 @@ function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ign
       notes: preferExisting(current.notes, item.notes),
       attributes: mergeCharacterAttributes(current.attributes, item.attributes ?? []),
     })
+    const _fmergeFields = ['leader', 'notes'].filter((f) => (item as any)[f])
+    if (_fmergeFields.length > 0) {
+      const _fc2 = selectedChapter.value?.content ?? ''
+      const _fev2 = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
+      const _fa2 = resolveQuoteAnchor(_fc2, _fev2[0]?.quote ?? '')
+      const _ffv: Record<string, string> = {}
+      for (const f of _fmergeFields) _ffv[f] = (item as any)[f]
+      recordFactionChangeFields(nextFactionId, _fmergeFields, { chapterId: selectedChapterId.value, anchorStart: _fa2?.start, anchorEnd: _fa2?.end, fieldValues: _ffv })
+    }
     appendAiSystemNote(`已确认合并势力：${item.name} -> ${current.name}`)
   }
   finishAiSuggestionApply('factions', index, action, { editorEntityType: 'faction', editorTargetId: nextFactionId })
@@ -1940,6 +2149,15 @@ function applyMembershipSuggestion(index: number, action: 'create' | 'merge' | '
       factionId,
       description: item.description,
     })
+    const _mc = selectedChapter.value?.content ?? ''
+    const _mev = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
+    const _ma = resolveQuoteAnchor(_mc, _mev[0]?.quote ?? '')
+    recordCharacterChangeFields(characterId, ['memberships'], {
+      chapterId: selectedChapterId.value,
+      anchorStart: _ma?.start,
+      anchorEnd: _ma?.end,
+      fieldValues: { memberships: `${item.characterName} → ${item.factionName}` },
+    })
     appendAiSystemNote(`已确认添加所属势力：${item.characterName} -> ${item.factionName}`)
   } else {
     const targetId = String(item.match.targetId ?? '').trim()
@@ -1949,6 +2167,15 @@ function applyMembershipSuggestion(index: number, action: 'create' | 'merge' | '
     updateCharacterFactionMembership({
       id: targetId,
       description: preferExisting(current.description, item.description),
+    })
+    const _mc2 = selectedChapter.value?.content ?? ''
+    const _mev2 = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
+    const _ma2 = resolveQuoteAnchor(_mc2, _mev2[0]?.quote ?? '')
+    recordCharacterChangeFields(characterId, ['memberships'], {
+      chapterId: selectedChapterId.value,
+      anchorStart: _ma2?.start,
+      anchorEnd: _ma2?.end,
+      fieldValues: { memberships: `${item.characterName} → ${item.factionName}` },
     })
     appendAiSystemNote(`已确认合并所属势力：${item.characterName} -> ${item.factionName}`)
   }
@@ -2018,6 +2245,13 @@ function applyForeshadowSuggestion(index: number, action: 'create' | 'ignore'): 
   if (!chapter || !novelId.value) return
   const evidence = item.evidences.find((ev) => String(ev.chapterId ?? '').trim() === chapter.id) ?? item.evidences[0]
   const plantText = String(evidence?.quote ?? item.summary ?? item.title).trim()
+
+  // 计算伏笔在正文中的位置
+  const content = chapter.content || ''
+  const plantTextIndex = content.indexOf(plantText)
+  const plantStart = plantTextIndex >= 0 ? plantTextIndex : undefined
+  const plantEnd = plantTextIndex >= 0 ? plantTextIndex + plantText.length : undefined
+
   createForeshadowPlant({
     novelId: novelId.value,
     title: item.title,
@@ -2025,6 +2259,8 @@ function applyForeshadowSuggestion(index: number, action: 'create' | 'ignore'): 
     plantChapterId: String(evidence?.chapterId ?? '').trim() || chapter.id,
     plantChapterNo: Number.isFinite(Number(evidence?.chapterNo)) ? Number(evidence?.chapterNo) : chapter.chapterNo,
     plantChapterTitle: chapter.title,
+    plantStart,
+    plantEnd,
     description: item.summary,
     expectedFulfillNotes: item.payoffHint,
   })
@@ -2281,6 +2517,7 @@ async function runAiExtract(mode: AiExtractMode): Promise<void> {
       classifyNovelChapterFromWorkspace(snapshot, { mode, chapterIds, focusQuote }),
     ])
     aiExtractResult.value = entityResult
+    autoSkipNegligibleExtractUpdates()
     aiForeshadowResult.value = foreshadowResult
     aiClassificationResult.value = classificationResult
     pushAiExtractRun('entities', mode, {
@@ -2300,6 +2537,44 @@ async function runAiExtract(mode: AiExtractMode): Promise<void> {
 
 function runCurrentAiExtract(): void {
   void runAiExtract('current')
+}
+
+async function runConsistencyCheck(): Promise<void> {
+  const id = novelId.value
+  const chapter = selectedChapter.value
+  if (!id || !chapter || !requestAiAccess()) return
+
+  aiConsistencyLoading.value = true
+  aiConsistencyResult.value = null
+
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const result = await checkChapterConsistencyFromWorkspaceStream(
+      snapshot,
+      chapter.id,
+      {
+        onChunk: () => {},
+        onError: (err: Error) => {
+          if (err.name !== 'AbortError') {
+            console.warn('一致性检查失败:', err.message)
+          }
+        },
+      },
+    )
+    aiConsistencyResult.value = result
+    const issueCount = result.characterIssues.length + result.timelineIssues.length + result.foreshadowIssues.length + result.settingIssues.length
+    if (issueCount > 0) {
+      appendAiSystemNote(`一致性检查发现 ${issueCount} 个问题`)
+    } else {
+      appendAiSystemNote('一致性检查通过，未发现问题')
+    }
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name !== 'AbortError') {
+      console.warn('一致性检查失败:', e.message)
+    }
+  } finally {
+    aiConsistencyLoading.value = false
+  }
 }
 
 function stopAiReadingDesk(): void {
@@ -2335,6 +2610,7 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
   if (!requestAiAccess()) return
 
   const rawDirection = String(payload.direction ?? '').trim()
+
   const nextChapterSetup = isNextChapterIntent(rawDirection)
     ? suggestNextChapterOutlineBinding(outlineItems.value, chapters.value, selectedChapter.value)
     : null
@@ -2393,6 +2669,7 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
               title: novel.value.title,
               summary: novel.value.summary,
               continuityBrief: novel.value.continuityBrief,
+              arcSummaries: novel.value.arcSummaries,
               genre: novel.value.genre,
               perspective: novel.value.perspective,
               tone: novel.value.tone,
@@ -2496,6 +2773,7 @@ async function applyContinueDraft(): Promise<void> {
   void runChapterSummaryAfterContinue(chapter.id, { autoApply: true })
   switchToAiDeskMode('ask')
   void runAiExtract('current')
+  void runSceneSummaryAfterContinue(chapter.id)
 }
 
 function ignoreContinueDraft(): void {
@@ -2643,6 +2921,9 @@ function ignoreAiPendingToolActions(silent = false): void {
 const WRITE_BODY_INTENT_RE =
   /(续写|写下一章|下一章内容|按大纲写|根据大纲写|撰写本章|生成正文|写出本章|写本章|按节拍写)/
 
+const TOOL_ACTION_INTENT_RE =
+  /(伏笔|设为|标记|创建|新建|添加|删除|移除|绑定|关联|整理|总结|提取|归纳|修改角色|更新角色|创建角色|创建势力|修改势力)/
+
 async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }): Promise<void> {
   const id = novelId.value
   if (!id) return
@@ -2652,29 +2933,33 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
   }
   const deskMode = payload.mode ?? aiDeskMode.value
   const question = String(payload.question ?? '').trim()
-  if (deskMode === 'write' || (deskMode === 'ask' && WRITE_BODY_INTENT_RE.test(question))) {
-    const switchedFromAsk = deskMode === 'ask'
-    if (switchedFromAsk) switchToAiDeskMode('write')
+  const isToolAction = TOOL_ACTION_INTENT_RE.test(question)
 
-    if (isNextChapterIntent(question)) {
+  // 写作模式：只允许续写相关请求，其他一律拒绝
+  if (deskMode === 'write') {
+    if (isNextChapterIntent(question) || WRITE_BODY_INTENT_RE.test(question)) {
       await runAiContinue({ direction: question })
       return
     }
+    appendAiChatMessage('assistant', '写作模式仅支持续写正文。如需提问、创建伏笔、整理角色等操作，请切换到「提问」模式。', 'current')
+    return
+  }
 
-    if (switchedFromAsk) {
-      appendAiChatMessage(
-        'assistant',
-        '已识别为生成正文任务：请在下方「续写草稿」中预览，点「采用」后才会写入稿纸。',
-        'current',
-      )
-    }
+  // 提问模式：识别到续写意图时自动切到写作模式
+  if (WRITE_BODY_INTENT_RE.test(question) && !isToolAction) {
+    switchToAiDeskMode('write')
+    appendAiChatMessage(
+      'assistant',
+      '已识别为生成正文任务：请在下方「续写草稿」中预览，点「采用」后才会写入稿纸。',
+      'current',
+    )
     await runAiContinue({ direction: question })
     return
   }
 
   const quoted = aiSelectionQuote.value.trim()
   const composedQuestion = quoted
-    ? `请结合以下引用片段回答：\n「${quoted}」\n\n作者问题：${question}`
+    ? `以下选中的正文需要被操作：\n「${quoted}」\n\n作者指令：${question}`
     : question
   if (aiPendingToolActions.value.some((row) => row.status === 'pending')) {
     ignoreAiPendingToolActions(true)
@@ -2721,6 +3006,7 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
               title: novel.value.title,
               summary: novel.value.summary,
               continuityBrief: novel.value.continuityBrief,
+              arcSummaries: novel.value.arcSummaries,
               genre: novel.value.genre,
               perspective: novel.value.perspective,
               tone: novel.value.tone,
@@ -2744,6 +3030,8 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
       usedChars: contextMeta.usedChars,
       ragHits: contextMeta.ragHits,
     }
+    // 清除流式传输中可能残留的 DSML tool call 标记
+    msg.content = String(msg.content ?? '').replace(/<｜｜DSML｜｜[^>]*>[\s\S]*?<｜｜DSML｜｜[^>]*>/g, '').trim()
     if (pendingToolActions && pendingToolActions.length > 0) {
       aiPendingToolActions.value = pendingToolActions
       const hasChapterDraft = pendingToolActions.some((row) => row.toolCall.function.name === 'update_chapter_content')
@@ -2841,6 +3129,131 @@ const {
   chapterTextareaRef,
   foreshadowModalOpen,
 })
+
+// ── 选中文本浮动操作条 ────────────────────────────────────────────────
+const selectionActionBarOpen = ref(false)
+const selectionActionBarX = ref(0)
+const selectionActionBarY = ref(0)
+const selectionActionBarSelStart = ref(0)
+const selectionActionBarSelEnd = ref(0)
+let selectionActionBarHideTimer: number | null = null
+
+const selectionActionBarCanAddAsFaction = computed(() => {
+  const ta = chapterTextareaRef.value
+  if (!ta) return true
+  const start = selectionActionBarSelStart.value
+  const end = selectionActionBarSelEnd.value
+  if (end <= start) return true
+  const text = ta.value.slice(start, end).trim()
+  if (!text) return true
+  return !someCharacterHasLabel(characters.value, text)
+})
+
+function showSelectionActionBar(): void {
+  const ta = chapterTextareaRef.value
+  if (!ta || !selectedChapter.value) return
+  const start = ta.selectionStart ?? 0
+  const end = ta.selectionEnd ?? start
+  if (end <= start) {
+    hideSelectionActionBar()
+    return
+  }
+
+  if (selectionActionBarHideTimer != null) {
+    window.clearTimeout(selectionActionBarHideTimer)
+    selectionActionBarHideTimer = null
+  }
+
+  selectionActionBarSelStart.value = start
+  selectionActionBarSelEnd.value = end
+
+  const coords = getCaretPixelOffset(ta, end)
+  if (!coords) return
+  const taRect = ta.getBoundingClientRect()
+  const caretY = taRect.top + (coords.top - ta.scrollTop) + (coords.height || 18) + 8
+  const caretX = taRect.left + coords.left + (coords.width || 0) / 2
+
+  selectionActionBarX.value = Math.max(40, Math.min(caretX, window.innerWidth - 40))
+  selectionActionBarY.value = Math.min(caretY, window.innerHeight - 48)
+  selectionActionBarOpen.value = true
+}
+
+function hideSelectionActionBar(): void {
+  if (selectionActionBarHideTimer != null) return
+  selectionActionBarHideTimer = window.setTimeout(() => {
+    selectionActionBarOpen.value = false
+    selectionActionBarHideTimer = null
+  }, 150)
+}
+
+function cancelHideSelectionActionBar(): void {
+  if (selectionActionBarHideTimer != null) {
+    window.clearTimeout(selectionActionBarHideTimer)
+    selectionActionBarHideTimer = null
+  }
+}
+
+function selectionActionAddCharacter(): void {
+  const ta = chapterTextareaRef.value
+  if (!ta || !novel.value) return
+  const start = selectionActionBarSelStart.value
+  const end = selectionActionBarSelEnd.value
+  const name = ta.value.slice(start, end).trim()
+  if (!name) return
+  createCharacter({
+    novelId: novel.value.id,
+    name,
+    createdInChapterId: selectedChapter.value?.id ?? null,
+    firstAppearanceChapterNo: selectedChapter.value?.chapterNo ?? null,
+    age: '',
+    gender: '',
+    goal: '',
+    secret: '',
+    arc: '',
+    notes: '',
+  })
+  characters.value = getCharactersByNovelId(novelId.value)
+  selectionActionBarOpen.value = false
+  collapseAndBlurTextarea()
+}
+
+function selectionActionAddFaction(): void {
+  const ta = chapterTextareaRef.value
+  if (!ta || !novel.value) return
+  const start = selectionActionBarSelStart.value
+  const end = selectionActionBarSelEnd.value
+  const name = ta.value.slice(start, end).trim()
+  if (!name) return
+  createFaction({
+    novelId: novel.value.id,
+    name,
+    createdInChapterId: selectedChapter.value?.id ?? null,
+    leader: '',
+    notes: '',
+  })
+  factions.value = getFactionsByNovelId(novelId.value)
+  selectionActionBarOpen.value = false
+  collapseAndBlurTextarea()
+}
+
+function selectionActionAddForeshadow(): void {
+  const ta = chapterTextareaRef.value
+  if (!ta) return
+  const start = selectionActionBarSelStart.value
+  const end = selectionActionBarSelEnd.value
+  const text = ta.value.slice(start, end).trim()
+  if (!text) return
+  selectionActionBarOpen.value = false
+  openForeshadowPlantModalWithSelection(text, start, end)
+}
+
+function collapseAndBlurTextarea(): void {
+  const ta = chapterTextareaRef.value
+  if (!ta) return
+  const pos = ta.selectionEnd ?? ta.value.length
+  ta.setSelectionRange(pos, pos)
+  ta.blur()
+}
 
 // ── Foreshadow：localStorage 变更后需 bump tick，overlay 才会重新计算 ────────
 const foreshadowDataTick = ref(0)
@@ -2967,9 +3380,8 @@ function syncAiSelectionQuoteFromTextarea(): void {
   aiSelectionQuote.value = excerptForAiQuote((chapter.content ?? '').slice(range.start, range.end))
   closeCtxMenu()
   engageChapterWritingView()
-  if (aiSelectionQuote.value && !focusMode.value) {
+  if (aiSelectionQuote.value && !focusMode.value && aiStudioOpen.value) {
     if (!requestAiAccess()) return
-    aiStudioOpen.value = true
   }
 }
 
@@ -2977,6 +3389,18 @@ function openForeshadowPlantModal(): void {
   editingForeshadowPlantId.value = ''
   editingForeshadowFulfillmentId.value = ''
   snapshotForeshadowSelectionFromCtxMenu()
+  closeCtxMenu()
+  onEntityNameLeave()
+  closeForeshadowTooltipImmediate()
+  foreshadowModalMode.value = 'plant'
+  foreshadowModalOpen.value = true
+  releaseChapterTextareaAfterForeshadowModal()
+}
+
+function openForeshadowPlantModalWithSelection(text: string, start: number, end: number): void {
+  editingForeshadowPlantId.value = ''
+  editingForeshadowFulfillmentId.value = ''
+  pendingForeshadowSelection.value = { start, end, text }
   closeCtxMenu()
   onEntityNameLeave()
   closeForeshadowTooltipImmediate()
@@ -3664,15 +4088,41 @@ function onChapterTextareaKeyup(event: KeyboardEvent): void {
 function onChapterTextareaMouseup(event: MouseEvent): void {
   handleChapterTextareaMouseup(event)
   window.setTimeout(syncAiSelectionQuoteFromTextarea, 0)
+  window.setTimeout(() => {
+    const ta = chapterTextareaRef.value
+    if (ta && (ta.selectionEnd ?? 0) > (ta.selectionStart ?? 0)) {
+      showSelectionActionBar()
+    } else {
+      selectionActionBarOpen.value = false
+    }
+  }, 0)
+}
+
+function onChapterTextareaContextmenu(event: MouseEvent): void {
+  const ta = chapterTextareaRef.value
+  if (!ta) return
+  const start = ta.selectionStart ?? 0
+  const end = ta.selectionEnd ?? start
+  if (end > start) {
+    event.preventDefault()
+    openCtxMenuAtPoint(start, end, event.clientX, event.clientY)
+  }
 }
 
 function onChapterTextareaSelect(): void {
   handleChapterTextareaSelect()
   window.setTimeout(syncAiSelectionQuoteFromTextarea, 0)
+  window.setTimeout(() => {
+    const ta = chapterTextareaRef.value
+    if (!ta || (ta.selectionEnd ?? 0) <= (ta.selectionStart ?? 0)) {
+      selectionActionBarOpen.value = false
+    }
+  }, 0)
 }
 
 function onChapterTextareaBlur(event: FocusEvent): void {
   handleChapterTextareaBlur(event)
+  hideSelectionActionBar()
 }
 
 watch(selectedChapterId, (nextId, prevId) => {

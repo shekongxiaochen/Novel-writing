@@ -304,9 +304,24 @@ export function buildEntityPreviewLines(
   const plantRangesRaw =
     chapterId && foreshadows
       ? foreshadows.flatMap((p) => {
-          const start = p.plantStart
-          const end = p.plantEnd
-          if (p.plantChapterId !== chapterId || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
+          if (p.plantChapterId !== chapterId) return []
+
+          let start = p.plantStart
+          let end = p.plantEnd
+
+          // 如果没有位置信息，尝试通过 plantText 在正文中查找
+          if (typeof start !== 'number' || typeof end !== 'number' || end <= start) {
+            const plantText = p.plantText?.trim()
+            if (plantText) {
+              const idx = content.indexOf(plantText)
+              if (idx >= 0) {
+                start = idx
+                end = idx + plantText.length
+              }
+            }
+          }
+
+          if (typeof start !== 'number' || typeof end !== 'number' || end <= start) {
             return []
           }
           return [
@@ -504,11 +519,46 @@ export function buildEntityPreviewLines(
     if (!line) return [{ text: '', character: null, faction: null, item: null, foreshadow: null }]
     const tokens: EntityToken[] = []
     let i = 0
+    let plainBuf = ''
+    let plainStart = 0
+
+    const flushPlain = () => {
+      if (!plainBuf) return
+      // 将连续的非实体字符合并为一个 token
+      const firstSpan = getForeshadowSpanContaining(lineStartPos + plainStart)
+      if (firstSpan) {
+        // 有 foreshadow 的字符保持逐字符拆分
+        for (let k = 0; k < plainBuf.length; k++) {
+          const gp = lineStartPos + plainStart + k
+          const sp = getForeshadowSpanContaining(gp)
+          tokens.push({
+            text: plainBuf[k],
+            range: { start: gp, end: gp + 1 },
+            character: null,
+            faction: null,
+            item: null,
+            foreshadow: sp ? spanToMeta(sp) : null,
+          })
+        }
+      } else {
+        tokens.push({
+          text: plainBuf,
+          range: { start: lineStartPos + plainStart, end: lineStartPos + plainStart + plainBuf.length },
+          character: null,
+          faction: null,
+          item: null,
+          foreshadow: null,
+        })
+      }
+      plainBuf = ''
+    }
+
     while (i < line.length) {
       const globalPos = lineStartPos + i
       const ent = findEntityAt(line, i)
 
       if (ent.len > 0) {
+        flushPlain()
         const endPos = globalPos + ent.len
         const span = getForeshadowSpanContaining(globalPos)
         const foreshadowAttached =
@@ -523,7 +573,6 @@ export function buildEntityPreviewLines(
           item: ent.item,
           foreshadow: foreshadowAttached,
         }
-        // 为角色 token 附加 characterStateZone
         if (ent.character) {
           token.characterStateZone = characterZoneCache.get(ent.character.id) ?? null
           const spans = anchorSpanIndex.get(ent.character.id)
@@ -546,18 +595,11 @@ export function buildEntityPreviewLines(
         continue
       }
 
-      const span = getForeshadowSpanContaining(globalPos)
-      const fsMeta = span ? spanToMeta(span) : null
-      tokens.push({
-        text: line[i],
-        range: { start: globalPos, end: globalPos + 1 },
-        character: null,
-        faction: null,
-        item: null,
-        foreshadow: fsMeta,
-      })
+      if (!plainBuf) plainStart = i
+      plainBuf += line[i]
       i += 1
     }
+    flushPlain()
     return tokens
   }
 

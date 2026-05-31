@@ -48,6 +48,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Database connection pool established");
 
+    // 确保 card_keys 表存在
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS card_keys (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            code VARCHAR(64) NOT NULL,
+            amount_yuan INT NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'unused',
+            used_by_user_id VARCHAR(36) NULL,
+            used_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            UNIQUE KEY uk_card_keys_code (code),
+            INDEX idx_card_keys_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        "#,
+    )
+    .execute(&db)
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!("ensure card_keys table: {:?}", e);
+        sqlx::mysql::MySqlQueryResult::default()
+    });
+
     let redis_client = db::create_redis_client(&config.redis_url).await?;
 
     let cache_service = CacheService::new(redis_client);

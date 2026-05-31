@@ -66,6 +66,7 @@ axum-admin = { version = "0.1.1", features = ["seaorm"] }
 sea-orm-migration = { version = "1", features = ["sqlx-mysql", "runtime-tokio-rustls"] }
 minijinja = "2"
 tower-cookies = "0.10"
+urlencoding = "2"
 
 [dev-dependencies]
 tokio-test = "0.4"

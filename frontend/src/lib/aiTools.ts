@@ -12,6 +12,7 @@ import {
   getChaptersByNovelId,
   updateCharacter,
   updateChapter,
+  updateForeshadowPlant,
   updateOutlineItem,
 } from './storage'
 
@@ -161,14 +162,14 @@ export const AI_WRITE_TOOLS: AiToolDefinition[] = [
         properties: {
           title: { type: 'string', description: '伏笔标签' },
           description: { type: 'string', description: '伏笔详细描述：想说明什么、需要怎样收尾' },
-          plantText: { type: 'string', description: '植入的原文片段（如有）' },
+          plantText: { type: 'string', description: '植入的原文片段（必须是正文中精确存在的文字，用于定位伏笔标记位置）' },
           plantChapterId: { type: 'string', description: '植入章节 ID' },
           plantChapterNo: { type: 'integer', description: '植入章节序号' },
           plantChapterTitle: { type: 'string', description: '植入章节标题' },
           expectedFulfillChapterNo: { type: 'integer', description: '预计填坑章节号' },
           expectedFulfillNotes: { type: 'string', description: '预计填坑方式说明' },
         },
-        required: ['title', 'description'],
+        required: ['title', 'description', 'plantText', 'plantChapterId'],
       },
     },
   },
@@ -488,17 +489,34 @@ function execCreateForeshadow(novelId: string, args: Record<string, any>): AiToo
   const title = n(args.title)
   const description = n(args.description)
   if (!title || !description) return { success: false, message: '伏笔标题和描述不能为空' }
+  const plantText = n(args.plantText)
+  const plantChapterId = n(args.plantChapterId)
+  if (!plantText) return { success: false, message: 'plantText 不能为空，必须提供正文中精确存在的原文片段' }
+  if (!plantChapterId) return { success: false, message: 'plantChapterId 不能为空' }
+
   const plant = createForeshadowPlant({
     novelId,
     title,
     description,
-    plantText: n(args.plantText),
-    plantChapterId: n(args.plantChapterId),
+    plantText,
+    plantChapterId,
     plantChapterNo: typeof args.plantChapterNo === 'number' ? args.plantChapterNo : undefined,
     plantChapterTitle: n(args.plantChapterTitle),
     expectedFulfillChapterNo: typeof args.expectedFulfillChapterNo === 'number' ? args.expectedFulfillChapterNo : undefined,
     expectedFulfillNotes: n(args.expectedFulfillNotes),
   } as any)
+
+  // 自动从章节正文中定位 plantText 位置，写入 plantStart/plantEnd
+  if (!plant.plantStart || !plant.plantEnd) {
+    const chapter = getChaptersByNovelId(novelId).find((c) => c.id === plantChapterId)
+    if (chapter?.content) {
+      const idx = chapter.content.indexOf(plantText)
+      if (idx >= 0) {
+        updateForeshadowPlant({ id: plant.id, plantStart: idx, plantEnd: idx + plantText.length })
+      }
+    }
+  }
+
   return { success: true, message: `已创建伏笔「${plant.title}」`, data: { id: plant.id } }
 }
 

@@ -86,9 +86,14 @@ function uid(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
 }
 
+let _emitTimer: ReturnType<typeof setTimeout> | null = null
 function emitStorageChange(): void {
   if (typeof window === 'undefined') return
-  window.dispatchEvent(new Event('novel-writing:changed'))
+  if (_emitTimer != null) return // already scheduled — coalesce
+  _emitTimer = setTimeout(() => {
+    _emitTimer = null
+    window.dispatchEvent(new Event('novel-writing:changed'))
+  }, 16) // one frame — batches synchronous cascades
 }
 
 function readArrayFromStorage<T>(key: string): T[] {
@@ -281,6 +286,7 @@ export function getNovels(): Novel[] {
       .map((row) => ({
         ...row,
         continuityBrief: String((row as Novel).continuityBrief ?? '').trim(),
+        arcSummaries: Array.isArray((row as any).arcSummaries) ? (row as any).arcSummaries : [],
       }))
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
   } catch {
@@ -304,6 +310,7 @@ export function createNovel(input: NewNovelInput): Novel {
     title: input.title.trim(),
     summary: input.summary.trim(),
     continuityBrief: '',
+    arcSummaries: [],
     genre: input.genre.trim(),
     perspective: input.perspective.trim(),
     tone: input.tone.trim(),
@@ -458,6 +465,7 @@ function getAllChapters(): Chapter[] {
       annotation: (c as any).annotation ?? '',
       content: (c as any).content ?? '',
       outlineItemIds: Array.isArray((c as any).outlineItemIds) ? (c as any).outlineItemIds : [],
+      sceneSummaries: Array.isArray((c as any).sceneSummaries) ? (c as any).sceneSummaries : [],
       status: ((c as any).status as any) ?? 'draft',
       createdAt: (c as any).createdAt ?? nowIso(),
       updatedAt: (c as any).updatedAt ?? nowIso(),
@@ -750,6 +758,7 @@ export function createChapter(input: NewChapterInput): Chapter {
     annotation: input.annotation.trim(),
     content: '',
     outlineItemIds: [],
+    sceneSummaries: [],
     status: 'draft',
     createdAt: now,
     updatedAt: now,

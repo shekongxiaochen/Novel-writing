@@ -954,7 +954,6 @@
               maxlength="500"
               :placeholder="deskMode === 'write' ? '说明写作需求，如：按大纲写下一章 / 续写本章争吵后的场景…' : '询问当前章的人物、伏笔、冲突……'"
               @keydown="onComposerKeydown"
-              @input="syncComposerHeight"
             />
           </div>
 
@@ -1268,25 +1267,6 @@ function formatHistoryAge(value: string): string {
   return `${diffMinutes}m`
 }
 
-function syncComposerHeight(): void {
-  const el = composerInputRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  const computed = window.getComputedStyle(el)
-  const lineHeight = Number.parseFloat(computed.lineHeight || '0') || 18
-  const paddingTop = Number.parseFloat(computed.paddingTop || '0') || 0
-  const paddingBottom = Number.parseFloat(computed.paddingBottom || '0') || 0
-  const borderTop = Number.parseFloat(computed.borderTopWidth || '0') || 0
-  const borderBottom = Number.parseFloat(computed.borderBottomWidth || '0') || 0
-  const cssMinHeight = Number.parseFloat(computed.minHeight || '0') || 0
-  const contentMinHeight = lineHeight * 2 + paddingTop + paddingBottom + borderTop + borderBottom
-  const minHeight = Math.max(cssMinHeight, contentMinHeight)
-  const maxHeight = lineHeight * 5 + paddingTop + paddingBottom + borderTop + borderBottom
-  const nextHeight = Math.min(el.scrollHeight, maxHeight)
-  el.style.height = `${Math.max(nextHeight, minHeight)}px`
-  el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
-}
-
 function isNearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80
 }
@@ -1389,15 +1369,10 @@ watch(
     if (open) {
       void nextTick(() => {
         scrollToBottom()
-        syncComposerHeight()
       })
     }
   },
 )
-
-watch(draft, () => {
-  void nextTick(() => syncComposerHeight())
-})
 
 watch(
   () => props.deskMode,
@@ -1418,7 +1393,6 @@ onMounted(() => {
   window.addEventListener('novel-writing:changed', onAccountChanged)
   void nextTick(() => {
     scrollToBottom()
-    syncComposerHeight()
   })
 })
 
@@ -1650,7 +1624,6 @@ function submitAsk(): void {
   if (!question) return
   emit('ask', { question, mode: props.deskMode })
   draft.value = ''
-  void nextTick(() => syncComposerHeight())
 }
 
 function submitWrite(): void {
@@ -1662,7 +1635,6 @@ function submitWrite(): void {
   lastContinueDirection.value = direction
   emit('continue-run', { direction })
   draft.value = ''
-  void nextTick(() => syncComposerHeight())
 }
 
 function regenerateContinue(): void {
@@ -3016,12 +2988,14 @@ function relationSummary(item: ExtractedRelation): string {
 .chapter-hub-ai-panel__input {
   box-sizing: border-box;
   width: 100%;
-  height: 56px;
-  min-height: 56px;
+  height: 38px;
+  min-height: 38px;
+  max-height: 38px;
   resize: none;
+  overflow-y: auto;
   border: 0;
   background: transparent;
-  padding: 11px 12px;
+  padding: 9px 12px;
   font-size: 0.67rem;
   line-height: 1.55;
   color: var(--color-text);
