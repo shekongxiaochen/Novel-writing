@@ -11,6 +11,7 @@ pub struct Novel {
     pub perspective: String,
     pub tone: String,
     pub is_multi_line_narrative: bool,
+    pub ai_style_prompt: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -24,6 +25,7 @@ pub struct CreateNovelRequest {
     pub perspective: String,
     pub tone: String,
     pub is_multi_line_narrative: bool,
+    pub ai_style_prompt: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +36,7 @@ pub struct UpdateNovelRequest {
     pub perspective: Option<String>,
     pub tone: Option<String>,
     pub is_multi_line_narrative: Option<bool>,
+    pub ai_style_prompt: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +48,7 @@ pub struct NovelResponse {
     pub perspective: String,
     pub tone: String,
     pub is_multi_line_narrative: bool,
+    pub ai_style_prompt: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -59,6 +63,7 @@ impl From<Novel> for NovelResponse {
             perspective: novel.perspective,
             tone: novel.tone,
             is_multi_line_narrative: novel.is_multi_line_narrative,
+            ai_style_prompt: novel.ai_style_prompt,
             created_at: novel.created_at,
             updated_at: novel.updated_at,
         }

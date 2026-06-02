@@ -121,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/billing/ledger", get(billing::get_ledger))
         .route("/billing/redeem", post(billing::redeem_card_key))
         .route("/ai/chat", post(ai::chat))
+        .route("/ai/prompt", post(ai::prompt_chat))
         .route("/novels", get(novels::list_novels).post(novels::create_novel))
         .route(
             "/novels/:id",

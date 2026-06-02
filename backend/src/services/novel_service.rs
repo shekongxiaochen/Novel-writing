@@ -53,10 +53,17 @@ impl NovelService {
         // 4. 创建小说记录
         let now = time::now_utc();
         
+        let ai_style_prompt = req.ai_style_prompt.unwrap_or_default();
+        let ai_style_prompt = if ai_style_prompt.len() > 5000 {
+            ai_style_prompt[..5000].to_string()
+        } else {
+            ai_style_prompt
+        };
+
         sqlx::query(
             r#"
-            INSERT INTO novels (id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO novels (id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, ai_style_prompt, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&novel_id)
@@ -67,6 +74,7 @@ impl NovelService {
         .bind(&req.perspective)
         .bind(&req.tone)
         .bind(req.is_multi_line_narrative)
+        .bind(&ai_style_prompt)
         .bind(now)
         .bind(now)
         .execute(&self.db)
@@ -99,6 +107,7 @@ impl NovelService {
             perspective: req.perspective,
             tone: req.tone,
             is_multi_line_narrative: req.is_multi_line_narrative,
+            ai_style_prompt,
             created_at: now,
             updated_at: now,
         })
@@ -106,9 +115,9 @@ impl NovelService {
     
     /// 获取小说列表
     pub async fn list_novels(&self, user_id: &str) -> Result<Vec<Novel>> {
-        let novels: Vec<(String, String, String, String, String, String, String, bool, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
+        let novels: Vec<(String, String, String, String, String, String, String, bool, String, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
             r#"
-            SELECT id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, created_at, updated_at
+            SELECT id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, ai_style_prompt, created_at, updated_at
             FROM novels
             WHERE user_id = ?
             ORDER BY updated_at DESC
@@ -117,8 +126,8 @@ impl NovelService {
         .bind(user_id)
         .fetch_all(&self.db)
         .await?;
-        
-        Ok(novels.into_iter().map(|(id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, created_at, updated_at)| {
+
+        Ok(novels.into_iter().map(|(id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, ai_style_prompt, created_at, updated_at)| {
             Novel {
                 id,
                 user_id,
@@ -128,6 +137,7 @@ impl NovelService {
                 perspective,
                 tone,
                 is_multi_line_narrative,
+                ai_style_prompt,
                 created_at,
                 updated_at,
             }
@@ -147,9 +157,9 @@ impl NovelService {
         }
         
         // 2. 从数据库查询
-        let novel: Option<(String, String, String, String, String, String, String, bool, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
+        let novel: Option<(String, String, String, String, String, String, String, bool, String, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
             r#"
-            SELECT id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, created_at, updated_at
+            SELECT id, user_id, title, summary, genre, perspective, tone, is_multi_line_narrative, ai_style_prompt, created_at, updated_at
             FROM novels
             WHERE id = ? AND user_id = ?
             "#
@@ -158,9 +168,9 @@ impl NovelService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await?;
-        
+
         let novel = novel.ok_or(AppError::NotFound)?;
-        
+
         let novel = Novel {
             id: novel.0,
             user_id: novel.1,
@@ -170,8 +180,9 @@ impl NovelService {
             perspective: novel.5,
             tone: novel.6,
             is_multi_line_narrative: novel.7,
-            created_at: novel.8,
-            updated_at: novel.9,
+            ai_style_prompt: novel.8,
+            created_at: novel.9,
+            updated_at: novel.10,
         };
         
         // 3. 写入缓存（10分钟）
@@ -209,7 +220,16 @@ impl NovelService {
             updates.push("tone = ?");
             params.push(tone);
         }
-        
+        if let Some(ai_style_prompt) = req.ai_style_prompt {
+            let ai_style_prompt = if ai_style_prompt.len() > 5000 {
+                ai_style_prompt[..5000].to_string()
+            } else {
+                ai_style_prompt
+            };
+            updates.push("ai_style_prompt = ?");
+            params.push(ai_style_prompt);
+        }
+
         if updates.is_empty() && req.is_multi_line_narrative.is_none() {
             return self.get_novel(novel_id, user_id).await;
         }
@@ -404,7 +424,8 @@ impl NovelService {
             "characterFactionMemberships": [],
             "categories": [],
             "timelineEvents": [],
-            "foreshadows": []
+            "foreshadows": [],
+            "worldSettings": []
         })
     }
 }

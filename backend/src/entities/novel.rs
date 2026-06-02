@@ -13,6 +13,8 @@ pub struct Model {
     pub perspective: String,
     pub tone: String,
     pub is_multi_line_narrative: bool,
+    #[sea_orm(column_type = "Text")]
+    pub ai_style_prompt: String,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

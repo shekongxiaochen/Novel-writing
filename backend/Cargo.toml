@@ -61,6 +61,9 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1", "to
 # 随机数
 rand = "0.8"
 
+# 正则（用于 prompt injection 防御）
+regex = "1"
+
 # 管理后台（Django Admin 风格）
 axum-admin = { version = "0.1.1", features = ["seaorm"] }
 sea-orm-migration = { version = "1", features = ["sqlx-mysql", "runtime-tokio-rustls"] }
