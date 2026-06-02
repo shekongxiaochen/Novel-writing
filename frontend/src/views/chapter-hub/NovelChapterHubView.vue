@@ -181,6 +181,7 @@
             :chat-history-sessions="aiChatHistorySummaries"
             :active-chat-id="activeAiChatSessionId"
             :target-chapter="selectedChapter"
+            :can-create-first-chapter="chapters.length === 0"
             :has-run="aiExtractHasRun"
             :chat-messages="aiChatMessages"
             :selection-quote="aiSelectionQuote"
@@ -2611,6 +2612,18 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
 
   const rawDirection = String(payload.direction ?? '').trim()
 
+  // 零章节时自动创建第一章
+  if (!selectedChapter.value && chapters.value.length === 0) {
+    const outlineBinding = suggestNextChapterOutlineBinding(outlineItems.value, chapters.value, null)
+    const firstChapter = createAndOpenNextChapter(outlineBinding?.title ?? '', outlineBinding?.outlineItemIds ?? [])
+    if (!firstChapter) {
+      appendAiChatMessage('assistant', '自动创建第一章失败，请手动新建章节后再试。', 'current')
+      return
+    }
+    const beatNote = outlineBinding?.beatLine ? `\n大纲节拍：${outlineBinding.beatLine}` : ''
+    appendAiChatMessage('assistant', `已自动创建第 1 章${outlineBinding?.title ? `「${outlineBinding.title}」` : ''}，正在生成正文草稿…${beatNote}`, 'current')
+  }
+
   const nextChapterSetup = isNextChapterIntent(rawDirection)
     ? suggestNextChapterOutlineBinding(outlineItems.value, chapters.value, selectedChapter.value)
     : null
@@ -2675,6 +2688,7 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
               tone: novel.value.tone,
             }
           : undefined,
+        aiStylePrompt: novel.value?.aiStylePrompt,
       },
       {
         onChunk: (text: string) => {
@@ -2927,21 +2941,23 @@ const TOOL_ACTION_INTENT_RE =
 async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }): Promise<void> {
   const id = novelId.value
   if (!id) return
-  if (!selectedChapter.value) {
-    aiExtractError.value = '请先选择章节后再使用 AI。'
-    return
-  }
   const deskMode = payload.mode ?? aiDeskMode.value
   const question = String(payload.question ?? '').trim()
   const isToolAction = TOOL_ACTION_INTENT_RE.test(question)
 
   // 写作模式：只允许续写相关请求，其他一律拒绝
   if (deskMode === 'write') {
-    if (isNextChapterIntent(question) || WRITE_BODY_INTENT_RE.test(question)) {
-      await runAiContinue({ direction: question })
+    if (isNextChapterIntent(question) || WRITE_BODY_INTENT_RE.test(question) || chapters.value.length === 0) {
+      await runAiContinue({ direction: question || '写第一章开头' })
       return
     }
     appendAiChatMessage('assistant', '写作模式仅支持续写正文。如需提问、创建伏笔、整理角色等操作，请切换到「提问」模式。', 'current')
+    return
+  }
+
+  // 提问模式：零章节时允许提问（不限制）
+  if (!selectedChapter.value && deskMode !== 'ask') {
+    aiExtractError.value = '请先选择章节后再使用 AI。'
     return
   }
 

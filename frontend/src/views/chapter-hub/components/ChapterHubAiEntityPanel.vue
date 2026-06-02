@@ -994,7 +994,7 @@
               class="chapter-hub-ai-panel__ask"
               :class="{ 'chapter-hub-ai-panel__ask--stop': writeComposerBusy }"
               :data-busy="writeComposerBusy ? 'true' : 'false'"
-              :disabled="loading || (!writeComposerBusy && !targetChapter)"
+              :disabled="loading || (!writeComposerBusy && !targetChapter && !canCreateFirstChapter)"
               :aria-label="writeComposerBusy ? '终止续写' : '生成续写'"
               @click="onWriteComposerClick()"
             >
@@ -1006,7 +1006,7 @@
               class="chapter-hub-ai-panel__ask"
               :class="{ 'chapter-hub-ai-panel__ask--stop': askComposerBusy }"
               :data-busy="askComposerBusy ? 'true' : 'false'"
-              :disabled="loading || (!askComposerBusy && (!canSend || !targetChapter))"
+              :disabled="loading || (!askComposerBusy && !canSend)"
               :aria-label="askComposerBusy ? '终止回答' : '发送提问'"
               @click="onAskComposerClick()"
             >
@@ -1074,6 +1074,7 @@ const props = defineProps<{
   chatHistorySessions: Array<{ id: string; title: string; updatedAt: string; lastQuestionAt: string }>
   activeChatId: string
   targetChapter?: Chapter | null
+  canCreateFirstChapter?: boolean
   hasRun: boolean
   chatMessages: AiDeskChatMessage[]
   selectionQuote?: string

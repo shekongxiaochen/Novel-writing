@@ -313,6 +313,163 @@ export async function fetchWalletBalance(): Promise<number> {
   return balance
 }
 
+// ── POST /ai/prompt — 后端组装系统提示词 ──
+
+type AiPromptBody = {
+  prompt_type: string
+  user_prompt: string
+  context_prompt?: string
+  ai_style_prompt?: string
+  temperature?: number
+  max_tokens?: number
+  stream?: boolean
+  response_format?: string
+  tools?: AiToolDefinition[]
+  tool_choice?: string | Record<string, unknown>
+}
+
+async function aiPromptRequest(path: string, body: AiPromptBody, signal?: AbortSignal): Promise<Response> {
+  const session = requireSession()
+  let resp: Response
+  try {
+    resp = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json, text/event-stream',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.token}`,
+        ...deviceHeaders(),
+      },
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') throw error
+    throw new Error(
+      `无法连接后端（${API_BASE_URL}）。请确认 Rust 后端已启动且已登录。`,
+    )
+  }
+  return resp
+}
+
+export async function postAiPrompt(
+  input: Omit<AiPromptBody, 'stream'>,
+  signal?: AbortSignal,
+): Promise<AiCompletionResult> {
+  const resp = await aiPromptRequest('/ai/prompt', { ...input, stream: false }, signal)
+
+  const text = await resp.text()
+  let payload: unknown = null
+  if (text) {
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = null
+    }
+  }
+
+  if (!resp.ok) {
+    const detail =
+      payload && typeof payload === 'object' && 'detail' in payload
+        ? String((payload as { detail?: unknown }).detail ?? '')
+        : text
+    throw mapAiError(resp.status, detail)
+  }
+
+  return parseCompletion((payload ?? {}) as AiChatApiResponse)
+}
+
+export async function postAiPromptStream(
+  input: Omit<AiPromptBody, 'stream'>,
+  callbacks: {
+    onChunk: (text: string) => void
+    onError: (err: Error) => void
+    onReasoningChunk?: (text: string) => void
+  },
+  signal?: AbortSignal,
+): Promise<{ text: string; balanceYuan: number }> {
+  const resp = await aiPromptRequest('/ai/prompt', { ...input, stream: true }, signal)
+
+  if (!resp.ok) {
+    const text = await resp.text()
+    let detail = text
+    try {
+      const parsed = JSON.parse(text) as { detail?: string }
+      if (parsed.detail) detail = parsed.detail
+    } catch {
+      /* ignore */
+    }
+    const err = mapAiError(resp.status, detail)
+    callbacks.onError(err)
+    throw err
+  }
+
+  const reader = resp.body?.getReader()
+  if (!reader) throw new Error('浏览器不支持流式读取')
+
+  const decoder = new TextDecoder()
+  let full = ''
+  let buffer = ''
+  let balanceYuan = 0
+  let balancePatched = false
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+        const data = trimmed.slice(6)
+        if (data === '[DONE]') continue
+        try {
+          const parsed = JSON.parse(data) as {
+            choices?: Array<{ delta?: { content?: string } }>
+            novel_meta?: { balance_yuan?: number; balance_tokens?: number }
+            error?: { message?: string }
+          }
+          if (parsed.error?.message) {
+            throw new Error(parsed.error.message)
+          }
+          const metaYuan = readBalanceYuan(parsed.novel_meta)
+          if (metaYuan != null) {
+            balanceYuan = metaYuan
+            patchSessionBalance(balanceYuan)
+            balancePatched = true
+            continue
+          }
+          const delta = String(parsed?.choices?.[0]?.delta?.content ?? '')
+          const reasoningDelta = String(
+            (parsed?.choices?.[0]?.delta as { reasoning_content?: string } | undefined)?.reasoning_content ?? '',
+          )
+          if (reasoningDelta) callbacks.onReasoningChunk?.(reasoningDelta)
+          if (delta) {
+            full += delta
+            callbacks.onChunk(delta)
+          }
+        } catch (error: unknown) {
+          if (error instanceof Error && error.message) throw error
+        }
+      }
+    }
+    if (!balancePatched) {
+      try {
+        balanceYuan = await fetchWalletBalance()
+      } catch {
+        /* 流式未带回余额时，向服务端拉取最新值 */
+      }
+    }
+    return { text: full, balanceYuan }
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error))
+    callbacks.onError(err)
+    throw err
+  }
+}
+
 export function isAiReady(): boolean {
   const session = getCurrentSession()
   return Boolean(session?.token && Number(session.user.balanceYuan) > 0)

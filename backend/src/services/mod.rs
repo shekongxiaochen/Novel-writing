@@ -6,6 +6,7 @@ pub mod app_state;
 pub mod auth_service;
 pub mod cache_service;
 pub mod novel_service;
+pub mod prompt_registry;
 pub mod settings_service;
 pub mod wallet_service;
 pub mod wallet_units;

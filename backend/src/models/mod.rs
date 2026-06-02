@@ -5,6 +5,7 @@ pub mod novel;
 pub mod chapter;
 pub mod character;
 pub mod snapshot;
+pub mod prompt;
 
 pub use user::*;
 pub use novel::*;

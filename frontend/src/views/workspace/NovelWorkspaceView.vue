@@ -56,6 +56,14 @@
           >
             伏笔
           </button>
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: activeTab === 'worldsettings' }"
+            @click="switchTab('worldsettings')"
+          >
+            世界观
+          </button>
         </nav>
       </div>
     </header>
@@ -68,6 +76,7 @@
         <div><span class="k">基调</span><span>{{ novel.tone || '未设置' }}</span></div>
         <div><span class="k">多线叙事</span><span>{{ novel.isMultiLineNarrative ? '是' : '否' }}</span></div>
       </div>
+
       <div class="action-row workspace-write-entry">
         <button type="button" class="workspace-write-entry__btn" @click="goToWritingChapter">
           去写作
@@ -2680,6 +2689,476 @@
     </Teleport>
     </section>
 
+    <section class="card" v-if="activeTab === 'worldsettings'">
+      <h2>世界观设定</h2>
+
+      <h3 class="workspace-subsection-title">新建世界观设定</h3>
+      <div class="action-row" style="margin-bottom: 14px">
+        <button type="button" class="btn-primary" @click="openWorldSettingCreate">新增设定</button>
+        <button type="button" class="btn-primary" style="margin-left: 8px" @click="openWorldSettingAiCreate">AI 生成</button>
+      </div>
+
+      <p v-if="filteredWorldSettings.length === 0 && !worldSettingKeywordFilter && !selectedCategoryFilterId" class="muted">暂无世界观设定</p>
+      <template v-else>
+        <div class="faction-filter-block">
+          <h3 class="workspace-subsection-title workspace-subsection-title--spaced">已存在设定</h3>
+          <label class="faction-filter-label">
+            <span>关键字筛选</span>
+            <input v-model="worldSettingKeywordFilter" maxlength="30" placeholder="输入设定名称或内容关键字…" class="faction-filter-input" />
+          </label>
+          <div class="faction-filter-chips">
+            <button
+              type="button"
+              class="faction-filter-chip"
+              :class="{ 'faction-filter-chip--active': !selectedCategoryFilterId }"
+              @click="clearCategoryFilter"
+            >全部（{{ worldSettings.length }}）</button>
+            <button
+              v-for="cat in sortedCategories"
+              :key="`wsfilter-${cat.id}`"
+              type="button"
+              class="faction-filter-chip"
+              :class="{ 'faction-filter-chip--active': selectedCategoryFilterId === cat.id }"
+              @click="setCategoryFilter(cat.id)"
+            >{{ cat.name }}</button>
+          </div>
+        </div>
+        <p v-if="filteredWorldSettings.length === 0" class="muted" style="margin-top: 8px">没有符合条件的设定</p>
+        <ul class="list">
+        <li v-for="ws in filteredWorldSettings" :key="ws.id" class="list-item" :id="`world-setting-row-${ws.id}`">
+          <div class="chapter-main">
+            <div class="faction-row__head">
+              <strong class="faction-row__title">{{ ws.name }}</strong>
+              <div class="faction-row__actions">
+                <button type="button" class="faction-row__edit" title="修改设定" @click="openWorldSettingEdit(ws.id)">
+                  修改
+                </button>
+                <button type="button" class="faction-row__edit" title="AI 编辑" @click="openWorldSettingAiEdit(ws.id)">
+                  AI
+                </button>
+                <button type="button" class="faction-row__delete" title="删除设定" @click="openWorldSettingDelete(ws.id)">
+                  删除
+                </button>
+              </div>
+            </div>
+            <div v-if="categoryNamesByIds(ws.categoryIds).length > 0" class="faction-row__attrs">
+              <small v-for="name in categoryNamesByIds(ws.categoryIds)" :key="`wscat-${ws.id}-${name}`" class="muted faction-row__attr-chip">
+                分类：{{ name }}
+              </small>
+            </div>
+            <p v-if="ws.content" class="muted" style="margin: 6px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap">{{ ws.content.length > 200 ? ws.content.slice(0, 200) + '…' : ws.content }}</p>
+          </div>
+        </li>
+        </ul>
+      </template>
+
+      <ConfirmDialog
+        v-model="worldSettingDeleteOpen"
+        title="删除世界观设定"
+        message="确定要删除这条世界观设定吗？删除后无法恢复。"
+        confirm-label="删除"
+        cancel-label="取消"
+        danger
+        @confirm="confirmWorldSettingDelete"
+      />
+    </section>
+
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div
+          v-if="worldSettingCreateOpen"
+          class="confirm-overlay"
+          role="presentation"
+          @click.self="worldSettingCreateOpen = false"
+        >
+          <div class="confirm-dialog workspace-faction-create-dialog" role="dialog" aria-modal="true">
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+            <div class="confirm-dialog__body workspace-faction-create-dialog__body">
+              <h2 class="confirm-dialog__title">新增世界观设定</h2>
+              <form class="form-grid" style="margin-top: 12px" @submit.prevent="handleCreateWorldSetting">
+                <label>
+                  设定名称 *
+                  <input v-model="worldSettingForm.name" maxlength="100" required autocomplete="off" placeholder="例：修炼境界体系" />
+                </label>
+                <label style="margin-top: 10px">
+                  设定内容
+                  <textarea v-model="worldSettingForm.content" rows="8" placeholder="详细描述这个世界观设定…" style="width: 100%; resize: vertical; min-height: 120px"></textarea>
+                </label>
+                <div class="character-custom-fields faction-custom-fields" style="margin-top: 10px">
+                  <div class="faction-custom-fields__head">
+                    <p class="character-custom-list__title">分类</p>
+                  </div>
+                  <p v-if="sortedCategories.length === 0" class="muted" style="margin: 0 0 8px">
+                    暂无分类，请在本页「分类」标签中新建。
+                  </p>
+                  <div v-else class="character-panel__category-checks" role="group" aria-label="设定分类">
+                    <label
+                      v-for="cat in sortedCategories"
+                      :key="`wscreate-cat-${cat.id}`"
+                      class="category-bind-chip character-panel__category-chip"
+                      :class="
+                        worldSettingForm.categoryIds.includes(cat.id) ? 'category-bind-chip--bound' : 'category-bind-chip--unbound'
+                      "
+                      :for="`ws-create-cat-${cat.id}`"
+                    >
+                      <input
+                        :id="`ws-create-cat-${cat.id}`"
+                        type="checkbox"
+                        class="visually-hidden"
+                        :checked="worldSettingForm.categoryIds.includes(cat.id)"
+                        @change="toggleWorldSettingFormCategory(cat.id)"
+                      />
+                      <span class="category-bind-chip__state" aria-hidden="true">{{
+                        worldSettingForm.categoryIds.includes(cat.id) ? '✓' : '+'
+                      }}</span>
+                      <span class="character-panel__category-chip-text">{{ cat.name }}</span>
+                    </label>
+                  </div>
+                </div>
+                <p v-if="worldSettingFormError" class="muted" style="color: var(--danger-text); margin-top: 6px">
+                  {{ worldSettingFormError }}
+                </p>
+                <div class="confirm-dialog__actions" style="margin-top: 14px">
+                  <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="worldSettingCreateOpen = false">
+                    取消
+                  </button>
+                  <button type="submit" class="confirm-dialog__btn confirm-dialog__btn--danger">确定</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div
+          v-if="worldSettingEditOpen"
+          class="confirm-overlay"
+          role="presentation"
+          @click.self="worldSettingEditOpen = false"
+        >
+          <div class="confirm-dialog workspace-faction-edit-dialog" role="dialog" aria-modal="true">
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+            <div class="confirm-dialog__body workspace-faction-edit-dialog__body">
+              <h2 class="confirm-dialog__title">修改世界观设定</h2>
+              <div class="form-grid" style="margin-top: 12px">
+                <label>
+                  设定名称 *
+                  <input v-model="worldSettingEditDraft.name" maxlength="100" required />
+                </label>
+                <label style="margin-top: 10px">
+                  设定内容
+                  <textarea v-model="worldSettingEditDraft.content" rows="8" style="width: 100%; resize: vertical; min-height: 120px"></textarea>
+                </label>
+                <div class="character-custom-fields faction-custom-fields" style="margin-top: 10px">
+                  <div class="faction-custom-fields__head">
+                    <p class="character-custom-list__title">分类</p>
+                  </div>
+                  <div v-if="sortedCategories.length > 0" class="character-panel__category-checks" role="group" aria-label="设定分类">
+                    <label
+                      v-for="cat in sortedCategories"
+                      :key="`wsedit-cat-${cat.id}`"
+                      class="category-bind-chip character-panel__category-chip"
+                      :class="
+                        worldSettingEditDraft.categoryIds.includes(cat.id) ? 'category-bind-chip--bound' : 'category-bind-chip--unbound'
+                      "
+                      :for="`ws-edit-cat-${cat.id}`"
+                    >
+                      <input
+                        :id="`ws-edit-cat-${cat.id}`"
+                        type="checkbox"
+                        class="visually-hidden"
+                        :checked="worldSettingEditDraft.categoryIds.includes(cat.id)"
+                        @change="toggleWorldSettingEditCategory(cat.id)"
+                      />
+                      <span class="category-bind-chip__state" aria-hidden="true">{{
+                        worldSettingEditDraft.categoryIds.includes(cat.id) ? '✓' : '+'
+                      }}</span>
+                      <span class="character-panel__category-chip-text">{{ cat.name }}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div class="confirm-dialog__actions" style="margin-top: 14px">
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="worldSettingEditOpen = false">
+                  取消
+                </button>
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="handleSaveWorldSettingEdit">
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div
+          v-if="worldSettingAiOpen"
+          class="confirm-overlay ws-ai-overlay"
+          role="presentation"
+          @click.self="worldSettingAiOpen = false"
+        >
+          <div class="confirm-dialog ws-ai-dialog" role="dialog" aria-modal="true">
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+
+            <!-- Header -->
+            <div class="ws-ai-dialog__header">
+              <div class="ws-ai-dialog__header-left">
+                <div class="ws-ai-dialog__icon">W</div>
+                <div>
+                  <h2 class="ws-ai-dialog__title">AI 世界观构建</h2>
+                  <p class="ws-ai-dialog__subtitle">
+                    {{ worldSettingAiStep === 'interview'
+                      ? '通过对话完善你的世界观构想'
+                      : '审阅并编辑 AI 生成的设定草案'
+                    }}
+                  </p>
+                </div>
+              </div>
+              <div class="ws-ai-dialog__header-right">
+                <div class="ws-ai-step-indicator">
+                  <span class="ws-ai-step-indicator__dot" :class="{ 'ws-ai-step-indicator__dot--done': worldSettingAiStep === 'draft' }">1</span>
+                  <span class="ws-ai-step-indicator__line" :class="{ 'ws-ai-step-indicator__line--done': worldSettingAiStep === 'draft' }"></span>
+                  <span class="ws-ai-step-indicator__dot" :class="{ 'ws-ai-step-indicator__dot--active': worldSettingAiStep === 'draft' }">2</span>
+                </div>
+                <button type="button" class="ws-ai-dialog__close" aria-label="关闭" @click="worldSettingAiOpen = false">&times;</button>
+              </div>
+            </div>
+
+            <!-- Body -->
+            <div class="ws-ai-dialog__body scrollbar-paper">
+
+              <!-- Loading overlay -->
+              <Transition name="ws-ai-fade">
+                <div v-if="worldSettingAiLoading" class="ws-ai-loading-bar">
+                  <div class="ws-ai-loading-bar__track">
+                    <div class="ws-ai-loading-bar__fill"></div>
+                  </div>
+                  <span class="ws-ai-loading-bar__text">
+                    <span class="ws-ai-loading-dot"></span>
+                    {{ worldSettingAiStep === 'interview' ? 'AI 正在构思问题…' : 'AI 正在生成设定草案…' }}
+                  </span>
+                </div>
+              </Transition>
+
+              <!-- Step 1: Interview -->
+              <template v-if="worldSettingAiStep === 'interview'">
+                <!-- Dimensions -->
+                <div class="ws-ai-dimensions">
+                  <span
+                    v-for="(dim, idx) in [
+                      { label: '力量体系', icon: '01' },
+                      { label: '世界结构', icon: '02' },
+                      { label: '社会规则', icon: '03' },
+                      { label: '历史脉络', icon: '04' },
+                      { label: '核心设定', icon: '05' },
+                    ]"
+                    :key="dim.label"
+                    class="ws-ai-dim-tag"
+                    :class="{ 'ws-ai-dim-tag--done': worldSettingAiCoveredDimensions.includes(String(idx + 1)) }"
+                  >
+                    <span class="ws-ai-dim-tag__icon">{{ dim.icon }}</span>
+                    {{ dim.label }}
+                  </span>
+                </div>
+
+                <!-- History -->
+                <div v-if="worldSettingAiInterviewHistory.length > 0" class="ws-ai-history">
+                  <div class="ws-ai-history__header">
+                    <span class="ws-ai-history__count">已完成 {{ worldSettingAiInterviewHistory.length }} 轮对话</span>
+                  </div>
+                  <div class="ws-ai-history__list">
+                    <article
+                      v-for="(turn, index) in worldSettingAiInterviewHistory"
+                      :key="`${turn.label}-${index}`"
+                      class="ws-ai-history__turn"
+                    >
+                      <div class="ws-ai-history__turn-head">
+                        <span class="ws-ai-history__turn-badge">Q{{ index + 1 }}</span>
+                        <span class="ws-ai-history__turn-label">{{ turn.label }}</span>
+                      </div>
+                      <p class="ws-ai-history__turn-question">{{ turn.prompt }}</p>
+                      <div class="ws-ai-history__turn-answer">
+                        <span class="ws-ai-history__turn-answer-icon">A</span>
+                        {{ turn.answer }}
+                      </div>
+                    </article>
+                  </div>
+                </div>
+
+                <!-- Rationale -->
+                <p v-if="worldSettingAiRationale && !worldSettingAiLoading" class="ws-ai-rationale">
+                  <span class="ws-ai-rationale__icon">—</span>
+                  {{ worldSettingAiRationale }}
+                </p>
+
+                <!-- Current question -->
+                <article v-if="worldSettingAiCurrentQuestion && !worldSettingAiLoading" class="ws-ai-question">
+                  <div class="ws-ai-question__header">
+                    <span class="ws-ai-question__round">第 {{ worldSettingAiInterviewHistory.length + 1 }} 轮</span>
+                    <span class="ws-ai-question__label">{{ worldSettingAiCurrentQuestion.label }}</span>
+                  </div>
+                  <p class="ws-ai-question__prompt">{{ worldSettingAiCurrentQuestion.prompt }}</p>
+
+                  <div class="ws-ai-question__options">
+                    <button
+                      v-for="option in worldSettingAiCurrentQuestion.options"
+                      :key="option"
+                      type="button"
+                      class="ws-ai-option-btn"
+                      :class="{ 'ws-ai-option-btn--active': worldSettingAiCurrentAnswer === option }"
+                      @click="worldSettingAiCurrentAnswer = option"
+                    >
+                      <span class="ws-ai-option-btn__check">{{ worldSettingAiCurrentAnswer === option ? '✓' : '' }}</span>
+                      {{ option }}
+                    </button>
+                    <button
+                      type="button"
+                      class="ws-ai-option-btn ws-ai-option-btn--custom"
+                      :class="{ 'ws-ai-option-btn--active': worldSettingAiCurrentAnswer === '__custom__' }"
+                      @click="worldSettingAiCurrentAnswer = '__custom__'"
+                    >
+                      <span class="ws-ai-option-btn__check">{{ worldSettingAiCurrentAnswer === '__custom__' ? '✓' : '' }}</span>
+                      自己输入
+                    </button>
+                  </div>
+
+                  <div class="ws-ai-question__input-area">
+                    <textarea
+                      v-model="worldSettingAiCurrentCustom"
+                      class="ws-ai-textarea"
+                      rows="3"
+                      maxlength="400"
+                      :placeholder="worldSettingAiInterviewCustomPlaceholder"
+                    />
+                    <span class="ws-ai-textarea__counter">{{ worldSettingAiCurrentCustom.length }}/400</span>
+                  </div>
+
+                  <p class="ws-ai-question__hint">选中选项后仍可补充想法，会一并交给 AI。</p>
+                </article>
+
+                <!-- Actions -->
+                <div v-if="worldSettingAiCurrentQuestion && !worldSettingAiLoading" class="ws-ai-actions">
+                  <button
+                    type="button"
+                    class="ws-ai-btn ws-ai-btn--ghost"
+                    @click="generateWorldSettingAiDraft"
+                  >
+                    跳过，直接生成
+                  </button>
+                  <button
+                    type="button"
+                    class="ws-ai-btn ws-ai-btn--primary"
+                    :disabled="!worldSettingAiResolvedAnswer"
+                    @click="submitWorldSettingAiInterviewAnswer"
+                  >
+                    确认回答
+                  </button>
+                </div>
+
+                <!-- Empty state -->
+                <div v-if="!worldSettingAiCurrentQuestion && !worldSettingAiLoading && worldSettingAiInterviewHistory.length === 0" class="ws-ai-empty">
+                  <span class="ws-ai-empty__icon">~</span>
+                  <p>AI 正在准备第一个问题…</p>
+                </div>
+              </template>
+
+              <!-- Step 2: Draft -->
+              <template v-else-if="worldSettingAiStep === 'draft'">
+                <div class="ws-ai-draft-header">
+                  <p class="ws-ai-draft-header__text">
+                    AI 已根据 {{ worldSettingAiInterviewHistory.length }} 轮对话生成了世界观设定草案，你可以自由修改后再保存。
+                  </p>
+                </div>
+
+                <div class="ws-ai-draft-editor">
+                  <label class="ws-ai-field">
+                    <span class="ws-ai-field__label">设定名称</span>
+                    <input
+                      v-model="worldSettingAiDraftName"
+                      class="ws-ai-input"
+                      maxlength="100"
+                      placeholder="输入世界观设定名称…"
+                    />
+                  </label>
+
+                  <label class="ws-ai-field">
+                    <span class="ws-ai-field__label">设定内容</span>
+                    <textarea
+                      v-model="worldSettingAiDraftContent"
+                      class="ws-ai-textarea ws-ai-textarea--large"
+                      rows="16"
+                      placeholder="世界观设定详细内容…"
+                    />
+                    <span class="ws-ai-field__hint">{{ worldSettingAiDraftContent.length }} 字</span>
+                  </label>
+
+                  <div class="ws-ai-field">
+                    <span class="ws-ai-field__label">分类标签</span>
+                    <div v-if="sortedCategories.length === 0" class="ws-ai-field__empty">暂无分类，请先在「分类」标签中新建。</div>
+                    <div v-else class="ws-ai-categories">
+                      <label
+                        v-for="cat in sortedCategories"
+                        :key="`wsai-cat-${cat.id}`"
+                        class="ws-ai-cat-chip"
+                        :class="worldSettingAiDraftCategoryIds.includes(cat.id) ? 'ws-ai-cat-chip--active' : ''"
+                      >
+                        <input
+                          type="checkbox"
+                          class="visually-hidden"
+                          :checked="worldSettingAiDraftCategoryIds.includes(cat.id)"
+                          @change="toggleWorldSettingAiDraftCategory(cat.id)"
+                        />
+                        <span class="ws-ai-cat-chip__check">{{ worldSettingAiDraftCategoryIds.includes(cat.id) ? '✓' : '+' }}</span>
+                        {{ cat.name }}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ws-ai-actions ws-ai-actions--spread">
+                  <button
+                    type="button"
+                    class="ws-ai-btn ws-ai-btn--ghost"
+                    @click="worldSettingAiStep = 'interview'"
+                  >
+                    ← 返回问答
+                  </button>
+                  <div class="ws-ai-actions__right">
+                    <button type="button" class="ws-ai-btn ws-ai-btn--ghost" @click="worldSettingAiOpen = false">
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      class="ws-ai-btn ws-ai-btn--primary"
+                      :disabled="!worldSettingAiDraftName.trim()"
+                      @click="saveWorldSettingAiDraft"
+                    >
+                      {{ worldSettingAiTargetId ? '更新设定' : '保存为新设定' }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Error -->
+              <Transition name="ws-ai-fade">
+                <div v-if="worldSettingAiError" class="ws-ai-error">
+                  <span class="ws-ai-error__icon">!</span>
+                  <span>{{ worldSettingAiError }}</span>
+                  <button type="button" class="ws-ai-error__dismiss" @click="worldSettingAiError = ''">&times;</button>
+                </div>
+              </Transition>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
   </section>
 
   <section v-else class="page-block">
@@ -2744,16 +3223,22 @@ import {
   updateChapter,
   updateOutlineItem,
   updateTimelineEvent,
+  getWorldSettingsByNovelId,
+  createWorldSetting,
+  updateWorldSetting,
+  deleteWorldSetting,
 } from '../../lib/storage'
 import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
 import {
   designOutlineInterviewTurnByAi,
   designOutlineOptionsByAi,
+  designWorldSettingInterviewTurnByAi,
   expandOutlineDesignByAi,
   expandOutlineItemByAi,
   expandOutlineFromExistingByAi,
   expandOutlineScenesForSkeletonByAi,
   expandOutlineSkeletonByAi,
+  generateWorldSettingDraftByAi,
   refineOutlineOptionsByAi,
 } from '../../lib/localAi'
 import { lintOutlineDraftItems } from '../../lib/outlineDraftLint'
@@ -2782,6 +3267,7 @@ import type {
   OutlineStorylineType,
   OutlineTension,
   TimelineEvent,
+  WorldSetting,
 } from '../../types'
 import CharacterGraphRelationToolbar from '../../components/CharacterGraphRelationToolbar.vue'
 import CharacterRelationSphere from '../../components/CharacterRelationSphere.vue'
@@ -2809,6 +3295,7 @@ type WorkspaceTab =
   | 'factions'
   | 'categories'
   | 'issues'
+  | 'worldsettings'
 
 type OutlineAiInterviewQuestion = {
   label: string
@@ -3040,6 +3527,33 @@ const foreshadowEditInitial = ref({
 })
 const foreshadowJumpOpen = ref(false)
 const foreshadowJumpTarget = ref<ForeshadowPlant | null>(null)
+const worldSettings = ref<WorldSetting[]>([])
+const worldSettingKeywordFilter = ref('')
+const worldSettingCreateOpen = ref(false)
+const worldSettingForm = reactive({ name: '', content: '', categoryIds: [] as string[] })
+const worldSettingFormError = ref('')
+const worldSettingEditOpen = ref(false)
+const worldSettingEditId = ref('')
+const worldSettingEditDraft = reactive({ name: '', content: '', categoryIds: [] as string[] })
+const worldSettingDeleteOpen = ref(false)
+const worldSettingDeleteId = ref('')
+type WorldSettingAiStep = 'interview' | 'draft'
+type WorldSettingAiInterviewQuestion = { label: string; prompt: string; options: string[]; placeholder: string }
+type WorldSettingAiFollowupTurn = { label: string; prompt: string; answer: string }
+const worldSettingAiOpen = ref(false)
+const worldSettingAiStep = ref<WorldSettingAiStep>('interview')
+const worldSettingAiLoading = ref(false)
+const worldSettingAiError = ref('')
+const worldSettingAiTargetId = ref('')
+const worldSettingAiInterviewHistory = ref<WorldSettingAiFollowupTurn[]>([])
+const worldSettingAiCurrentQuestion = ref<WorldSettingAiInterviewQuestion | null>(null)
+const worldSettingAiCurrentAnswer = ref('')
+const worldSettingAiCurrentCustom = ref('')
+const worldSettingAiCoveredDimensions = ref<string[]>([])
+const worldSettingAiRationale = ref('')
+const worldSettingAiDraftName = ref('')
+const worldSettingAiDraftContent = ref('')
+const worldSettingAiDraftCategoryIds = ref<string[]>([])
 const timelineForm = reactive({
   storyLabel: '',
   title: '',
@@ -3895,6 +4409,7 @@ watch(
     characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(id)
     timelineEvents.value = getTimelineByNovelId(id)
     foreshadows.value = getForeshadowsByNovelId(id)
+    worldSettings.value = getWorldSettingsByNovelId(id)
     factionEditOpen.value = false
     factionEditId.value = ''
     applyRoutePrefill()
@@ -4138,6 +4653,7 @@ async function requestNextOutlineAiQuestion(): Promise<boolean> {
           perspective: novel.value.perspective,
           tone: novel.value.tone,
         },
+        aiStylePrompt: novel.value.aiStylePrompt,
         history: collectOutlineAiInterviewHistory(),
         remainingRounds: Math.max(0, 6 - outlineAiInterviewHistory.value.length),
       },
@@ -4184,6 +4700,7 @@ async function generateOutlineAiOptions(): Promise<void> {
         novelTitle: novel.value.title,
         novelSummary: novel.value.summary,
         novel: novel.value,
+        aiStylePrompt: novel.value.aiStylePrompt,
         history: collectOutlineAiInterviewHistory(),
       },
     )
@@ -4248,6 +4765,7 @@ async function refineOutlineAiOptions(): Promise<void> {
         novelTitle: novel.value.title,
         novelSummary: novel.value.summary,
         novel: novel.value,
+        aiStylePrompt: novel.value.aiStylePrompt,
         history: collectOutlineAiInterviewHistory(),
         currentOptions: outlineAiDesignerOptions.value,
         selectedOptionId: selected.id,
@@ -4279,6 +4797,7 @@ function buildOutlineAiDraftInput() {
     novelTitle: novel.value.title,
     novelSummary: novel.value.summary,
     novel: novel.value,
+    aiStylePrompt: novel.value.aiStylePrompt,
     history: collectOutlineAiInterviewHistory(),
     selectedOption: selectedOutlineAiOption.value,
     selectedOptionId: outlineAiDesignerSelectedOptionId.value,
@@ -4337,6 +4856,7 @@ async function generateOutlineAiExpand(): Promise<void> {
     const payload = buildNovelWorkspacePayload(novel.value.id)
     const result = await expandOutlineFromExistingByAi(payload, {
       novel: novel.value,
+      aiStylePrompt: novel.value.aiStylePrompt,
       anchorOutlineId: anchorId,
       expandNote: outlineAiExpandNote.value,
       expandPreset: outlineAiExpandPreset.value,
@@ -5807,6 +6327,30 @@ function toggleFactionEditDraftCategory(categoryId: string): void {
   else factionEditDraft.categoryIds.push(id)
 }
 
+function toggleWorldSettingFormCategory(categoryId: string): void {
+  const id = String(categoryId ?? '').trim()
+  if (!id) return
+  const i = worldSettingForm.categoryIds.indexOf(id)
+  if (i >= 0) worldSettingForm.categoryIds.splice(i, 1)
+  else worldSettingForm.categoryIds.push(id)
+}
+
+function toggleWorldSettingEditCategory(categoryId: string): void {
+  const id = String(categoryId ?? '').trim()
+  if (!id) return
+  const i = worldSettingEditDraft.categoryIds.indexOf(id)
+  if (i >= 0) worldSettingEditDraft.categoryIds.splice(i, 1)
+  else worldSettingEditDraft.categoryIds.push(id)
+}
+
+function toggleWorldSettingAiDraftCategory(categoryId: string): void {
+  const id = String(categoryId ?? '').trim()
+  if (!id) return
+  const i = worldSettingAiDraftCategoryIds.value.indexOf(id)
+  if (i >= 0) worldSettingAiDraftCategoryIds.value.splice(i, 1)
+  else worldSettingAiDraftCategoryIds.value.push(id)
+}
+
 function removeCharacterDraftMembershipRow(index: number): void {
   characterDraft.membershipRows.splice(index, 1)
   if (characterMembershipFactionDropdownOpenId.value === String(index)) {
@@ -5928,6 +6472,17 @@ const filteredFactions = computed(() => {
     if (cid && !(f.categoryIds ?? []).includes(cid)) return false
     if (!q) return true
     return f.name.toLowerCase().includes(q)
+  })
+  return sortByPinyinName(list)
+})
+
+const filteredWorldSettings = computed(() => {
+  const cid = selectedCategoryFilterId.value
+  const q = worldSettingKeywordFilter.value.trim().toLowerCase()
+  const list = worldSettings.value.filter((ws) => {
+    if (cid && !(ws.categoryIds ?? []).includes(cid)) return false
+    if (!q) return true
+    return ws.name.toLowerCase().includes(q) || ws.content.toLowerCase().includes(q)
   })
   return sortByPinyinName(list)
 })
@@ -7083,6 +7638,271 @@ function onFactionDeleteDialogCancel(): void {
   pendingDeleteFactionId.value = null
 }
 
+// ── World Setting handlers ──────────────────────────────────────────────────
+
+function openWorldSettingCreate(): void {
+  worldSettingForm.name = ''
+  worldSettingForm.content = ''
+  worldSettingForm.categoryIds = []
+  worldSettingFormError.value = ''
+  worldSettingCreateOpen.value = true
+}
+
+function handleCreateWorldSetting(): void {
+  if (!novelId.value) return
+  if (!worldSettingForm.name.trim()) {
+    worldSettingFormError.value = '请输入设定名称。'
+    return
+  }
+  createWorldSetting({
+    novelId: novelId.value,
+    name: worldSettingForm.name,
+    content: worldSettingForm.content,
+    categoryIds: worldSettingForm.categoryIds,
+  })
+  worldSettings.value = getWorldSettingsByNovelId(novelId.value)
+  worldSettingCreateOpen.value = false
+}
+
+function openWorldSettingEdit(id: string): void {
+  const ws = worldSettings.value.find((w) => w.id === id)
+  if (!ws) return
+  worldSettingEditId.value = id
+  worldSettingEditDraft.name = ws.name
+  worldSettingEditDraft.content = ws.content
+  worldSettingEditDraft.categoryIds = [...(ws.categoryIds ?? [])]
+  worldSettingEditOpen.value = true
+}
+
+function handleSaveWorldSettingEdit(): void {
+  if (!worldSettingEditId.value) return
+  if (!worldSettingEditDraft.name.trim()) return
+  updateWorldSetting({
+    id: worldSettingEditId.value,
+    name: worldSettingEditDraft.name,
+    content: worldSettingEditDraft.content,
+    categoryIds: worldSettingEditDraft.categoryIds,
+  })
+  worldSettings.value = getWorldSettingsByNovelId(novelId.value)
+  worldSettingEditOpen.value = false
+  worldSettingEditId.value = ''
+}
+
+function openWorldSettingDelete(id: string): void {
+  worldSettingDeleteId.value = id
+  worldSettingDeleteOpen.value = true
+}
+
+function confirmWorldSettingDelete(): void {
+  const id = worldSettingDeleteId.value
+  if (!id) return
+  if (worldSettingEditId.value === id) {
+    worldSettingEditOpen.value = false
+    worldSettingEditId.value = ''
+  }
+  deleteWorldSetting(id)
+  worldSettings.value = getWorldSettingsByNovelId(novelId.value)
+  worldSettingDeleteOpen.value = false
+  worldSettingDeleteId.value = ''
+}
+
+// ── World Setting AI Interview ──────────────────────────────────────────────
+
+const worldSettingAiResolvedAnswer = computed(() => {
+  const selected = worldSettingAiCurrentAnswer.value
+  const custom = worldSettingAiCurrentCustom.value.trim()
+  if (!selected && !custom) return ''
+  if (selected === '__custom__') return custom || ''
+  if (!selected) return custom
+  return custom ? `${selected}（补充：${custom}）` : selected
+})
+
+const worldSettingAiInterviewCustomPlaceholder = computed(() => {
+  const selected = worldSettingAiCurrentAnswer.value
+  if (!selected || selected === '__custom__') return '直接用一句到几句话描述你的想法'
+  return `对「${selected}」有什么补充？留空则只用选项`
+})
+
+function resetWorldSettingAiState(): void {
+  worldSettingAiStep.value = 'interview'
+  worldSettingAiLoading.value = false
+  worldSettingAiError.value = ''
+  worldSettingAiTargetId.value = ''
+  worldSettingAiInterviewHistory.value = []
+  worldSettingAiCurrentQuestion.value = null
+  worldSettingAiCurrentAnswer.value = ''
+  worldSettingAiCurrentCustom.value = ''
+  worldSettingAiCoveredDimensions.value = []
+  worldSettingAiRationale.value = ''
+  worldSettingAiDraftName.value = ''
+  worldSettingAiDraftContent.value = ''
+  worldSettingAiDraftCategoryIds.value = []
+}
+
+async function openWorldSettingAiCreate(): Promise<void> {
+  resetWorldSettingAiState()
+  worldSettingAiOpen.value = true
+  const hasNext = await requestNextWorldSettingAiQuestion()
+  if (!hasNext && !worldSettingAiError.value) {
+    await generateWorldSettingAiDraft()
+  }
+}
+
+async function openWorldSettingAiEdit(id: string): Promise<void> {
+  resetWorldSettingAiState()
+  worldSettingAiTargetId.value = id
+  const ws = worldSettings.value.find((w) => w.id === id)
+  if (ws) {
+    worldSettingAiDraftCategoryIds.value = [...(ws.categoryIds ?? [])]
+  }
+  worldSettingAiOpen.value = true
+  const hasNext = await requestNextWorldSettingAiQuestion()
+  if (!hasNext && !worldSettingAiError.value) {
+    await generateWorldSettingAiDraft()
+  }
+}
+
+function collectWorldSettingAiHistory(): Array<{ label: string; prompt: string; answer: string }> {
+  return worldSettingAiInterviewHistory.value.map((row) => ({
+    label: row.label,
+    prompt: row.prompt,
+    answer: row.answer,
+  }))
+}
+
+async function requestNextWorldSettingAiQuestion(): Promise<boolean> {
+  if (!novel.value) return false
+  worldSettingAiLoading.value = true
+  worldSettingAiError.value = ''
+  try {
+    const existing = worldSettingAiTargetId.value
+      ? worldSettings.value.find((w) => w.id === worldSettingAiTargetId.value)
+      : undefined
+    const result = await designWorldSettingInterviewTurnByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      {
+        novelTitle: novel.value.title,
+        novelSummary: novel.value.summary,
+        novel: {
+          title: novel.value.title,
+          summary: novel.value.summary,
+          genre: novel.value.genre,
+          perspective: novel.value.perspective,
+          tone: novel.value.tone,
+        },
+        aiStylePrompt: novel.value.aiStylePrompt,
+        existingSetting: existing ? { name: existing.name, content: existing.content } : undefined,
+        history: collectWorldSettingAiHistory(),
+        remainingRounds: Math.max(0, 6 - worldSettingAiInterviewHistory.value.length),
+      },
+    )
+    worldSettingAiRationale.value = result.rationale
+    const newDims = result.coveredDimensions ?? []
+    for (const d of newDims) {
+      if (!worldSettingAiCoveredDimensions.value.includes(d)) {
+        worldSettingAiCoveredDimensions.value.push(d)
+      }
+    }
+    if (result.shouldAsk && result.question) {
+      worldSettingAiCurrentQuestion.value = result.question
+      worldSettingAiCurrentAnswer.value = ''
+      worldSettingAiCurrentCustom.value = ''
+      worldSettingAiStep.value = 'interview'
+      return true
+    }
+    worldSettingAiCurrentQuestion.value = null
+    return false
+  } catch (error: unknown) {
+    worldSettingAiError.value = error instanceof Error ? error.message : 'AI 生成问题失败，请稍后重试。'
+    return true
+  } finally {
+    worldSettingAiLoading.value = false
+  }
+}
+
+async function submitWorldSettingAiInterviewAnswer(): Promise<void> {
+  const question = worldSettingAiCurrentQuestion.value
+  const answer = worldSettingAiResolvedAnswer.value
+  if (!question || !answer) return
+  worldSettingAiInterviewHistory.value = [
+    ...worldSettingAiInterviewHistory.value,
+    { label: question.label, prompt: question.prompt, answer },
+  ]
+  worldSettingAiCurrentQuestion.value = null
+  worldSettingAiCurrentAnswer.value = ''
+  worldSettingAiCurrentCustom.value = ''
+  if (worldSettingAiInterviewHistory.value.length >= 6) {
+    await generateWorldSettingAiDraft()
+    return
+  }
+  const allDimsCovered = worldSettingAiCoveredDimensions.value.length >= 5
+  if (allDimsCovered && worldSettingAiInterviewHistory.value.length >= 3) {
+    await generateWorldSettingAiDraft()
+    return
+  }
+  const hasNext = await requestNextWorldSettingAiQuestion()
+  if (!hasNext && !worldSettingAiError.value) {
+    await generateWorldSettingAiDraft()
+  }
+}
+
+async function generateWorldSettingAiDraft(): Promise<void> {
+  if (!novel.value) return
+  worldSettingAiLoading.value = true
+  worldSettingAiError.value = ''
+  try {
+    const existing = worldSettingAiTargetId.value
+      ? worldSettings.value.find((w) => w.id === worldSettingAiTargetId.value)
+      : undefined
+    const result = await generateWorldSettingDraftByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      {
+        novelTitle: novel.value.title,
+        novelSummary: novel.value.summary,
+        novel: {
+          title: novel.value.title,
+          summary: novel.value.summary,
+          genre: novel.value.genre,
+          perspective: novel.value.perspective,
+          tone: novel.value.tone,
+        },
+        aiStylePrompt: novel.value.aiStylePrompt,
+        existingSetting: existing ? { name: existing.name, content: existing.content } : undefined,
+        history: collectWorldSettingAiHistory(),
+      },
+    )
+    worldSettingAiDraftName.value = result.name
+    worldSettingAiDraftContent.value = result.content
+    worldSettingAiStep.value = 'draft'
+  } catch (error: unknown) {
+    worldSettingAiError.value = error instanceof Error ? error.message : 'AI 生成设定草案失败，请稍后重试。'
+  } finally {
+    worldSettingAiLoading.value = false
+  }
+}
+
+function saveWorldSettingAiDraft(): void {
+  if (!novel.value) return
+  if (!worldSettingAiDraftName.value.trim()) return
+  if (worldSettingAiTargetId.value) {
+    updateWorldSetting({
+      id: worldSettingAiTargetId.value,
+      name: worldSettingAiDraftName.value.trim(),
+      content: worldSettingAiDraftContent.value.trim(),
+      categoryIds: worldSettingAiDraftCategoryIds.value,
+    })
+  } else {
+    createWorldSetting({
+      novelId: novel.value.id,
+      name: worldSettingAiDraftName.value.trim(),
+      content: worldSettingAiDraftContent.value.trim(),
+      categoryIds: worldSettingAiDraftCategoryIds.value,
+    })
+  }
+  worldSettings.value = getWorldSettingsByNovelId(novel.value.id)
+  worldSettingAiOpen.value = false
+}
+
 // ── Foreshadow handlers ──────────────────────────────────────────────────────
 
 const filteredForeshadows = computed(() => {
@@ -7300,7 +8120,8 @@ function applyRoutePrefill(): void {
     tab === 'items' ||
     tab === 'factions' ||
     tab === 'categories' ||
-    tab === 'issues'
+    tab === 'issues' ||
+    tab === 'worldsettings'
   ) {
     activeTab.value = tab
   }
@@ -7921,6 +8742,787 @@ onUnmounted(() => {
   .workspace-outline-ai-draft-item__head {
     grid-auto-flow: row;
     display: grid;
+  }
+}
+
+/* ── World Setting AI Dialog ──────────────────────────────────────── */
+
+.ws-ai-overlay {
+  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--color-surface) 40%, transparent);
+}
+
+.ws-ai-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(88vh, 820px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.ws-ai-dialog__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-primary-soft) 16%, var(--color-surface)), var(--color-surface));
+  flex-shrink: 0;
+}
+
+.ws-ai-dialog__header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ws-ai-dialog__icon {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1.5px solid color-mix(in srgb, var(--color-border-strong) 40%, transparent);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+}
+
+.ws-ai-dialog__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.ws-ai-dialog__subtitle {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.ws-ai-dialog__header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.ws-ai-dialog__close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-border) 30%, transparent);
+  color: var(--color-text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ws-ai-dialog__close:hover {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  color: var(--color-text);
+}
+
+/* Step indicator */
+.ws-ai-step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.ws-ai-step-indicator__dot {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-border) 30%, transparent);
+  color: var(--color-text-muted);
+  transition: all 0.25s ease;
+}
+
+.ws-ai-step-indicator__dot--done {
+  background: color-mix(in srgb, var(--color-success, #22c55e) 20%, transparent);
+  color: var(--color-success, #22c55e);
+}
+
+.ws-ai-step-indicator__dot--active {
+  background: var(--color-primary);
+  color: var(--color-primary-contrast, #fff);
+}
+
+.ws-ai-step-indicator__line {
+  width: 28px;
+  height: 2px;
+  background: color-mix(in srgb, var(--color-border) 40%, transparent);
+  transition: background 0.25s ease;
+}
+
+.ws-ai-step-indicator__line--done {
+  background: var(--color-success, #22c55e);
+}
+
+/* Body */
+.ws-ai-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-text-muted) 28%, transparent) transparent;
+}
+
+.ws-ai-dialog__body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.ws-ai-dialog__body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 28%, transparent);
+}
+
+/* Loading bar */
+.ws-ai-loading-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-primary-soft) 12%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.ws-ai-loading-bar__track {
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  overflow: hidden;
+}
+
+.ws-ai-loading-bar__fill {
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-primary), color-mix(in srgb, var(--color-primary) 50%, var(--color-surface)));
+  animation: ws-ai-loading-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes ws-ai-loading-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.ws-ai-loading-bar__text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.ws-ai-loading-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: ws-ai-dot-pulse 1s ease-in-out infinite;
+}
+
+@keyframes ws-ai-dot-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* Dimensions */
+.ws-ai-dimensions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ws-ai-dim-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--color-border) 16%, transparent);
+  color: var(--color-text-muted);
+  border: 1px solid color-mix(in srgb, var(--color-border) 24%, transparent);
+  transition: all 0.2s ease;
+}
+
+.ws-ai-dim-tag__icon {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-ai-dim-tag--done {
+  background: color-mix(in srgb, var(--color-success, #22c55e) 12%, transparent);
+  color: var(--color-success, #22c55e);
+  border-color: color-mix(in srgb, var(--color-success, #22c55e) 28%, transparent);
+}
+
+.ws-ai-dim-tag--done::after {
+  content: '✓';
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+/* History */
+.ws-ai-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ws-ai-history__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-ai-history__count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ws-ai-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.ws-ai-history__turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 30%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-surface) 96%, rgba(255,255,255,0.5)), color-mix(in srgb, var(--color-surface-muted) 88%, transparent));
+}
+
+.ws-ai-history__turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-ai-history__turn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.ws-ai-history__turn-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-text) 80%, var(--color-primary) 20%);
+}
+
+.ws-ai-history__turn-question {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.ws-ai-history__turn-answer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary-soft) 14%, var(--color-surface));
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+
+.ws-ai-history__turn-answer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Rationale */
+.ws-ai-rationale {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 12%, var(--color-surface));
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.ws-ai-rationale__icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 300;
+  color: var(--color-text-muted);
+  margin-top: 0;
+  line-height: 1;
+}
+
+/* Question card */
+.ws-ai-question {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-primary-soft) 10%, var(--color-surface)), var(--color-surface));
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.ws-ai-question__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-ai-question__round {
+  display: inline-flex;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-primary-contrast, #fff);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ws-ai-question__label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ws-ai-question__prompt {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--color-text);
+}
+
+.ws-ai-question__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ws-ai-option-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 30%, transparent);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ws-ai-option-btn:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 10%, var(--color-surface));
+}
+
+.ws-ai-option-btn--active {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-soft) 24%, var(--color-surface));
+  color: color-mix(in srgb, var(--color-primary) 80%, var(--color-text) 20%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
+
+.ws-ai-option-btn--custom {
+  border-style: dashed;
+}
+
+.ws-ai-option-btn__check {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.ws-ai-question__input-area {
+  position: relative;
+}
+
+.ws-ai-question__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Textarea */
+.ws-ai-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 80px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 40%, transparent);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, rgba(255,255,255,0.6)), var(--color-surface));
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.7;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ws-ai-textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.ws-ai-textarea--large {
+  min-height: 280px;
+  font-size: 14px;
+  line-height: 1.8;
+  padding: 16px 18px;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      color-mix(in srgb, var(--color-border) 22%, transparent) 28px
+    ),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, rgba(255,255,255,0.6)), var(--color-surface));
+  background-attachment: local;
+}
+
+.ws-ai-textarea__counter {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+/* Input */
+.ws-ai-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 40%, transparent);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ws-ai-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+/* Draft header */
+.ws-ai-draft-header {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary-soft) 10%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.ws-ai-draft-header__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+/* Draft editor */
+.ws-ai-draft-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ws-ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ws-ai-field__label {
+  font-size: 13px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-text) 80%, var(--color-primary) 20%);
+}
+
+.ws-ai-field__hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  align-self: flex-end;
+}
+
+.ws-ai-field__empty {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Categories */
+.ws-ai-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ws-ai-cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 36%, transparent);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ws-ai-cat-chip:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, transparent);
+}
+
+.ws-ai-cat-chip--active {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-soft) 22%, var(--color-surface));
+  color: color-mix(in srgb, var(--color-primary) 70%, var(--color-text) 30%);
+}
+
+.ws-ai-cat-chip__check {
+  font-size: 11px;
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
+}
+
+/* Actions */
+.ws-ai-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.ws-ai-actions--spread {
+  justify-content: space-between;
+}
+
+.ws-ai-actions__right {
+  display: flex;
+  gap: 10px;
+}
+
+.ws-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.ws-ai-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ws-ai-btn--primary {
+  background: var(--color-primary);
+  color: var(--color-primary-contrast, #fff);
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary) 24%, transparent);
+}
+
+.ws-ai-btn--primary:hover:not(:disabled) {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-primary) 32%, transparent);
+  transform: translateY(-1px);
+}
+
+.ws-ai-btn--ghost {
+  background: transparent;
+  color: var(--color-text-muted);
+  border-color: color-mix(in srgb, var(--color-border-strong) 36%, transparent);
+}
+
+.ws-ai-btn--ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary-soft) 12%, var(--color-surface));
+  color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+/* Empty state */
+.ws-ai-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.ws-ai-empty__icon {
+  font-size: 28px;
+  font-weight: 200;
+  color: var(--color-text-muted);
+  animation: ws-ai-dot-pulse 1.5s ease-in-out infinite;
+}
+
+/* Error */
+.ws-ai-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-danger, #ef4444) 10%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-danger, #ef4444) 24%, transparent);
+  color: var(--color-danger, #ef4444);
+  font-size: 13px;
+}
+
+.ws-ai-error__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-danger, #ef4444);
+  color: var(--color-danger, #ef4444);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+.ws-ai-error__dismiss {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--color-danger, #ef4444);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  opacity: 0.7;
+}
+
+.ws-ai-error__dismiss:hover {
+  opacity: 1;
+}
+
+/* Transitions */
+.ws-ai-fade-enter-active,
+.ws-ai-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.ws-ai-fade-enter-from,
+.ws-ai-fade-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 640px) {
+  .ws-ai-dialog__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .ws-ai-dialog__header-right {
+    align-self: flex-end;
+  }
+  .ws-ai-question__options {
+    flex-direction: column;
+  }
+  .ws-ai-actions--spread {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ws-ai-actions__right {
+    justify-content: flex-end;
   }
 }
 </style>

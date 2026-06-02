@@ -102,6 +102,17 @@
           <span class="cursor-shell__menu-title">章总结</span>
         </button>
         <button
+          v-if="isNovelContext"
+          type="button"
+          class="cursor-shell__menu-item cursor-shell__menu-item--utility"
+          :class="{ 'is-active': aiWritingSettingsOpen }"
+          title="AI 写作设定"
+          aria-label="AI 写作设定"
+          @click="openAiWritingSettings($event)"
+        >
+          <span class="cursor-shell__menu-title">AI 设定</span>
+        </button>
+        <button
           v-if="isWritingRoute"
           type="button"
           class="cursor-shell__menu-item cursor-shell__menu-item--utility"
@@ -494,6 +505,13 @@
     @close="closeThemePicker"
   />
 
+  <AiWritingSettingsPopover
+    :open="aiWritingSettingsOpen"
+    :return-focus-el="aiWritingSettingsReturnFocusEl"
+    :novel="currentNovel"
+    @close="closeAiWritingSettings"
+  />
+
   <ConfirmDialog
     v-model="chapterSummaryCloseConfirmOpen"
     title="关闭章总结"
@@ -563,6 +581,7 @@ import CreateNovelDialog from './components/CreateNovelDialog.vue'
 import NovelShelfDialog from './components/NovelShelfDialog.vue'
 import ThemePickerPopover from './components/ThemePickerPopover.vue'
 import SaveToast from './components/SaveToast.vue'
+import AiWritingSettingsPopover from './components/AiWritingSettingsPopover.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -677,6 +696,18 @@ function openThemePicker(returnFocusEl: HTMLElement | null): void {
 
 function closeThemePicker(): void {
   isThemePickerOpen.value = false
+}
+
+const aiWritingSettingsOpen = ref(false)
+const aiWritingSettingsReturnFocusEl = ref<HTMLElement | null>(null)
+
+function openAiWritingSettings(event: MouseEvent): void {
+  aiWritingSettingsReturnFocusEl.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  aiWritingSettingsOpen.value = true
+}
+
+function closeAiWritingSettings(): void {
+  aiWritingSettingsOpen.value = false
 }
 
 function refreshNovelRecords(): void {
@@ -955,7 +986,7 @@ watch(
   { immediate: true },
 )
 
-type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues'
+type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues' | 'worldsettings'
 const workspaceTabs = [
   { key: 'write' as const, label: '写作' },
   { key: 'outline' as const, label: '大纲' },
@@ -964,6 +995,7 @@ const workspaceTabs = [
   { key: 'factions' as const, label: '势力' },
   { key: 'categories' as const, label: '分类' },
   { key: 'issues' as const, label: '伏笔' },
+  { key: 'worldsettings' as const, label: '世界观' },
 ]
 const currentWorkspaceTabLabel = computed(
   () => workspaceTabs.find((tab) => tab.key === currentWorkspaceTabKey.value)?.label ?? '写作',

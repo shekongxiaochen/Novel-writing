@@ -18,6 +18,7 @@ type RemoteNovel = {
   perspective: string
   tone: string
   is_multi_line_narrative: boolean
+  ai_style_prompt: string
   created_at: string
   updated_at: string
 }
@@ -58,6 +59,7 @@ function mapRemoteNovel(novel: RemoteNovel): Novel {
     perspective: String(novel.perspective ?? ''),
     tone: String(novel.tone ?? ''),
     isMultiLineNarrative: Boolean(novel.is_multi_line_narrative),
+    aiStylePrompt: String((novel as any).ai_style_prompt ?? ''),
     createdAt: String(novel.created_at ?? ''),
     updatedAt: String(novel.updated_at ?? ''),
   }
@@ -72,6 +74,7 @@ function toRemoteNovelPayload(novel: Novel, includeId = false): Record<string, u
     perspective: novel.perspective,
     tone: novel.tone,
     is_multi_line_narrative: novel.isMultiLineNarrative,
+    ai_style_prompt: novel.aiStylePrompt,
   }
 }
 
