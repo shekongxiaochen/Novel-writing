@@ -24,6 +24,8 @@ export type Novel = {
   perspective: string
   tone: string
   isMultiLineNarrative: boolean
+  /** AI 写作自定义风格提示词（持久注入续写/大纲 AI 的系统提示词） */
+  aiStylePrompt: string
   createdAt: string
   updatedAt: string
 }
@@ -257,6 +259,24 @@ export type NewFactionInput = {
   notes: string
   attributes?: CharacterAttribute[]
   /** 势力分类（引用 Category.id） */
+  categoryIds?: string[]
+}
+
+export type WorldSetting = {
+  id: string
+  novelId: string
+  name: string
+  content: string
+  /** 设定分类（引用 Category.id） */
+  categoryIds?: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type NewWorldSettingInput = {
+  novelId: string
+  name: string
+  content: string
   categoryIds?: string[]
 }
 

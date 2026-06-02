@@ -13,6 +13,7 @@ import type {
   NewOutlineInput,
   NewOutlineStorylineInput,
   NewTimelineEventInput,
+  NewWorldSettingInput,
   OutlineStorylineType,
   CharacterFactionMembership,
   Faction,
@@ -27,6 +28,7 @@ import type {
   OutlineStoryline,
   OutlineTension,
   TimelineEvent,
+  WorldSetting,
 } from '../types'
 import { getCurrentUser } from './auth'
 import { normalizeCharacterAliases } from './characterLabels'
@@ -45,6 +47,7 @@ const FACTION_LAST_CHANGED_FIELDS_KEY = 'novel-writing.faction-last-changed-fiel
 const CATEGORIES_KEY = 'novel-writing.categories'
 const TIMELINE_KEY = 'novel-writing.timeline-events'
 const FORESHADOWS_KEY = 'novel-writing.foreshadows'
+const WORLD_SETTINGS_KEY = 'novel-writing.world-settings'
 const DELETED_NOVEL_IDS_KEY = 'novel-writing.deleted-novel-ids'
 
 function currentStorageScope(): string {
@@ -76,6 +79,7 @@ export type WorkspaceSnapshotPayload = {
   categories?: Category[]
   timelineEvents?: TimelineEvent[]
   foreshadows?: ForeshadowPlant[]
+  worldSettings?: WorldSetting[]
 }
 
 function nowIso(): string {
@@ -273,6 +277,17 @@ export function deleteCategory(categoryId: string): boolean {
   })
   if (factionChanged) saveAllFactions(nextFactions)
 
+  const allWorldSettings = getAllWorldSettings()
+  let worldSettingChanged = false
+  const nextWorldSettings = allWorldSettings.map((ws) => {
+    const nextCategoryIds = normalizeCategoryIds(ws.categoryIds).filter((catId) => catId !== id)
+    const prevCategoryIds = normalizeCategoryIds(ws.categoryIds)
+    if (nextCategoryIds.length === prevCategoryIds.length) return ws
+    worldSettingChanged = true
+    return { ...ws, categoryIds: nextCategoryIds, updatedAt: nowIso() }
+  })
+  if (worldSettingChanged) saveAllWorldSettings(nextWorldSettings)
+
   return true
 }
 
@@ -287,6 +302,7 @@ export function getNovels(): Novel[] {
         ...row,
         continuityBrief: String((row as Novel).continuityBrief ?? '').trim(),
         arcSummaries: Array.isArray((row as any).arcSummaries) ? (row as any).arcSummaries : [],
+        aiStylePrompt: String((row as any).aiStylePrompt ?? '').trim(),
       }))
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
   } catch {
@@ -315,6 +331,7 @@ export function createNovel(input: NewNovelInput): Novel {
     perspective: input.perspective.trim(),
     tone: input.tone.trim(),
     isMultiLineNarrative: input.isMultiLineNarrative,
+    aiStylePrompt: '',
     createdAt: now,
     updatedAt: now,
   }
@@ -364,6 +381,7 @@ export function hydrateNovelWorkspaceFromPayload(novelId: string, payload: Works
   replaceNovelScopedRows(CATEGORIES_KEY, id, Array.isArray(payload.categories) ? payload.categories : [])
   replaceNovelScopedRows(TIMELINE_KEY, id, Array.isArray(payload.timelineEvents) ? payload.timelineEvents : [])
   replaceNovelScopedRows(FORESHADOWS_KEY, id, Array.isArray(payload.foreshadows) ? payload.foreshadows : [])
+  replaceNovelScopedRows(WORLD_SETTINGS_KEY, id, Array.isArray(payload.worldSettings) ? payload.worldSettings : [])
   emitStorageChange()
 }
 
@@ -403,6 +421,7 @@ export function deleteNovel(novelId: string, options?: { trackDeletion?: boolean
   removeNovelScopedRows<Category>(CATEGORIES_KEY, id)
   removeNovelScopedRows<TimelineEvent>(TIMELINE_KEY, id)
   removeNovelScopedRows<ForeshadowPlant>(FORESHADOWS_KEY, id)
+  removeNovelScopedRows<WorldSetting>(WORLD_SETTINGS_KEY, id)
 
   for (const chapterId of chapterIds) {
     removeEntityChangeAnchorsForChapter(chapterId)
@@ -433,6 +452,7 @@ export function buildNovelWorkspacePayload(novelId: string): WorkspaceSnapshotPa
     categories: getCategoriesByNovelId(novelId),
     timelineEvents: getTimelineByNovelId(novelId),
     foreshadows: getForeshadowsByNovelId(novelId),
+    worldSettings: getWorldSettingsByNovelId(novelId),
   }
 }
 
@@ -2587,6 +2607,65 @@ export function deleteFaction(factionId: string): boolean {
   const nextMems = mems.filter((m) => m.factionId !== factionId)
   if (nextMems.length !== mems.length) saveAllCharacterFactionMemberships(nextMems)
   clearItemOwnerReferences('faction', factionId)
+  return true
+}
+
+function getAllWorldSettings(): WorldSetting[] {
+  return readArrayFromStorage<WorldSetting>(WORLD_SETTINGS_KEY)
+}
+
+function saveAllWorldSettings(items: WorldSetting[]): void {
+  writeArrayToStorage(WORLD_SETTINGS_KEY, items)
+  emitStorageChange()
+}
+
+export function getWorldSettingsByNovelId(novelId: string): WorldSetting[] {
+  return getAllWorldSettings()
+    .filter((ws) => ws.novelId === novelId)
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+}
+
+export function createWorldSetting(input: NewWorldSettingInput): WorldSetting {
+  const all = getAllWorldSettings()
+  const now = nowIso()
+  const item: WorldSetting = {
+    id: uid(),
+    novelId: input.novelId,
+    name: input.name.trim() || '未命名设定',
+    content: input.content.trim(),
+    categoryIds: normalizeCategoryIds(input.categoryIds),
+    createdAt: now,
+    updatedAt: now,
+  }
+  all.push(item)
+  saveAllWorldSettings(all)
+  return item
+}
+
+export function updateWorldSetting(partial: Pick<WorldSetting, 'id'> & Partial<WorldSetting>): WorldSetting | null {
+  const all = getAllWorldSettings()
+  const idx = all.findIndex((ws) => ws.id === partial.id)
+  if (idx < 0) return null
+  const updated: WorldSetting = {
+    ...all[idx],
+    ...partial,
+    categoryIds:
+      partial.categoryIds !== undefined
+        ? normalizeCategoryIds(partial.categoryIds)
+        : normalizeCategoryIds(all[idx].categoryIds),
+    updatedAt: nowIso(),
+  }
+  all[idx] = updated
+  saveAllWorldSettings(all)
+  return updated
+}
+
+export function deleteWorldSetting(id: string): boolean {
+  const all = getAllWorldSettings()
+  const beforeLen = all.length
+  const next = all.filter((ws) => ws.id !== id)
+  if (next.length === beforeLen) return false
+  saveAllWorldSettings(next)
   return true
 }
 
