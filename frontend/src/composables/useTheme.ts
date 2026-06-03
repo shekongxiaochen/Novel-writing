@@ -53,12 +53,12 @@ export const themeOptions: ThemeOption[] = [
   {
     id: 'codex',
     label: '冷夜蓝墨',
-    description: '冷黑编辑器底色，蓝灰层级和低眩光高亮，适合长时间沉浸写作',
+    description: '冷石板灰蓝底色，柔和钢蓝高亮和低眩光层级，适合长时间沉浸写作',
     preview: {
-      bg: '#0d1117',
-      surface: '#11161d',
-      text: '#c9d1d9',
-      accent: '#58a6ff',
+      bg: '#2d313a',
+      surface: '#3b414d',
+      text: '#e6eaf1',
+      accent: '#79a8d8',
     },
   },
 ]

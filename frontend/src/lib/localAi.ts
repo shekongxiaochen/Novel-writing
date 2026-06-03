@@ -1375,6 +1375,17 @@ function itemMatch(entity: JsonRecord, payload: WorkspaceSnapshotPayload): Entit
   return best.row && best.score >= 0.8 ? createMatch('possible_duplicate', best.row) : createMatch('new')
 }
 
+function outlineItemMatch(entity: JsonRecord, payload: WorkspaceSnapshotPayload): EntityMatch {
+  const rows = (payload.outline ?? []) as JsonRecord[]
+  const needle = normName(s(entity.title))
+  if (!needle) return createMatch('new')
+  for (const row of rows) {
+    if (normName(s(row.title)) === needle) return createMatch('possible_duplicate', { ...row, name: s(row.title) })
+  }
+  const best = matchByName(s(entity.title), rows.map((row) => ({ ...row, name: s(row.title) })))
+  return best.row && best.score >= 0.82 ? createMatch('possible_duplicate', best.row) : createMatch('new')
+}
+
 function membershipMatch(entity: JsonRecord, payload: WorkspaceSnapshotPayload): EntityMatch {
   const memberships = (payload.characterFactionMemberships ?? []) as JsonRecord[]
   const characters = new Map(((payload.characters ?? []) as JsonRecord[]).map((row) => [s(row.id), row]))
@@ -1495,7 +1506,7 @@ export async function extractNovelEntitiesFromWorkspace(
 ): Promise<NovelEntityExtractResult> {
   const context = buildExtractContext(payload, input.mode, input.chapterIds)
   if (context.chapters.length === 0) {
-    return { characters: [], factions: [], items: [], memberships: [], relations: [], warnings: ['没有可分析的章节正文'] }
+    return { characters: [], factions: [], items: [], memberships: [], relations: [], outlineItems: [], warnings: ['没有可分析的章节正文'] }
   }
 
   const prompt = [
@@ -1618,6 +1629,20 @@ export async function extractNovelEntitiesFromWorkspace(
             note: s(row.note),
             confidence: f(row.confidence),
             match: relationMatch(row, payload),
+            evidences: normalizeEvidences(row.evidences),
+            warnings: stringList(row.warnings),
+          }))
+      : [],
+    outlineItems: Array.isArray(raw.outlineItems)
+      ? raw.outlineItems
+          .filter((row: any) => s(row?.title))
+          .map((row: any) => ({
+            title: s(row.title),
+            summary: s(row.summary),
+            level: s(row.level) || 'scene',
+            estimatedChapters: i(row.estimatedChapters ?? row.estimated_chapters),
+            confidence: f(row.confidence),
+            match: outlineItemMatch(row, payload),
             evidences: normalizeEvidences(row.evidences),
             warnings: stringList(row.warnings),
           }))
@@ -2637,14 +2662,16 @@ export async function designOutlineInterviewTurnByAi(
 }> {
   const genreProfiles = matchGenreProfiles(s(input.novel?.genre ?? ''))
   const genreBlock = buildGenrePromptInjection(genreProfiles)
+  const contextPack = buildOutlineAiContextPack(payload, resolveOutlineAiNovelBrief(input))
   const prompt = [
+    contextPack.text,
     `作品名：${s(input.novelTitle) || '未命名作品'}`,
     `类型：${s(input.novel?.genre) || '未指定'}`,
     `现有简介：${s(input.novelSummary) || '暂无'}`,
     `已确认的访谈记录：${stableStringify((input.history ?? []).map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`,
     `剩余追问轮次：${Math.max(0, i(input.remainingRounds) ?? 0)}`,
     genreBlock ? `【类型指导】\n${genreBlock}` : '',
-    '如果还有一个最该补的关键信息，就提出 1 个问题；如果已经足够，就明确结束追问。',
+    '上文已附本书现有设定（作品信息/写作进度/已有大纲/角色档案/关系/伏笔等）。提问前先读这些，已知的信息不要再问；只针对仍然空白或矛盾的关键点提问。如果还有一个最该补的关键信息，就提出 1 个问题；如果已经足够，就明确结束追问。',
   ].filter(Boolean).join('\n')
 
   const parsed = await callAiPromptJson('outline_interview', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt })

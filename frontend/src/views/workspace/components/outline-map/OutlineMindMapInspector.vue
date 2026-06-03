@@ -40,74 +40,83 @@
           />
         </label>
 
-        <button
-          v-if="showBeatToggle"
-          type="button"
-          class="outline-map-inspector__more-toggle btn-secondary"
-          @click="beatPanelOpen = !beatPanelOpen"
-        >
-          {{ beatPanelOpen ? '收起节拍' : beatToggleLabel }}
-        </button>
-
-        <section v-if="beatPanelOpen && showBeatToggle" class="outline-map-inspector__beat-card">
-          <p class="muted outline-map-inspector__beat-hint">冲突、转折等可留空；需要 AI 续写时再补全即可。</p>
-          <div class="outline-map-inspector__grid outline-map-inspector__grid--beats">
-            <label>
-              <span>冲突</span>
-              <input :value="item.conflict ?? ''" maxlength="120" @change="onTextFieldChange('conflict', $event)" />
-            </label>
-            <label>
-              <span>转折</span>
-              <input :value="item.twist ?? ''" maxlength="120" @change="onTextFieldChange('twist', $event)" />
-            </label>
-            <label>
-              <span>结果</span>
-              <input :value="item.result ?? ''" maxlength="120" @change="onTextFieldChange('result', $event)" />
-            </label>
-            <label>
-              <span>悬念</span>
-              <input :value="item.suspense ?? ''" maxlength="120" @change="onTextFieldChange('suspense', $event)" />
-            </label>
-            <label v-if="isSceneLevel">
-              <span>情绪转折</span>
-              <input :value="item.emotionalTurn ?? ''" maxlength="120" @change="onTextFieldChange('emotionalTurn', $event)" />
-            </label>
-            <label v-if="isSceneLevel">
-              <span>写作提示</span>
-              <input :value="item.proseHint ?? ''" maxlength="120" @change="onTextFieldChange('proseHint', $event)" />
-            </label>
-            <label v-if="isSceneLevel">
-              <span>张力</span>
-              <select :value="String(item.tension ?? 3)" @change="onTensionChange($event)">
-                <option value="1">1 · 低潮</option>
-                <option value="2">2 · 铺垫</option>
-                <option value="3">3 · 推进</option>
-                <option value="4">4 · 紧张</option>
-                <option value="5">5 · 爆点</option>
-              </select>
-            </label>
+        <details v-if="showBeatToggle" class="oi-section">
+          <summary class="oi-section__summary">
+            <span class="oi-section__title">节拍细节</span>
+            <span v-if="item && hasBeatContent(item)" class="oi-section__badge">已填</span>
+            <span class="oi-section__chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="oi-section__body">
+            <p class="muted outline-map-inspector__beat-hint">冲突、转折等可留空；需要 AI 续写时再补全即可。</p>
+            <div class="outline-map-inspector__grid outline-map-inspector__grid--beats">
+              <label>
+                <span>冲突</span>
+                <input :value="item.conflict ?? ''" maxlength="120" @change="onTextFieldChange('conflict', $event)" />
+              </label>
+              <label>
+                <span>转折</span>
+                <input :value="item.twist ?? ''" maxlength="120" @change="onTextFieldChange('twist', $event)" />
+              </label>
+              <label>
+                <span>结果</span>
+                <input :value="item.result ?? ''" maxlength="120" @change="onTextFieldChange('result', $event)" />
+              </label>
+              <label>
+                <span>悬念</span>
+                <input :value="item.suspense ?? ''" maxlength="120" @change="onTextFieldChange('suspense', $event)" />
+              </label>
+              <label v-if="isSceneLevel">
+                <span>情绪转折</span>
+                <input :value="item.emotionalTurn ?? ''" maxlength="120" @change="onTextFieldChange('emotionalTurn', $event)" />
+              </label>
+              <label v-if="isSceneLevel">
+                <span>写作提示</span>
+                <input :value="item.proseHint ?? ''" maxlength="120" @change="onTextFieldChange('proseHint', $event)" />
+              </label>
+              <label v-if="isSceneLevel">
+                <span>张力</span>
+                <select :value="String(item.tension ?? 3)" @change="onTensionChange($event)">
+                  <option value="1">1 · 低潮</option>
+                  <option value="2">2 · 铺垫</option>
+                  <option value="3">3 · 推进</option>
+                  <option value="4">4 · 紧张</option>
+                  <option value="5">5 · 爆点</option>
+                </select>
+              </label>
+            </div>
           </div>
-        </section>
+        </details>
 
-        <section v-if="storylines.length > 0" class="outline-map-inspector__storylines">
-          <span class="outline-map-inspector__label">故事线（可选）</span>
-          <div class="outline-map-inspector__storyline-chips">
-            <button
-              v-for="storyline in storylines"
-              :key="storyline.id"
-              type="button"
-              class="outline-map-inspector__storyline-chip"
-              :class="{ 'is-active': isStorylineActive(storyline.id) }"
-              :style="{ '--storyline-color': storyline.color }"
-              @click="toggleStoryline(storyline.id)"
-            >
-              {{ storyline.name }}
-            </button>
+        <details v-if="storylines.length > 0" class="oi-section">
+          <summary class="oi-section__summary">
+            <span class="oi-section__title">故事线</span>
+            <span v-if="activeStorylineCount > 0" class="oi-section__badge">{{ activeStorylineCount }}</span>
+            <span class="oi-section__chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="oi-section__body">
+            <div class="outline-map-inspector__storyline-chips">
+              <button
+                v-for="storyline in storylines"
+                :key="storyline.id"
+                type="button"
+                class="outline-map-inspector__storyline-chip"
+                :class="{ 'is-active': isStorylineActive(storyline.id) }"
+                :style="{ '--storyline-color': storyline.color }"
+                @click="toggleStoryline(storyline.id)"
+              >
+                {{ storyline.name }}
+              </button>
+            </div>
           </div>
-        </section>
+        </details>
 
-        <section class="outline-map-inspector__binding-card">
-          <span class="outline-map-inspector__label">章节绑定</span>
+        <details class="oi-section">
+          <summary class="oi-section__summary">
+            <span class="oi-section__title">章节绑定</span>
+            <span v-if="assocStart || assocEnd" class="oi-section__badge">已设</span>
+            <span class="oi-section__chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="oi-section__body">
           <div class="outline-map-inspector__grid outline-map-inspector__grid--binding">
             <div class="outline-map-chapter-picker" :class="{ 'is-open': startDropdownOpen, 'is-upward': startDropdownDirection === 'up' }">
               <span class="outline-map-chapter-picker__label">开始章节</span>
@@ -158,23 +167,30 @@
             <button type="button" class="btn-secondary" :disabled="!assocDirty" @click="emit('cancelAssoc', item.id)">取消</button>
             <button type="button" class="btn-primary" :disabled="!assocDirty" @click="emit('applyAssoc', item.id)">确认绑定</button>
           </div>
-        </section>
-
-        <section>
-          <span class="outline-map-inspector__label">已绑定章节（{{ linkedChapters.length }}）</span>
-          <div v-if="linkedChapters.length > 0" class="outline-map-inspector__chapter-list">
-            <button
-              v-for="chapter in linkedChapters"
-              :key="`ins-ch-${item.id}-${chapter.id}`"
-              type="button"
-              class="outline-map-inspector__chapter-btn"
-              @click="emit('jumpChapter', chapter.id)"
-            >
-              {{ chapterDisplayLabel(chapter) }}
-            </button>
           </div>
-          <p v-else class="muted">尚未绑定章节。</p>
-        </section>
+        </details>
+
+        <details class="oi-section">
+          <summary class="oi-section__summary">
+            <span class="oi-section__title">已绑定章节</span>
+            <span v-if="linkedChapters.length > 0" class="oi-section__badge">{{ linkedChapters.length }}</span>
+            <span class="oi-section__chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="oi-section__body">
+            <div v-if="linkedChapters.length > 0" class="outline-map-inspector__chapter-list">
+              <button
+                v-for="chapter in linkedChapters"
+                :key="`ins-ch-${item.id}-${chapter.id}`"
+                type="button"
+                class="outline-map-inspector__chapter-btn"
+                @click="emit('jumpChapter', chapter.id)"
+              >
+                {{ chapterDisplayLabel(chapter) }}
+              </button>
+            </div>
+            <p v-else class="muted">尚未绑定章节。</p>
+          </div>
+        </details>
       </div>
     </template>
 
@@ -210,8 +226,6 @@ const emit = defineEmits<{
   cancelAssoc: [outlineId: string]
   aiExpand: [outlineId: string]
 }>()
-
-const beatPanelOpen = ref(false)
 
 const startDropdownOpen = ref(false)
 const endDropdownOpen = ref(false)
@@ -249,10 +263,7 @@ function hasBeatContent(item: OutlineItem): boolean {
   )
 }
 
-const beatToggleLabel = computed(() => {
-  if (!props.item) return '填写节拍（可选）'
-  return hasBeatContent(props.item) ? '编辑节拍' : '填写节拍（可选）'
-})
+const activeStorylineCount = computed(() => (props.item?.storylineIds ?? []).length)
 
 const startChapterNo = computed(() => Number(props.assocStart || 0))
 const endChapterNo = computed(() => Number(props.assocEnd || 0))
@@ -285,7 +296,6 @@ watch(
     endSearch.value = ''
     startDropdownDirection.value = 'down'
     endDropdownDirection.value = 'down'
-    beatPanelOpen.value = props.item ? hasBeatContent(props.item) : false
   },
   { immediate: true },
 )
@@ -401,19 +411,60 @@ function outlineLevelText(level?: OutlineNodeLevel): string {
 </script>
 
 <style scoped>
-.outline-map-inspector__more-toggle {
-  width: 100%;
-  justify-content: center;
-  font-size: 0.86rem;
+.oi-section {
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface-muted) 22%, transparent);
+}
+.oi-section:not([open]) {
+  overflow: hidden;
+}
+.oi-section + .oi-section {
+  margin-top: 2px;
+}
+.oi-section__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.oi-section__summary::-webkit-details-marker {
+  display: none;
+}
+.oi-section__title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.oi-section__badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+.oi-section__chevron {
+  margin-left: auto;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  transition: transform 0.16s ease;
+}
+.oi-section[open] .oi-section__chevron {
+  transform: rotate(180deg);
+}
+.oi-section__body {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
 }
 
 .outline-map-inspector__beat-hint {
   margin: 0 0 0.5rem;
   font-size: 0.8rem;
-}
-
-.outline-map-inspector__beat-card {
-  margin-top: 0.15rem;
 }
 
 .outline-map-inspector__grid--beats {
