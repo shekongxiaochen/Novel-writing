@@ -608,12 +608,25 @@ export type ExtractedRelation = {
   uiState?: AiSuggestionUiState
 }
 
+export type ExtractedOutlineItem = {
+  title: string
+  summary: string
+  level: string
+  estimatedChapters?: number | null
+  confidence: number
+  match: EntityMatch
+  evidences: EntityEvidence[]
+  warnings: string[]
+  uiState?: AiSuggestionUiState
+}
+
 export type NovelEntityExtractResult = {
   characters: ExtractedCharacter[]
   factions: ExtractedFaction[]
   items: ExtractedItem[]
   memberships: ExtractedMembership[]
   relations: ExtractedRelation[]
+  outlineItems: ExtractedOutlineItem[]
   warnings: string[]
 }
 

@@ -26,14 +26,26 @@
             <button type="button" class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--primary" :disabled="busy || !targetChapter" @click="$emit('run')">
               {{ loading ? '整理中...' : '整理' }}
             </button>
-            <button
-              type="button"
-              class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--ghost"
-              :aria-pressed="deskMode === 'write' ? 'true' : 'false'"
-              @click="$emit('toggle-desk-mode')"
-            >
-              {{ deskMode === 'ask' ? '写作' : '提问' }}
-            </button>
+            <div class="chapter-hub-ai-panel__mode" role="tablist" aria-label="AI 模式">
+              <button
+                type="button"
+                role="tab"
+                class="chapter-hub-ai-panel__mode-seg"
+                :class="{ 'is-active': deskMode === 'ask' }"
+                :aria-selected="deskMode === 'ask' ? 'true' : 'false'"
+                @click="deskMode === 'write' && $emit('toggle-desk-mode')"
+              >提问</button>
+              <button
+                type="button"
+                role="tab"
+                class="chapter-hub-ai-panel__mode-seg"
+                :class="{ 'is-active': deskMode === 'write' }"
+                :aria-selected="deskMode === 'write' ? 'true' : 'false'"
+                @click="deskMode === 'ask' && $emit('toggle-desk-mode')"
+              >写作</button>
+            </div>
+          </div>
+          <div class="chapter-hub-ai-panel__right-cluster">
             <div class="chapter-hub-ai-panel__wallet" role="group" aria-label="钱包余额">
               <button
                 type="button"
@@ -57,7 +69,15 @@
                 <span aria-hidden="true">↻</span>
               </button>
             </div>
-            <button type="button" class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--ghost" @click="$emit('collapse')">收起</button>
+            <button
+              type="button"
+              class="chapter-hub-ai-panel__iconbtn chapter-hub-ai-panel__collapse"
+              aria-label="收起侧栏"
+              title="收起"
+              @click="$emit('collapse')"
+            >
+              <span aria-hidden="true">⟩</span>
+            </button>
           </div>
         </div>
 
@@ -166,7 +186,6 @@
 
         <article
           v-for="message in chatMessagesBeforeExtract"
-          v-show="deskMode === 'ask' || message.role === 'user' || message.content.length < 400"
           :key="message.id"
           class="chapter-hub-ai-message"
           :class="[
@@ -665,6 +684,50 @@
               </div>
             </details>
 
+            <details v-if="(run.result.outlineItems?.length ?? 0) > 0" class="chapter-hub-ai-section" open>
+              <summary class="chapter-hub-ai-section__summary">
+                <span>大纲节点</span>
+                <span class="chapter-hub-ai-section__count">{{ run.result.outlineItems?.length ?? 0 }}</span>
+              </summary>
+              <div class="chapter-hub-ai-section__content">
+                <article
+                  v-for="(item, index) in (run.result.outlineItems ?? [])"
+                  :key="`outline-${run.id}-${index}`"
+                  class="chapter-hub-ai-card"
+                  :class="{ 'chapter-hub-ai-card--locked': isSuggestionLocked(item.uiState?.status) }"
+                >
+                  <header class="chapter-hub-ai-card__head">
+                    <div class="chapter-hub-ai-card__title-wrap">
+                      <p class="chapter-hub-ai-card__kind">{{ item.title }}</p>
+                      <p class="chapter-hub-ai-card__subtitle">
+                        {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
+                      </p>
+                    </div>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                  </header>
+
+                  <p v-if="item.summary" class="chapter-hub-ai-card__line">{{ item.summary }}</p>
+                  <p v-if="item.match.targetName" class="chapter-hub-ai-card__line">匹配档案：{{ item.match.targetName }}</p>
+                  <details v-if="item.evidences.length" class="chapter-hub-ai-evidence">
+                    <summary class="chapter-hub-ai-evidence__summary">原文依据（{{ item.evidences.length }}）</summary>
+                    <div class="chapter-hub-ai-evidence-list">
+                      <p v-for="(ev, evIdx) in item.evidences" :key="`outline-${index}-${evIdx}`">第 {{ ev.chapterNo ?? '?' }} 章 · {{ ev.quote }}</p>
+                    </div>
+                  </details>
+                  <p v-for="warning in item.warnings" :key="warning" class="chapter-hub-ai-warning">{{ warning }}</p>
+                  <footer v-if="runIdx === 0" class="chapter-hub-ai-card__footer">
+                    <template v-if="!isSuggestionLocked(item.uiState?.status)">
+                      <button type="button" class="chapter-hub-ai-action chapter-hub-ai-action--primary" @click="$emit('apply', { section: 'outlineItems', index, action: 'create' })">采用</button>
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'outlineItems', index, action: 'ignore' })">忽略</button>
+                    </template>
+                    <template v-else-if="item.uiState?.status === 'ignored'">
+                      <button type="button" class="chapter-hub-ai-action" @click="$emit('apply', { section: 'outlineItems', index, action: 'reopen' })">重新审阅</button>
+                    </template>
+                  </footer>
+                </article>
+              </div>
+            </details>
+
             <details v-if="(run.foreshadowResult?.warnings.length ?? 0) > 0" class="chapter-hub-ai-section" open>
               <summary class="chapter-hub-ai-section__summary">
                 <span>伏笔提醒</span>
@@ -756,7 +819,6 @@
 
         <article
           v-for="message in chatMessagesAfterExtract"
-          v-show="deskMode === 'ask' || message.role === 'user' || message.content.length < 400"
           :key="message.id"
           class="chapter-hub-ai-message"
           :class="[
@@ -1109,7 +1171,7 @@ const emit = defineEmits<{
   collapse: []
   clearSelectionQuote: []
   stopAsk: []
-  apply: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' | 'reopen' }]
+  apply: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification' | 'outlineItems'; index: number; action: 'create' | 'merge' | 'ignore' | 'reopen' }]
   openEditor: [payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations'; index: number }]
   'pending-tool-adopt-all': []
   'pending-tool-adopt-one': [actionId: string]
@@ -1155,6 +1217,15 @@ const scrollRef = ref<HTMLElement | null>(null)
 const composerInputRef = ref<HTMLTextAreaElement | null>(null)
 const historyOpen = ref(false)
 const expandedRunIds = ref<string[]>([])
+function resizeComposer(): void {
+  const el = composerInputRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+}
+watch(draft, () => {
+  void nextTick(resizeComposer)
+})
 function formatContinueLayers(keys: string[]): string {
   return keys.map((key) => CONTINUE_CONTEXT_LAYER_LABELS[key] ?? key).join('、')
 }
@@ -1730,17 +1801,32 @@ function relationSummary(item: ExtractedRelation): string {
 
 .chapter-hub-ai-panel__topbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 
 .chapter-hub-ai-panel__hero-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chapter-hub-ai-panel__right-cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.chapter-hub-ai-panel__collapse {
+  flex: 0 0 auto;
 }
 
 .chapter-hub-ai-panel__history,
@@ -1808,6 +1894,32 @@ function relationSummary(item: ExtractedRelation): string {
   padding: 0;
   font-size: 0.82rem;
   flex: 0 0 auto;
+}
+
+.chapter-hub-ai-panel__mode {
+  display: inline-flex;
+  min-height: 30px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface-muted) 50%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 60%, transparent);
+}
+.chapter-hub-ai-panel__mode-seg {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.chapter-hub-ai-panel__mode-seg.is-active {
+  background: var(--color-primary);
+  color: #fff;
 }
 
 .chapter-hub-ai-panel__wallet {
@@ -2989,9 +3101,9 @@ function relationSummary(item: ExtractedRelation): string {
 .chapter-hub-ai-panel__input {
   box-sizing: border-box;
   width: 100%;
-  height: 38px;
+  height: auto;
   min-height: 38px;
-  max-height: 38px;
+  max-height: 160px;
   resize: none;
   overflow-y: auto;
   border: 0;
@@ -3104,8 +3216,7 @@ function relationSummary(item: ExtractedRelation): string {
 
 @media (max-width: 1100px) {
   .chapter-hub-ai-suggestion__top,
-  .chapter-hub-ai-panel__composer-bar,
-  .chapter-hub-ai-panel__topbar {
+  .chapter-hub-ai-panel__composer-bar {
     flex-direction: column;
     align-items: stretch;
   }

@@ -11,6 +11,14 @@
           <button
             type="button"
             class="tab"
+            :class="{ active: activeTab === 'worldsettings' }"
+            @click="switchTab('worldsettings')"
+          >
+            世界观
+          </button>
+          <button
+            type="button"
+            class="tab"
             :class="{ active: activeTab === 'outline' }"
             @click="switchTab('outline')"
           >
@@ -56,31 +64,97 @@
           >
             伏笔
           </button>
-          <button
-            type="button"
-            class="tab"
-            :class="{ active: activeTab === 'worldsettings' }"
-            @click="switchTab('worldsettings')"
-          >
-            世界观
-          </button>
         </nav>
       </div>
     </header>
 
-    <section class="card" v-if="activeTab === 'write'">
-      <h2>概览</h2>
-      <div class="meta-grid">
-        <div><span class="k">题材</span><span>{{ novel.genre || '未设置' }}</span></div>
-        <div><span class="k">叙事视角</span><span>{{ novel.perspective || '未设置' }}</span></div>
-        <div><span class="k">基调</span><span>{{ novel.tone || '未设置' }}</span></div>
-        <div><span class="k">多线叙事</span><span>{{ novel.isMultiLineNarrative ? '是' : '否' }}</span></div>
-      </div>
+    <section class="ws-overview" v-if="activeTab === 'write'">
+      <!-- ① 故事核心 hero -->
+      <header class="ws-ov-hero">
+        <div class="ws-ov-hero__main">
+          <span class="ws-ov-hero__eyebrow">故事核心</span>
+          <p class="ws-ov-hero__premise">{{ novel.summary || '还没写下一句话卖点。点右侧编辑，先定下这本书最吸引人的核心。' }}</p>
+          <div class="ws-ov-hero__badges">
+            <span v-if="novel.genre" class="ws-ov-badge">{{ novel.genre }}</span>
+            <span v-if="novel.perspective" class="ws-ov-badge">{{ novel.perspective }}</span>
+            <span v-if="novel.tone" class="ws-ov-badge">{{ novel.tone }}</span>
+            <span v-if="novel.isMultiLineNarrative" class="ws-ov-badge">多线</span>
+          </div>
+        </div>
+        <button type="button" class="ws-ov-hero__edit" @click="switchTab('outline')">编辑设定</button>
+      </header>
 
-      <div class="action-row workspace-write-entry">
-        <button type="button" class="workspace-write-entry__btn" @click="goToWritingChapter">
-          去写作
-        </button>
+      <div class="ws-ov-grid">
+        <!-- ② 进度 -->
+        <section class="ws-ov-card ws-ov-card--progress">
+          <h3 class="ws-ov-card__title">进度</h3>
+          <div class="ws-ov-progress-nums">
+            <div><strong>{{ overviewProgress.writtenChapters }}</strong><span>/ {{ overviewProgress.totalChapters }} 章</span></div>
+            <div><strong>{{ overviewProgress.totalChars.toLocaleString() }}</strong><span>字</span></div>
+          </div>
+          <p class="ws-ov-progress-sub">大纲完成 {{ overviewProgress.outlineDone }}/{{ overviewProgress.outlineTotal }} · 已绑定 {{ overviewProgress.outlineLinked }}</p>
+          <div class="ws-ov-bar"><span :style="{ width: overviewProgress.pct + '%' }" /></div>
+          <button type="button" class="ws-ov-btn ws-ov-btn--primary" @click="goToWritingChapter">继续写</button>
+        </section>
+
+        <!-- ③ 下一步 -->
+        <section class="ws-ov-card ws-ov-card--next">
+          <h3 class="ws-ov-card__title">下一步</h3>
+          <p v-if="overviewNextBeat.arcTitle" class="ws-ov-next-arc">当前弧线：{{ overviewNextBeat.arcTitle }}</p>
+          <p class="ws-ov-next-beat" v-if="overviewNextBeat.nextChapterNo">
+            下一章：第 {{ overviewNextBeat.nextChapterNo }} 章 {{ overviewNextBeat.nextChapterTitle || '（未命名）' }}
+          </p>
+          <p class="ws-ov-next-beat muted" v-else>暂无后续章节，去大纲规划下一个节拍。</p>
+          <div class="ws-ov-actions">
+            <button type="button" class="ws-ov-btn ws-ov-btn--primary" @click="goToWritingChapter">去写作</button>
+            <button type="button" class="ws-ov-btn ws-ov-btn--ghost" @click="switchTab('outline')">看大纲</button>
+          </div>
+        </section>
+
+        <!-- ④ 故事体检 -->
+        <section class="ws-ov-card ws-ov-card--health ws-ov-card--wide">
+          <h3 class="ws-ov-card__title">故事体检</h3>
+          <ul v-if="overviewHealth.length > 0" class="ws-ov-health-list">
+            <li v-for="item in overviewHealth" :key="item.key" class="ws-ov-health-item">
+              <span class="ws-ov-health-dot" aria-hidden="true" />
+              <span class="ws-ov-health-label">{{ item.label }}</span>
+              <button v-if="item.tab" type="button" class="ws-ov-chip" @click="switchTab(item.tab)">去处理</button>
+            </li>
+          </ul>
+          <p v-else class="ws-ov-health-ok muted">暂无需要注意的问题，结构是同步的。</p>
+        </section>
+
+        <!-- ⑤ 最近发生 / 连续性 -->
+        <section class="ws-ov-card ws-ov-card--recent">
+          <h3 class="ws-ov-card__title">最近发生</h3>
+          <p v-if="String(novel.continuityBrief || '').trim()" class="ws-ov-recent-brief">{{ novel.continuityBrief }}</p>
+          <p v-else class="muted">还没有连续性摘要。写到一定章数后，可在写作页一键生成。</p>
+        </section>
+
+        <!-- ⑥ 人物阵容 -->
+        <section class="ws-ov-card ws-ov-card--cast">
+          <h3 class="ws-ov-card__title">人物阵容</h3>
+          <p class="ws-ov-cast-counts">角色 {{ overviewCast.characterCount }} · 势力 {{ overviewCast.factionCount }} · 关系 {{ overviewCast.relationCount }}</p>
+          <div class="ws-ov-cast-names">
+            <span v-for="c in overviewCast.mains" :key="c.id" class="ws-ov-cast-chip">{{ c.name || '未命名' }}</span>
+            <span v-if="overviewCast.mains.length === 0" class="muted">还没有角色</span>
+          </div>
+          <button type="button" class="ws-ov-btn ws-ov-btn--ghost" @click="switchTab('characters')">看角色</button>
+        </section>
+
+        <!-- ⑦ 伏笔状态 -->
+        <section class="ws-ov-card ws-ov-card--foreshadow ws-ov-card--wide">
+          <h3 class="ws-ov-card__title">伏笔状态</h3>
+          <p class="ws-ov-fs-counts">开 {{ overviewForeshadow.openCount }} · 已收 {{ overviewForeshadow.fulfilledCount }}</p>
+          <ul v-if="overviewForeshadow.pending.length > 0" class="ws-ov-fs-list">
+            <li v-for="f in overviewForeshadow.pending" :key="f.id">
+              <span class="ws-ov-fs-title">{{ f.title || '未命名伏笔' }}</span>
+              <span v-if="f.expectedFulfillChapterNo" class="ws-ov-fs-due">第 {{ f.expectedFulfillChapterNo }} 章前</span>
+            </li>
+          </ul>
+          <p v-else class="muted">没有待回收的伏笔。</p>
+          <button type="button" class="ws-ov-btn ws-ov-btn--ghost" @click="switchTab('issues')">看伏笔</button>
+        </section>
       </div>
     </section>
 
@@ -130,8 +204,28 @@
           >
             {{ storyline.name }}
           </button>
+          <span
+            v-if="outlineStorylineFilterId && storylineMatchedCount === 0"
+            class="outline-map-hero__filter-empty"
+          >该故事线下暂无节点，去节点上绑定试试</span>
         </div>
         <div class="outline-map-hero__actions">
+          <div v-if="outlineItems.length > 0" class="outline-view-toggle" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="outlineMapViewMode === 'board'"
+              :class="{ 'is-active': outlineMapViewMode === 'board' }"
+              @click="outlineMapViewMode = 'board'"
+            >看板</button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="outlineMapViewMode === 'map'"
+              :class="{ 'is-active': outlineMapViewMode === 'map' }"
+              @click="outlineMapViewMode = 'map'"
+            >导图</button>
+          </div>
           <button v-if="outlineItems.length > 0" type="button" class="btn-primary" @click="openOutlineAiExpand">
             AI 扩展大纲
           </button>
@@ -154,7 +248,23 @@
         </div>
       </div>
       <div v-else class="outline-map-workspace">
+        <OutlineBoardView
+          v-if="outlineMapViewMode === 'board'"
+          :tree="outlineTree"
+          :active-id="activeOutlineMapId"
+          :linked-count="getLinkedChaptersCount"
+          :storylines="outlineStorylines"
+          :dimmed-ids="dimmedOutlineIdSet"
+          @select="selectOutlineMindMapNode"
+          @create-child="createOutlineNodeFromMindMap('child', $event)"
+          @create-sibling="createOutlineNodeFromMindMap('sibling', $event)"
+          @create-root="createOutlineNodeFromMindMap('root')"
+          @cycle-status="cycleOutlineStatus"
+          @toggle-storyline="toggleOutlineStoryline"
+          @reorder="reorderOutlineNode"
+        />
         <OutlineMindMapCanvas
+          v-else
           :nodes="outlineMapNodes"
           :edges="outlineMapEdges"
           :scene-width="outlineMapSceneWidth"
@@ -198,7 +308,9 @@
                     <h2 class="confirm-dialog__title">{{ outlineAiMode === 'expand' ? 'AI 扩展大纲' : 'AI 设计大纲' }}</h2>
                     <p class="muted workspace-outline-dialog__sub">
                       {{
-                        outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
+                        outlineAiDesignerStep === 'intro'
+                          ? '先确认世界观就绪，再开始设计；点「开始设计」前不会调用 AI。'
+                          : outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
                           ? '会结合全书设定、已有大纲与写作进度在后台整理上下文；你只需选位置、说一句方向。'
                           : outlineAiDesignerStep === 'interview'
                             ? '信息够用时可直接出方案，不必答完所有轮次。'
@@ -214,7 +326,9 @@
                   </div>
                   <span class="workspace-outline-ai-dialog__progress">
                       {{
-                        outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
+                        outlineAiDesignerStep === 'intro'
+                          ? '准备'
+                          : outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
                           ? '扩展'
                           : outlineAiDesignerStep === 'interview'
                             ? `访谈中 · ${outlineAiInterviewTurnCount}`
@@ -253,7 +367,30 @@
                 </div>
 
                 <div class="workspace-outline-dialog__scroll scrollbar-paper workspace-outline-ai-dialog__scroll">
-                  <template v-if="outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'">
+                  <template v-if="outlineAiDesignerStep === 'intro'">
+                    <section v-if="!hasWorldviewForOutline" class="workspace-outline-ai-panel workspace-outline-ai-gate">
+                      <div class="workspace-outline-ai-gate__icon" aria-hidden="true">◍</div>
+                      <h3 class="workspace-outline-ai-gate__title">先完善世界观，再设计大纲</h3>
+                      <p class="workspace-outline-ai-gate__desc">
+                        大纲会建立在你的世界观设定之上——设定、规则、地理、势力都要与世界观一致。
+                        当前还没有任何世界观设定，请先补全，AI 才能据此生成贴合的大纲。
+                      </p>
+                      <button type="button" class="btn-primary workspace-outline-ai-gate__cta" @click="goCompleteWorldviewFromOutlineAi">
+                        去填写世界观设定
+                      </button>
+                    </section>
+                    <section v-else class="workspace-outline-ai-panel workspace-outline-ai-gate">
+                      <div class="workspace-outline-ai-gate__icon" aria-hidden="true">✦</div>
+                      <h3 class="workspace-outline-ai-gate__title">开始 AI 设计大纲</h3>
+                      <p class="workspace-outline-ai-gate__desc">
+                        AI 会结合你的世界观设定（已有 {{ worldSettings.length }} 条），通过几轮简短对话了解你的构想，
+                        再给出多套大纲方案。点击下方按钮开始，不会马上锁住界面。
+                      </p>
+                      <p class="muted workspace-outline-ai-gate__hint">每轮都可选预设答案或自己补充，随时能关闭。</p>
+                    </section>
+                  </template>
+
+                  <template v-else-if="outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'">
                     <section class="workspace-outline-ai-panel workspace-outline-ai-panel--expand">
                       <p class="workspace-outline-ai-brief">
                         扩展位置：<strong>{{ outlineAiExpandAnchorLabel }}</strong>
@@ -480,7 +617,26 @@
 
                 <div class="confirm-dialog__actions workspace-outline-dialog__actions workspace-outline-ai-dialog__actions">
                   <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading || outlineAiDesignerWriting" @click="closeOutlineAiDesigner">关闭</button>
-                  <template v-if="outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'">
+                  <template v-if="outlineAiDesignerStep === 'intro'">
+                    <button
+                      v-if="hasWorldviewForOutline"
+                      type="button"
+                      class="btn-primary"
+                      :disabled="outlineAiDesignerLoading"
+                      @click="startOutlineAiInterview"
+                    >
+                      {{ outlineAiDesignerLoading ? '准备中…' : '开始设计' }}
+                    </button>
+                    <button
+                      v-else
+                      type="button"
+                      class="btn-primary"
+                      @click="goCompleteWorldviewFromOutlineAi"
+                    >
+                      去填写世界观
+                    </button>
+                  </template>
+                  <template v-else-if="outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'">
                     <button
                       type="button"
                       class="btn-primary"
@@ -2192,91 +2348,92 @@
       </Transition>
     </Teleport>
 
-    <section class="card" v-if="activeTab === 'categories'">
-      <h2>分类</h2>
-      <h3 class="workspace-subsection-title">新建分类</h3>
-      <div class="action-row" style="margin-bottom: 14px">
-        <button type="button" class="btn-primary" @click="openCategoryCreate">添加分类</button>
-      </div>
-      <div class="grid-2" style="margin: 8px 0 14px">
-        <label>
-          搜索角色
-          <input v-model="categoryBindCharacterQuery" maxlength="24" />
-        </label>
-        <label>
-          搜索势力
-          <input v-model="categoryBindFactionQuery" maxlength="24" />
-        </label>
-        <label>
-          搜索分类
-          <input v-model="categoryBindCategoryQuery" maxlength="24" />
-        </label>
+    <section class="card workspace-items-card" v-if="activeTab === 'categories'">
+      <div class="workspace-items-hero">
+        <div>
+          <p class="workspace-items-hero__eyebrow">Taxonomy</p>
+          <h2>分类</h2>
+          <p class="muted workspace-items-hero__sub">用统一的分类标签归拢角色、势力与设定，便于筛选和批量管理。</p>
+        </div>
+        <button type="button" class="btn-primary workspace-items-hero__btn" @click="openCategoryCreate">添加分类</button>
       </div>
 
-      <p v-if="categoryCenterFilteredCategories.length === 0" class="muted">暂无分类</p>
-      <ul v-else class="list">
-        <li v-for="cat in categoryCenterFilteredCategories" :key="cat.id" class="list-item">
-          <div class="chapter-main">
-            <div class="faction-row__head">
-              <strong class="faction-row__title">{{ cat.name }}</strong>
-              <div class="action-row action-row--inline">
+      <section v-if="categories.length === 0" class="panel workspace-items-empty">
+        <p class="workspace-items-empty__mark">⊞</p>
+        <h3>暂无分类</h3>
+        <p class="muted">先建几个分类（如「主角阵营」「反派」「地理」），再到角色或势力上绑定。</p>
+        <button type="button" class="btn-primary" @click="openCategoryCreate">添加第一个分类</button>
+      </section>
+
+      <template v-else>
+        <div class="workspace-items-toolbar workspace-category-toolbar">
+          <label class="workspace-items-search">
+            <span>搜索分类</span>
+            <input v-model="categoryBindCategoryQuery" maxlength="24" placeholder="分类名称…" />
+          </label>
+          <label class="workspace-items-search">
+            <span>搜索角色</span>
+            <input v-model="categoryBindCharacterQuery" maxlength="24" placeholder="按绑定角色筛选…" />
+          </label>
+          <label class="workspace-items-search">
+            <span>搜索势力</span>
+            <input v-model="categoryBindFactionQuery" maxlength="24" placeholder="按绑定势力筛选…" />
+          </label>
+        </div>
+
+        <p v-if="categoryCenterFilteredCategories.length === 0" class="muted workspace-items-no-result">没有符合条件的分类</p>
+
+        <div v-else class="workspace-item-grid">
+          <article v-for="cat in categoryCenterFilteredCategories" :key="cat.id" class="workspace-item-card">
+            <div class="workspace-item-card__head">
+              <div>
+                <p class="workspace-item-card__kicker">分类</p>
+                <h3>{{ cat.name }}</h3>
+              </div>
+              <div class="workspace-item-card__actions">
                 <button type="button" class="faction-row__edit" @click="openCategoryEdit(cat.id)">修改</button>
+                <button type="button" class="faction-row__edit" @click="openCategoryBindModal(cat.id)">绑定</button>
                 <button type="button" class="faction-row__delete" @click="openCategoryDelete(cat.id)">删除</button>
-                <button
-                  type="button"
-                  class="confirm-dialog__btn confirm-dialog__btn--ghost"
-                  @click="openCategoryBindModal(cat.id)"
-                >
-                  编辑绑定
-                </button>
               </div>
             </div>
-            <p v-if="(cat.notes ?? '').trim()" class="muted" style="margin: 6px 0 10px">
-              分类备注：{{ cat.notes }}
-            </p>
-            <div class="character-custom-fields faction-custom-fields">
-              <div class="faction-custom-fields__head">
-                <p class="character-custom-list__title">已绑定角色（{{ categoryBoundCharacterNames(cat.id).length }}）</p>
-              </div>
-              <p v-if="categoryBoundCharacterNames(cat.id).length === 0" class="muted" style="margin: 4px 0 0">未绑定</p>
-              <div v-else class="faction-row__attrs">
+            <p v-if="(cat.notes ?? '').trim()" class="workspace-item-card__summary">{{ cat.notes }}</p>
+
+            <div class="workspace-category-card__bind">
+              <p class="workspace-category-card__bind-title">已绑定角色（{{ categoryBoundCharacterNames(cat.id).length }}）</p>
+              <p v-if="categoryBoundCharacterNames(cat.id).length === 0" class="muted workspace-category-card__bind-empty">未绑定</p>
+              <div v-else class="workspace-item-card__attrs">
                 <span
                   v-for="name in categoryBoundCharacterNames(cat.id).slice(0, 18)"
                   :key="`cat-bound-char-${cat.id}-${name}`"
-                  class="category-bind-chip category-bind-chip--bound"
-                  style="cursor: default"
+                  class="category-bind-chip category-bind-chip--bound workspace-category-card__chip"
                 >
-                  <span class="category-bind-chip__state" aria-hidden="true">✓</span>
-                  {{ name }}
+                  <span class="category-bind-chip__state" aria-hidden="true">✓</span>{{ name }}
                 </span>
-                <span v-if="categoryBoundCharacterNames(cat.id).length > 18" class="muted" style="font-size: 0.78rem">
+                <span v-if="categoryBoundCharacterNames(cat.id).length > 18" class="muted workspace-category-card__more">
                   +{{ categoryBoundCharacterNames(cat.id).length - 18 }}
                 </span>
               </div>
             </div>
-            <div class="character-custom-fields faction-custom-fields">
-              <div class="faction-custom-fields__head">
-                <p class="character-custom-list__title">已绑定势力（{{ categoryBoundFactionNames(cat.id).length }}）</p>
-              </div>
-              <p v-if="categoryBoundFactionNames(cat.id).length === 0" class="muted" style="margin: 4px 0 0">未绑定</p>
-              <div v-else class="faction-row__attrs">
+
+            <div class="workspace-category-card__bind">
+              <p class="workspace-category-card__bind-title">已绑定势力（{{ categoryBoundFactionNames(cat.id).length }}）</p>
+              <p v-if="categoryBoundFactionNames(cat.id).length === 0" class="muted workspace-category-card__bind-empty">未绑定</p>
+              <div v-else class="workspace-item-card__attrs">
                 <span
                   v-for="name in categoryBoundFactionNames(cat.id).slice(0, 18)"
                   :key="`cat-bound-fac-${cat.id}-${name}`"
-                  class="category-bind-chip category-bind-chip--bound"
-                  style="cursor: default"
+                  class="category-bind-chip category-bind-chip--bound workspace-category-card__chip"
                 >
-                  <span class="category-bind-chip__state" aria-hidden="true">✓</span>
-                  {{ name }}
+                  <span class="category-bind-chip__state" aria-hidden="true">✓</span>{{ name }}
                 </span>
-                <span v-if="categoryBoundFactionNames(cat.id).length > 18" class="muted" style="font-size: 0.78rem">
+                <span v-if="categoryBoundFactionNames(cat.id).length > 18" class="muted workspace-category-card__more">
                   +{{ categoryBoundFactionNames(cat.id).length - 18 }}
                 </span>
               </div>
             </div>
-          </div>
-        </li>
-      </ul>
+          </article>
+        </div>
+      </template>
     </section>
 
     <!-- 分类：编辑绑定弹窗（只编辑单个分类，避免主列表渲染海量按钮） -->
@@ -2689,67 +2846,84 @@
     </Teleport>
     </section>
 
-    <section class="card" v-if="activeTab === 'worldsettings'">
-      <h2>世界观设定</h2>
-
-      <h3 class="workspace-subsection-title">新建世界观设定</h3>
-      <div class="action-row" style="margin-bottom: 14px">
-        <button type="button" class="btn-primary" @click="openWorldSettingCreate">新增设定</button>
-        <button type="button" class="btn-primary" style="margin-left: 8px" @click="openWorldSettingAiCreate">AI 生成</button>
+    <section class="card workspace-items-card" v-if="activeTab === 'worldsettings'">
+      <div class="workspace-items-hero">
+        <div>
+          <p class="workspace-items-hero__eyebrow">Worldbuilding</p>
+          <h2>世界观设定</h2>
+          <p class="muted workspace-items-hero__sub">沉淀世界的规则、地理、势力与历史，AI 设计大纲和续写都会以此为基准。</p>
+        </div>
+        <div class="workspace-items-hero__actions">
+          <button type="button" class="btn-secondary" @click="openWorldSettingAiCreate">AI 生成</button>
+          <button type="button" class="btn-primary workspace-items-hero__btn" @click="openWorldSettingCreate">新增设定</button>
+        </div>
       </div>
 
-      <p v-if="filteredWorldSettings.length === 0 && !worldSettingKeywordFilter && !selectedCategoryFilterId" class="muted">暂无世界观设定</p>
+      <section v-if="worldSettings.length === 0" class="panel workspace-items-empty">
+        <p class="workspace-items-empty__mark">◍</p>
+        <h3>暂无世界观设定</h3>
+        <p class="muted">先写下世界的核心规则或背景，再让 AI 据此设计贴合的大纲。</p>
+        <div class="action-row">
+          <button type="button" class="btn-primary" @click="openWorldSettingCreate">新增第一条设定</button>
+          <button type="button" class="btn-secondary" @click="openWorldSettingAiCreate">AI 生成</button>
+        </div>
+      </section>
+
       <template v-else>
-        <div class="faction-filter-block">
-          <h3 class="workspace-subsection-title workspace-subsection-title--spaced">已存在设定</h3>
-          <label class="faction-filter-label">
-            <span>关键字筛选</span>
-            <input v-model="worldSettingKeywordFilter" maxlength="30" placeholder="输入设定名称或内容关键字…" class="faction-filter-input" />
+        <div class="workspace-items-toolbar">
+          <label class="workspace-items-search">
+            <span>搜索设定</span>
+            <input v-model="worldSettingKeywordFilter" maxlength="30" placeholder="名称 / 内容关键字…" />
           </label>
-          <div class="faction-filter-chips">
-            <button
-              type="button"
-              class="faction-filter-chip"
-              :class="{ 'faction-filter-chip--active': !selectedCategoryFilterId }"
-              @click="clearCategoryFilter"
-            >全部（{{ worldSettings.length }}）</button>
-            <button
-              v-for="cat in sortedCategories"
-              :key="`wsfilter-${cat.id}`"
-              type="button"
-              class="faction-filter-chip"
-              :class="{ 'faction-filter-chip--active': selectedCategoryFilterId === cat.id }"
-              @click="setCategoryFilter(cat.id)"
-            >{{ cat.name }}</button>
+          <div class="workspace-items-count" aria-label="设定数量">
+            <strong>{{ filteredWorldSettings.length }}</strong>
+            <span>条设定</span>
           </div>
         </div>
-        <p v-if="filteredWorldSettings.length === 0" class="muted" style="margin-top: 8px">没有符合条件的设定</p>
-        <ul class="list">
-        <li v-for="ws in filteredWorldSettings" :key="ws.id" class="list-item" :id="`world-setting-row-${ws.id}`">
-          <div class="chapter-main">
-            <div class="faction-row__head">
-              <strong class="faction-row__title">{{ ws.name }}</strong>
-              <div class="faction-row__actions">
-                <button type="button" class="faction-row__edit" title="修改设定" @click="openWorldSettingEdit(ws.id)">
-                  修改
-                </button>
-                <button type="button" class="faction-row__edit" title="AI 编辑" @click="openWorldSettingAiEdit(ws.id)">
-                  AI
-                </button>
-                <button type="button" class="faction-row__delete" title="删除设定" @click="openWorldSettingDelete(ws.id)">
-                  删除
-                </button>
+
+        <div v-if="sortedCategories.length > 0" class="faction-filter-chips workspace-ws-filter-chips">
+          <button
+            type="button"
+            class="faction-filter-chip"
+            :class="{ 'faction-filter-chip--active': !selectedCategoryFilterId }"
+            @click="clearCategoryFilter"
+          >全部（{{ worldSettings.length }}）</button>
+          <button
+            v-for="cat in sortedCategories"
+            :key="`wsfilter-${cat.id}`"
+            type="button"
+            class="faction-filter-chip"
+            :class="{ 'faction-filter-chip--active': selectedCategoryFilterId === cat.id }"
+            @click="setCategoryFilter(cat.id)"
+          >{{ cat.name }}</button>
+        </div>
+
+        <p v-if="filteredWorldSettings.length === 0" class="muted workspace-items-no-result">没有符合条件的设定</p>
+
+        <div v-else class="workspace-item-grid">
+          <article
+            v-for="ws in filteredWorldSettings"
+            :id="`world-setting-row-${ws.id}`"
+            :key="ws.id"
+            class="workspace-item-card"
+          >
+            <div class="workspace-item-card__head">
+              <div>
+                <p class="workspace-item-card__kicker">世界观</p>
+                <h3>{{ ws.name }}</h3>
+              </div>
+              <div class="workspace-item-card__actions">
+                <button type="button" class="faction-row__edit" title="修改设定" @click="openWorldSettingEdit(ws.id)">修改</button>
+                <button type="button" class="faction-row__edit" title="AI 编辑" @click="openWorldSettingAiEdit(ws.id)">AI</button>
+                <button type="button" class="faction-row__delete" title="删除设定" @click="openWorldSettingDelete(ws.id)">删除</button>
               </div>
             </div>
-            <div v-if="categoryNamesByIds(ws.categoryIds).length > 0" class="faction-row__attrs">
-              <small v-for="name in categoryNamesByIds(ws.categoryIds)" :key="`wscat-${ws.id}-${name}`" class="muted faction-row__attr-chip">
-                分类：{{ name }}
-              </small>
+            <div v-if="categoryNamesByIds(ws.categoryIds).length > 0" class="workspace-item-card__meta">
+              <span v-for="name in categoryNamesByIds(ws.categoryIds)" :key="`wscat-${ws.id}-${name}`">分类：{{ name }}</span>
             </div>
-            <p v-if="ws.content" class="muted" style="margin: 6px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap">{{ ws.content.length > 200 ? ws.content.slice(0, 200) + '…' : ws.content }}</p>
-          </div>
-        </li>
-        </ul>
+            <p class="workspace-item-card__summary workspace-ws-card__content">{{ ws.content ? (ws.content.length > 200 ? ws.content.slice(0, 200) + '…' : ws.content) : '暂无内容' }}</p>
+          </article>
+        </div>
       </template>
 
       <ConfirmDialog
@@ -3274,6 +3448,7 @@ import CharacterRelationSphere from '../../components/CharacterRelationSphere.vu
 import CharacterRelationFocusSphere from '../../components/CharacterRelationFocusSphere.vue'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import OutlineMindMapCanvas from './components/outline-map/OutlineMindMapCanvas.vue'
+import OutlineBoardView from './components/outline-map/OutlineBoardView.vue'
 import OutlineMindMapInspector from './components/outline-map/OutlineMindMapInspector.vue'
 import { useOutlineChapterMapping } from '../../features/outline-map/composables/useOutlineChapterMapping'
 import { useOutlineMindMapLayout } from '../../features/outline-map/composables/useOutlineMindMapLayout'
@@ -3382,14 +3557,14 @@ const chapters = ref<Chapter[]>([])
 const outlineItems = ref<OutlineItem[]>([])
 const outlineStorylines = ref<OutlineStoryline[]>([])
 const outlineStorylineFilterId = ref('')
-const { dimmedOutlineIdSet } = useOutlineStorylineFilter({
+const { dimmedOutlineIdSet, matchedCount: storylineMatchedCount } = useOutlineStorylineFilter({
   outlineItems,
   filterStorylineId: outlineStorylineFilterId,
 })
 const expandedOutlineId = ref<string>('')
 const outlineCreateOpen = ref(false)
 const outlineAiDesignerOpen = ref(false)
-type OutlineAiDesignerStep = 'expand' | 'interview' | 'options' | 'skeleton' | 'preview'
+type OutlineAiDesignerStep = 'intro' | 'expand' | 'interview' | 'options' | 'skeleton' | 'preview'
 type OutlineAiMode = 'expand' | 'create'
 type OutlineAiExpandPreset = 'auto' | 'next_chapters' | 'split_scenes' | 'subplot'
 
@@ -3437,6 +3612,7 @@ const outlineFilter = reactive({
 })
 const outlineViewMode = ref<'console' | 'storyline' | 'structure' | 'rhythm'>('console')
 const activeOutlineMapId = ref('')
+const outlineMapViewMode = ref<'board' | 'map'>('board')
 
 // 删除情节点：使用自定义弹窗替代原生 confirm()
 const outlineDeleteOpen = ref(false)
@@ -3617,6 +3793,11 @@ const filteredOutlineItems = computed(() => {
   })
 })
 const outlineLevelOrder: OutlineNodeLevel[] = ['volume', 'act', 'chapter', 'scene']
+function nextOutlineLevelDown(level: OutlineNodeLevel): OutlineNodeLevel {
+  const idx = outlineLevelOrder.indexOf(level)
+  if (idx < 0) return 'scene'
+  return outlineLevelOrder[Math.min(idx + 1, outlineLevelOrder.length - 1)]
+}
 const groupedOutlineItems = computed(() =>
   outlineLevelOrder
     .map((level) => ({
@@ -3627,6 +3808,23 @@ const groupedOutlineItems = computed(() =>
     .filter((group) => group.items.length > 0),
 )
 const outlineStorylineGroups = computed(() => [])
+
+type OutlineTreeNode = { item: OutlineItem; depth: number; children: OutlineTreeNode[] }
+const outlineTree = computed<OutlineTreeNode[]>(() => {
+  const visible = filteredOutlineItems.value
+  const visibleIds = new Set(visible.map((i) => i.id))
+  const byParent = new Map<string, OutlineItem[]>()
+  for (const item of visible) {
+    const pid = item.parentId && visibleIds.has(item.parentId) ? item.parentId : '__root__'
+    const arr = byParent.get(pid) ?? []
+    arr.push(item)
+    byParent.set(pid, arr)
+  }
+  for (const arr of byParent.values()) arr.sort((a, b) => a.order - b.order)
+  const build = (pid: string, depth: number): OutlineTreeNode[] =>
+    (byParent.get(pid) ?? []).map((item) => ({ item, depth, children: build(item.id, depth + 1) }))
+  return build('__root__', 0)
+})
 const outlineRhythmItems = computed(() =>
   filteredOutlineItems.value.map((item) => ({
     item,
@@ -3654,6 +3852,82 @@ const outlineConsoleStats = computed(() => {
 const outlineAiInterviewTurnCount = computed(() =>
   outlineAiInterviewHistory.value.length + (outlineAiCurrentQuestion.value ? 1 : 0),
 )
+// === 总览页（概览落地页）computed —— 全部基于已有 ref，不改数据模型 ===
+const overviewLatestWrittenChapterNo = computed(() => {
+  const written = chapters.value.filter((ch) => String(ch.content ?? '').trim().length > 0)
+  if (written.length === 0) return 0
+  return Math.max(...written.map((ch) => ch.chapterNo))
+})
+const overviewProgress = computed(() => {
+  const all = chapters.value
+  const written = all.filter((ch) => String(ch.content ?? '').trim().length > 0)
+  const totalChars = all.reduce((sum, ch) => sum + chapterWordCount(ch.content), 0)
+  const totalChapters = all.length
+  const writtenChapters = written.length
+  const outlineTotal = outlineConsoleStats.value.total
+  const outlineDone = outlineConsoleStats.value.done
+  const pct = outlineTotal > 0 ? Math.round((outlineDone / outlineTotal) * 100) : 0
+  return { totalChapters, writtenChapters, totalChars, outlineTotal, outlineDone, outlineLinked: outlineConsoleStats.value.linked, pct }
+})
+const overviewForeshadow = computed(() => {
+  const all = foreshadows.value
+  const open = all.filter((f) => f.status === 'open')
+  const fulfilled = all.filter((f) => f.status === 'fulfilled')
+  const now = overviewLatestWrittenChapterNo.value
+  const overdue = open.filter(
+    (f) => typeof f.expectedFulfillChapterNo === 'number' && f.expectedFulfillChapterNo > 0 && f.expectedFulfillChapterNo < now,
+  )
+  const pending = [...open]
+    .sort((a, b) => (a.expectedFulfillChapterNo ?? Infinity) - (b.expectedFulfillChapterNo ?? Infinity))
+    .slice(0, 4)
+  return { openCount: open.length, fulfilledCount: fulfilled.length, overdue, pending }
+})
+const overviewCast = computed(() => {
+  const mains = [...characters.value]
+    .sort((a, b) => (a.firstAppearanceChapterNo ?? 9999) - (b.firstAppearanceChapterNo ?? 9999))
+    .slice(0, 6)
+  return {
+    characterCount: characters.value.length,
+    factionCount: factions.value.length,
+    relationCount: characterRelations.value.length,
+    mains,
+  }
+})
+const overviewHealth = computed(() => {
+  const items: Array<{ key: string; label: string; tab?: WorkspaceTab }> = []
+  const written = chapters.value.filter((ch) => String(ch.content ?? '').trim().length > 0)
+  // 1) 已写但未绑定大纲的章
+  const unbound = written.filter((ch) => (ch.outlineItemIds ?? []).length === 0)
+  if (unbound.length > 0) {
+    items.push({ key: 'unbound', label: `${unbound.length} 章已写但未绑定大纲`, tab: 'outline' })
+  }
+  // 2) 伏笔逾期未回收
+  const overdue = overviewForeshadow.value.overdue
+  if (overdue.length > 0) {
+    items.push({ key: 'overdue', label: `${overdue.length} 条伏笔已过预计回收章仍未收`, tab: 'issues' })
+  }
+  // 3) 连续性摘要过期（落后最新已写章 5 章以上）
+  const now = overviewLatestWrittenChapterNo.value
+  const briefEmpty = !String(novel.value?.continuityBrief ?? '').trim()
+  if (now >= 6 && briefEmpty) {
+    items.push({ key: 'brief-missing', label: `已写 ${now} 章但尚无连续性摘要`, tab: 'write' })
+  }
+  return items
+})
+const overviewNextBeat = computed(() => {
+  const now = overviewLatestWrittenChapterNo.value
+  const next = chapters.value
+    .filter((ch) => ch.chapterNo > now)
+    .sort((a, b) => a.chapterNo - b.chapterNo)[0]
+  const currentArc = (novel.value?.arcSummaries ?? []).find(
+    (arc) => now >= arc.chapterRange[0] && now <= arc.chapterRange[1],
+  )
+  return {
+    arcTitle: currentArc?.title ?? '',
+    nextChapterNo: next?.chapterNo ?? null,
+    nextChapterTitle: next?.title ?? '',
+  }
+})
 const outlineAiResolvedAnswer = computed(() => {
   const custom = outlineAiCurrentCustom.value.trim()
   const selected = outlineAiCurrentAnswer.value.trim()
@@ -3801,8 +4075,10 @@ function createOutlineNodeFromMindMap(
   }
 
   const level: OutlineNodeLevel = action === 'root'
-    ? 'scene'
-    : (anchor?.level ?? 'scene')
+    ? 'volume'
+    : action === 'child'
+      ? nextOutlineLevelDown(anchor?.level ?? 'chapter')
+      : (anchor?.level ?? 'scene')
 
   const created = createOutlineItem({
     novelId: currentNovel.id,
@@ -3824,6 +4100,44 @@ function createOutlineNodeFromMindMap(
 
   outlineItems.value = getOutlineByNovelId(currentNovel.id)
   activeOutlineMapId.value = created.id
+}
+
+function reorderOutlineNode(payload: { draggedId: string; targetId: string; position: 'before' | 'after' | 'child' }): void {
+  const { draggedId, targetId, position } = payload
+  if (!novelId.value || draggedId === targetId) return
+  const items = outlineItems.value
+  const dragged = items.find((i) => i.id === draggedId)
+  const target = items.find((i) => i.id === targetId)
+  if (!dragged || !target) return
+
+  // 禁止拖入自己的子孙，避免成环
+  const isDescendant = (ancestorId: string, nodeId: string): boolean => {
+    let cur = items.find((i) => i.id === nodeId)
+    while (cur?.parentId) {
+      if (cur.parentId === ancestorId) return true
+      cur = items.find((i) => i.id === cur!.parentId)
+    }
+    return false
+  }
+  if (isDescendant(draggedId, targetId)) return
+
+  const newParentId = position === 'child' ? target.id : (target.parentId ?? null)
+  const newLevel = position === 'child' ? nextOutlineLevelDown(target.level ?? 'chapter') : (target.level ?? 'scene')
+
+  const siblings = items
+    .filter((i) => (i.parentId ?? null) === newParentId && i.id !== draggedId)
+    .sort((a, b) => a.order - b.order)
+  let insertAt = siblings.length
+  if (position !== 'child') {
+    const idx = siblings.findIndex((i) => i.id === targetId)
+    insertAt = position === 'before' ? idx : idx + 1
+  }
+  siblings.splice(insertAt, 0, dragged)
+
+  updateOutlineItem({ id: dragged.id, parentId: newParentId, level: newLevel })
+  siblings.forEach((sib, idx) => updateOutlineItem({ id: sib.id, order: idx }))
+  outlineItems.value = getOutlineByNovelId(novelId.value)
+  activeOutlineMapId.value = dragged.id
 }
 
 function jumpToWritingChapterFromOutline(chapterId: string): void {
@@ -4579,10 +4893,12 @@ function switchOutlineAiMode(mode: OutlineAiMode): void {
     }
     return
   }
-  outlineAiDesignerStep.value = outlineAiInterviewHistory.value.length > 0 ? 'options' : 'interview'
-  if (outlineAiDesignerStep.value === 'interview' && !outlineAiCurrentQuestion.value) {
-    void requestNextOutlineAiQuestion()
+  if (outlineAiInterviewHistory.value.length > 0) {
+    outlineAiDesignerStep.value = 'options'
+    return
   }
+  // 从零规划尚未开始访谈时，先回到准备步骤（含世界观校验），不自动触发 AI
+  outlineAiDesignerStep.value = 'intro'
 }
 
 function openOutlineAiExpand(): void {
@@ -4603,8 +4919,23 @@ async function openOutlineAiDesignerCreate(): Promise<void> {
   closeWorkspaceDropdowns()
   resetOutlineAiDesignerState()
   outlineAiMode.value = 'create'
-  outlineAiDesignerStep.value = 'interview'
+  outlineAiDesignerStep.value = 'intro'
   outlineAiDesignerOpen.value = true
+}
+
+const hasWorldviewForOutline = computed(
+  () => worldSettings.value.some((row) => String(row.content ?? '').trim() || String(row.name ?? '').trim()),
+)
+
+function goCompleteWorldviewFromOutlineAi(): void {
+  outlineAiDesignerOpen.value = false
+  switchTab('worldsettings')
+}
+
+async function startOutlineAiInterview(): Promise<void> {
+  if (outlineAiDesignerLoading.value) return
+  if (!hasWorldviewForOutline.value) return
+  outlineAiDesignerStep.value = 'interview'
   const hasNext = await requestNextOutlineAiQuestion()
   if (!hasNext && !outlineAiDesignerError.value) {
     await generateOutlineAiOptions()
@@ -5449,6 +5780,16 @@ function cycleOutlineStatus(id: string) {
   const next: OutlineStatus =
     current.status === 'todo' ? 'doing' : current.status === 'doing' ? 'done' : 'todo'
   updateOutlineItem({ id, status: next })
+  outlineItems.value = getOutlineByNovelId(novelId.value)
+}
+
+function toggleOutlineStoryline(payload: { outlineId: string; storylineId: string }): void {
+  const current = outlineItems.value.find((i) => i.id === payload.outlineId)
+  if (!current) return
+  const set = new Set(current.storylineIds ?? [])
+  if (set.has(payload.storylineId)) set.delete(payload.storylineId)
+  else set.add(payload.storylineId)
+  updateOutlineItem({ id: payload.outlineId, storylineIds: Array.from(set) })
   outlineItems.value = getOutlineByNovelId(novelId.value)
 }
 
@@ -8321,7 +8662,171 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.outline-map-empty-state__actions,
+/* === 总览落地页 === */
+.ws-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.ws-ov-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary, #6366f1) 8%, var(--color-surface, #fff)), var(--color-surface, #fff));
+}
+.ws-ov-hero__eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #6b7280);
+}
+.ws-ov-hero__premise {
+  margin: 8px 0 12px;
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--color-text, #111827);
+}
+.ws-ov-hero__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-ov-badge {
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--color-primary, #6366f1) 12%, transparent);
+  color: var(--color-primary, #6366f1);
+}
+.ws-ov-hero__edit {
+  flex: none;
+  border: 1px solid var(--color-border-strong, #d1d5db);
+  background: var(--color-surface, #fff);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ws-ov-hero__edit:hover { background: var(--color-surface-hover, #f9fafb); }
+/* __WS_OV_CSS_ANCHOR__ */
+.ws-ov-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+.ws-ov-card {
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 14px;
+  background: var(--color-surface, #fff);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-ov-card--wide { grid-column: 1 / -1; }
+.ws-ov-card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, #111827);
+}
+.ws-ov-progress-nums {
+  display: flex;
+  gap: 24px;
+  align-items: baseline;
+}
+.ws-ov-progress-nums strong { font-size: 26px; font-weight: 700; }
+.ws-ov-progress-nums span { font-size: 13px; color: var(--color-text-muted, #6b7280); margin-left: 4px; }
+.ws-ov-progress-sub { margin: 0; font-size: 13px; color: var(--color-text-muted, #6b7280); }
+.ws-ov-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-border, #e5e7eb);
+  overflow: hidden;
+}
+.ws-ov-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-primary, #6366f1);
+  transition: width 0.3s ease;
+}
+.ws-ov-next-arc { margin: 0; font-size: 13px; color: var(--color-primary, #6366f1); }
+.ws-ov-next-beat { margin: 0; font-size: 14px; line-height: 1.5; }
+/* __WS_OV_CSS_ANCHOR2__ */
+.ws-ov-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ws-ov-btn {
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  align-self: flex-start;
+}
+.ws-ov-btn--primary {
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+}
+.ws-ov-btn--primary:hover { background: color-mix(in srgb, var(--color-primary, #6366f1) 88%, #000); }
+.ws-ov-btn--ghost {
+  background: var(--color-surface, #fff);
+  border-color: var(--color-border-strong, #d1d5db);
+  color: var(--color-text, #111827);
+}
+.ws-ov-btn--ghost:hover { background: var(--color-surface-hover, #f9fafb); }
+.ws-ov-health-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ws-ov-health-item { display: flex; align-items: center; gap: 10px; }
+.ws-ov-health-dot {
+  flex: none;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--color-warning, #d97706);
+}
+.ws-ov-health-label { flex: 1; font-size: 14px; }
+.ws-ov-chip {
+  flex: none;
+  border: 1px solid var(--color-border-strong, #d1d5db);
+  background: var(--color-surface, #fff);
+  border-radius: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-ov-chip:hover { background: var(--color-surface-hover, #f9fafb); }
+.ws-ov-health-ok { margin: 0; font-size: 14px; }
+.ws-ov-recent-brief {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+/* __WS_OV_CSS_ANCHOR3__ */
+.ws-ov-cast-counts, .ws-ov-fs-counts { margin: 0; font-size: 13px; color: var(--color-text-muted, #6b7280); }
+.ws-ov-cast-names { display: flex; flex-wrap: wrap; gap: 8px; }
+.ws-ov-cast-chip {
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--color-primary, #6366f1) 8%, var(--color-surface, #fff));
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+.ws-ov-fs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ws-ov-fs-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.ws-ov-fs-due { flex: none; font-size: 12px; color: var(--color-warning, #d97706); }
+@media (max-width: 720px) {
+  .ws-ov-grid { grid-template-columns: 1fr; }
+  .ws-ov-hero { flex-direction: column; }
+}
+
+
+
+
 .outline-map-hero__actions {
   display: flex;
   flex-wrap: wrap;
@@ -8329,10 +8834,19 @@ onUnmounted(() => {
 }
 
 .outline-map-hero__storyline-filter {
+  grid-area: filter;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.outline-map-hero__filter-empty {
+  align-self: center;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  padding: 2px 8px;
 }
 
 .outline-map-hero__filter-chip {
@@ -8457,6 +8971,45 @@ onUnmounted(() => {
 .workspace-outline-ai-panel {
   display: grid;
   gap: 14px;
+}
+
+.workspace-outline-ai-gate {
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 26px 22px 30px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 26%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-surface-muted) 32%, transparent);
+}
+
+.workspace-outline-ai-gate__icon {
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--color-primary);
+}
+
+.workspace-outline-ai-gate__title {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 760;
+}
+
+.workspace-outline-ai-gate__desc {
+  margin: 0;
+  max-width: 420px;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.workspace-outline-ai-gate__hint {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.workspace-outline-ai-gate__cta {
+  margin-top: 4px;
 }
 
 .workspace-outline-ai-panel__summary {
