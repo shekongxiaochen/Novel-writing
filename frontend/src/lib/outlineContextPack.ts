@@ -82,6 +82,7 @@ export function buildOutlineAiContextPack(
   const characters = payload.characters ?? []
   const storylines = payload.outlineStorylines ?? []
   const foreshadows = payload.foreshadows ?? []
+  const worldSettings = payload.worldSettings ?? []
   const anchorId = s(options?.anchorOutlineId)
   const maxNodes = Math.max(20, Math.min(120, options?.maxOutlineNodes ?? 80))
 
@@ -118,6 +119,14 @@ export function buildOutlineAiContextPack(
     description: s(row.description).slice(0, 120),
   }))
 
+  const worldSettingCompact = worldSettings
+    .slice(0, 20)
+    .map((row) => ({
+      name: s(row.name),
+      content: s(row.content).slice(0, 280),
+    }))
+    .filter((row) => row.name || row.content)
+
   const openForeshadows = foreshadows
     .filter((row) => row.status !== 'fulfilled')
     .slice(0, 12)
@@ -142,6 +151,8 @@ export function buildOutlineAiContextPack(
       summary: s(novel.summary).slice(0, 400),
       continuityBrief: s(novel.continuityBrief).slice(0, 600),
     }),
+    worldSettingCompact.length > 0 ? '【世界观设定（大纲必须建立在该世界观之上，设定、规则、地理、势力背景都要与此一致，禁止脱离或自相矛盾）】' : '',
+    worldSettingCompact.length > 0 ? stableStringify(worldSettingCompact) : '',
     '【写作进度】',
     stableStringify({
       chapterCount: chapters.length,

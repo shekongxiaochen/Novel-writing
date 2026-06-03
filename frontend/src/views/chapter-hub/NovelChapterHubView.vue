@@ -404,6 +404,7 @@ import {
   createCharacterRelation,
   createFaction,
   createItem,
+  createOutlineItem,
   deleteForeshadowPlant,
   getCharacterRelationsByNovelId,
   getForeshadowsByNovelId,
@@ -507,6 +508,7 @@ const emptyAiExtractResult = (): NovelEntityExtractResult => ({
   items: [],
   memberships: [],
   relations: [],
+  outlineItems: [],
   warnings: [],
 })
 
@@ -808,9 +810,9 @@ function persistAiToggleTop(top: number): void {
 }
 
 function clampAiStudioWidth(raw: number): number {
-  if (typeof window === 'undefined') return Math.max(360, raw)
-  const min = 360
-  const max = Math.min(720, Math.max(min + 40, Math.floor(window.innerWidth * 0.56)))
+  if (typeof window === 'undefined') return Math.max(410, raw)
+  const min = 410
+  const max = Math.min(920, Math.max(min + 40, Math.floor(window.innerWidth * 0.62)))
   return Math.min(max, Math.max(min, raw))
 }
 
@@ -1800,7 +1802,7 @@ function pickEarlierChapter(existing?: number | null, incoming?: number | null):
 }
 
 function updateAiSuggestion(
-  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations',
+  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'outlineItems',
   index: number,
   patch: Record<string, any>,
 ): void {
@@ -1863,7 +1865,7 @@ function pushAiExtractRun(
 }
 
 function setAiSuggestionState(
-  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations',
+  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'outlineItems',
   index: number,
   status: 'pending' | 'applied' | 'ignored',
   action: 'create' | 'merge' | 'ignore' | null = null,
@@ -1937,7 +1939,7 @@ function resolveItemOwner(item: NovelEntityExtractResult['items'][number]): { ow
 }
 
 function finishAiSuggestionApply(
-  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations',
+  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'outlineItems',
   index: number,
   action: 'create' | 'merge',
   editorMeta: { editorEntityType?: 'character' | 'faction' | 'item' | null; editorTargetId?: string | null } = {},
@@ -2234,6 +2236,40 @@ function applyRelationSuggestion(index: number, action: 'create' | 'merge' | 'ig
   finishAiSuggestionApply('relations', index, action, { editorEntityType: 'character', editorTargetId: fromCharacterId })
 }
 
+function applyOutlineItemSuggestion(index: number, action: 'create' | 'ignore'): void {
+  const item = aiExtractResult.value.outlineItems[index]
+  if (!item || item.uiState?.status === 'applied') return
+  if (action === 'ignore') {
+    appendAiSystemNote(`已忽略大纲建议：${item.title}`)
+    setAiSuggestionState('outlineItems', index, 'ignored', 'ignore')
+    return
+  }
+  const allowedLevels = ['volume', 'act', 'chapter', 'scene']
+  const level = allowedLevels.includes(item.level) ? (item.level as 'volume' | 'act' | 'chapter' | 'scene') : 'scene'
+  const created = createOutlineItem({
+    novelId: novelId.value,
+    title: item.title,
+    summary: item.summary,
+    level,
+  })
+  // 整理当前章模式下，把新大纲节点自动绑定到来源章节，让“已写正文”与结构对齐
+  let boundNote = ''
+  if (aiExtractLastMode.value === 'current' && selectedChapter.value) {
+    const chapter = selectedChapter.value
+    const nextIds = [...(chapter.outlineItemIds ?? [])]
+    if (!nextIds.includes(created.id)) {
+      nextIds.push(created.id)
+      updateChapter({ id: chapter.id, outlineItemIds: nextIds })
+      chapters.value = chapters.value.map((row) =>
+        row.id === chapter.id ? { ...row, outlineItemIds: nextIds } : row,
+      )
+      boundNote = `，并绑定到第 ${chapter.chapterNo} 章`
+    }
+  }
+  appendAiSystemNote(`已确认添加大纲节点：${item.title}${boundNote}`)
+  finishAiSuggestionApply('outlineItems', index, 'create')
+}
+
 function applyForeshadowSuggestion(index: number, action: 'create' | 'ignore'): void {
   const item = aiForeshadowResult.value.newPlants[index]
   if (!item || item.uiState?.status === 'applied') return
@@ -2305,7 +2341,7 @@ function applyClassificationSuggestion(action: 'merge' | 'ignore'): void {
 }
 
 function reopenAiSuggestion(
-  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification',
+  section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'outlineItems' | 'foreshadows' | 'classification',
   index: number,
 ): void {
   if (section === 'foreshadows') {
@@ -2321,7 +2357,7 @@ function reopenAiSuggestion(
   setAiSuggestionState(section, index, 'pending', null)
 }
 
-function applyAiSuggestion(payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' | 'reopen' }): void {
+function applyAiSuggestion(payload: { section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'outlineItems' | 'foreshadows' | 'classification'; index: number; action: 'create' | 'merge' | 'ignore' | 'reopen' }): void {
   aiExtractError.value = ''
   if (payload.action === 'reopen') {
     reopenAiSuggestion(payload.section, payload.index)
@@ -2331,6 +2367,7 @@ function applyAiSuggestion(payload: { section: 'characters' | 'factions' | 'item
   if (payload.section === 'factions') return applyFactionSuggestion(payload.index, payload.action)
   if (payload.section === 'items') return applyItemSuggestion(payload.index, payload.action)
   if (payload.section === 'memberships') return applyMembershipSuggestion(payload.index, payload.action)
+  if (payload.section === 'outlineItems') return applyOutlineItemSuggestion(payload.index, payload.action === 'ignore' ? 'ignore' : 'create')
   if (payload.section === 'foreshadows') return applyForeshadowSuggestion(payload.index, payload.action === 'ignore' ? 'ignore' : 'create')
   if (payload.section === 'classification') return applyClassificationSuggestion(payload.action === 'ignore' ? 'ignore' : 'merge')
   applyRelationSuggestion(payload.index, payload.action)
@@ -2342,7 +2379,8 @@ const aiSuggestionCount = computed(
     aiExtractResult.value.factions.length +
     aiExtractResult.value.items.length +
     aiExtractResult.value.memberships.length +
-    aiExtractResult.value.relations.length,
+    aiExtractResult.value.relations.length +
+    aiExtractResult.value.outlineItems.length,
 )
 
 const aiConflictCount = computed(() => {
@@ -2444,7 +2482,7 @@ function buildCombinedExtractSummary(
   mode: AiExtractMode,
 ): string {
   const entityTotal =
-    entityResult.characters.length + entityResult.factions.length + entityResult.items.length + entityResult.memberships.length + entityResult.relations.length
+    entityResult.characters.length + entityResult.factions.length + entityResult.items.length + entityResult.memberships.length + entityResult.relations.length + entityResult.outlineItems.length
   const lines = [
     `${scopeLabel(mode)}整理完成。`,
     `实体建议 ${entityTotal} 条，新增伏笔候选 ${foreshadowResult.newPlants.length} 条，分类结果 ${classificationResult.chapterType || '未给出'}。`,

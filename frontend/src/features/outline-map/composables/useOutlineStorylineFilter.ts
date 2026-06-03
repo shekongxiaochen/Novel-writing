@@ -11,6 +11,13 @@ export function useOutlineStorylineFilter(deps: {
   outlineItems: MaybeRef<OutlineItem[]>
   filterStorylineId: MaybeRef<string>
 }) {
+  const matchedCount = computed(() => {
+    const filterId = s(unref(deps.filterStorylineId))
+    if (!filterId) return 0
+    const items = unref(deps.outlineItems)
+    return items.filter((item) => (item.storylineIds ?? []).includes(filterId)).length
+  })
+
   const dimmedOutlineIdSet = computed(() => {
     const filterId = s(unref(deps.filterStorylineId))
     if (!filterId) return new Set<string>()
@@ -29,8 +36,11 @@ export function useOutlineStorylineFilter(deps: {
       }
     }
 
+    // 没有任何节点属于该故事线时，不淡化全部（否则像“整屏坏掉”），交给视图给出空提示
+    if (visible.size === 0) return new Set<string>()
+
     return new Set(items.filter((item) => !visible.has(item.id)).map((item) => item.id))
   })
 
-  return { dimmedOutlineIdSet }
+  return { dimmedOutlineIdSet, matchedCount }
 }
