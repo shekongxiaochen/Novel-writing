@@ -2622,17 +2622,29 @@ function saveAllWorldSettings(items: WorldSetting[]): void {
 export function getWorldSettingsByNovelId(novelId: string): WorldSetting[] {
   return getAllWorldSettings()
     .filter((ws) => ws.novelId === novelId)
+    .map(migrateWorldSettingCards)
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+}
+
+/** 旧数据迁移：无 attributes 卡片但有 content 时，把 content 收成一张「概述」卡（不落库，读取时即时转换） */
+function migrateWorldSettingCards(ws: WorldSetting): WorldSetting {
+  const cards = Array.isArray(ws.attributes) ? ws.attributes.filter((a) => a && (a.key || a.value)) : []
+  if (cards.length > 0) return { ...ws, attributes: cards }
+  const legacy = String(ws.content ?? '').trim()
+  if (!legacy) return { ...ws, attributes: [] }
+  return { ...ws, attributes: [{ id: uid(), key: '概述', value: legacy }] }
 }
 
 export function createWorldSetting(input: NewWorldSettingInput): WorldSetting {
   const all = getAllWorldSettings()
   const now = nowIso()
+  const attributes = normalizeItemAttributes(input.attributes)
   const item: WorldSetting = {
     id: uid(),
     novelId: input.novelId,
     name: input.name.trim() || '未命名设定',
     content: input.content.trim(),
+    attributes,
     categoryIds: normalizeCategoryIds(input.categoryIds),
     createdAt: now,
     updatedAt: now,
@@ -2649,6 +2661,10 @@ export function updateWorldSetting(partial: Pick<WorldSetting, 'id'> & Partial<W
   const updated: WorldSetting = {
     ...all[idx],
     ...partial,
+    attributes:
+      partial.attributes !== undefined
+        ? normalizeItemAttributes(partial.attributes)
+        : normalizeItemAttributes(all[idx].attributes),
     categoryIds:
       partial.categoryIds !== undefined
         ? normalizeCategoryIds(partial.categoryIds)

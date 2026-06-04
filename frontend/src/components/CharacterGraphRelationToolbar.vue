@@ -73,7 +73,6 @@
           v-if="relationAddModalOpen && anchorCharacter"
           class="confirm-overlay"
           role="presentation"
-          @click.self="closeRelationAddModal"
         >
           <div
             ref="relationAddDialogRef"
@@ -204,7 +203,6 @@
           v-if="relationEditModalOpen"
           class="confirm-overlay"
           role="presentation"
-          @click.self="closeRelationEditModal"
         >
           <div class="confirm-dialog chapter-hub__relation-edit-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />

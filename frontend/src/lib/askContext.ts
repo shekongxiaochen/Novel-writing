@@ -22,6 +22,7 @@ export const ASK_CONTEXT_LAYER_LABELS: Record<string, string> = {
   items_compact: '物品',
   categories_compact: '分类',
   timeline_compact: '时间线',
+  worldview_compact: '世界观设定',
   outline_beat_path: '大纲节拍路径',
   continuity_brief: '全书连续性',
   novel_brief: '作品信息',
@@ -169,6 +170,7 @@ const ASK_TRIM_ORDER = [
   'outline_beat_path',
   'continuity_brief',
   'bible_compact',
+  'worldview_compact',
   'prev_summaries',
   'rag_snippets',
 ]
@@ -182,6 +184,120 @@ function resolvePrimaryChapter(payload: WorkspaceSnapshotPayload, chapterIds?: s
     if (hit) return hit
   }
   return chapters[chapters.length - 1]
+}
+
+/** 无章节场景（如新书只填了设定）：跳过所有正文/章节相关层，只构建作品+档案+设定层，让 AI 仍能基于世界观/角色/大纲作答与操作 */
+function buildNoChapterAskParts(
+  payload: WorkspaceSnapshotPayload,
+  input: {
+    mode: 'current' | 'recent' | 'all'
+    question: string
+    selectionQuote?: string
+    novel?: {
+      title?: string
+      summary?: string
+      continuityBrief?: string
+      genre?: string
+      perspective?: string
+      tone?: string
+    }
+  },
+): AskPromptBuildResult {
+  const warnings: string[] = ['本作品还没有章节正文，AI 将基于作品信息、角色/势力/物品/分类档案、大纲与世界观设定作答。']
+  const question = s(input.question)
+  const scanText = `${question}\n${s(input.selectionQuote)}`
+  const novel = input.novel ?? {}
+
+  const characterSource = (payload.characters ?? []) as JsonRecord[]
+  const characters = stableSortByKeys(
+    characterSource.slice(0, 28).map((row) => ({
+      id: s(row.id),
+      name: s(row.name),
+      aliases: stringList(row.aliases).slice(0, 5),
+      gender: s(row.gender),
+      goal: s(row.goal),
+      notes: s(row.notes).slice(0, 140),
+    })),
+    ['name'],
+  )
+  const charById = new Map(characterSource.map((row) => [s(row.id), row]))
+  const relations = stableSortByKeys(
+    (payload.characterRelations ?? [])
+      .map((row) => {
+        const from = charById.get(s(row.fromCharacterId))
+        const to = charById.get(s(row.toCharacterId))
+        if (!from || !to) return null
+        return { id: s(row.id), from: s(from.name), to: s(to.name), relationType: s(row.relationType), note: s(row.note).slice(0, 90) }
+      })
+      .filter(Boolean) as JsonRecord[],
+    ['from', 'to'],
+  ).slice(0, 24)
+
+  const foreshadows = stableSortByKeys(
+    (payload.foreshadows ?? [])
+      .filter((row) => s(row.status) !== 'fulfilled')
+      .map((row) => ({ id: s(row.id), title: s(row.title), description: s(row.description).slice(0, 120), status: s(row.status) })),
+    ['title'],
+  ).slice(0, 12)
+
+  const factions = stableSortByKeys(
+    (payload.factions ?? []).slice(0, 16).map((row) => ({ id: s(row.id), name: s(row.name), leader: s(row.leader), notes: s(row.notes).slice(0, 100) })),
+    ['name'],
+  )
+  const items = stableSortByKeys(
+    (payload.items ?? []).slice(0, 16).map((row) => ({ id: s(row.id), name: s(row.name), summary: s(row.summary).slice(0, 100) })),
+    ['name'],
+  )
+  const categories = stableSortByKeys(
+    (payload.categories ?? []).slice(0, 20).map((row) => ({ id: s(row.id), name: s(row.name), notes: s(row.notes).slice(0, 80) })),
+    ['name'],
+  )
+  const outline = stableSortByKeys(
+    (payload.outline ?? []).slice(0, 40).map((row) => ({ id: s(row.id), title: s(row.title), summary: s(row.summary).slice(0, 120), level: s(row.level) })),
+    ['title'],
+  )
+  const worldSettings = stableSortByKeys(
+    (payload.worldSettings ?? []).slice(0, 12).map((row) => {
+      const cards = Array.isArray(row.attributes) ? row.attributes.filter((a) => a && (a.key || a.value)) : []
+      const cardText = cards.map((a) => `【${s(a.key)}】${s(a.value)}`).join('\n')
+      return { id: s(row.id), name: s(row.name), content: (cardText || s(row.content)).slice(0, 400) }
+    }),
+    ['name'],
+  ).filter((row) => row.name || row.content)
+
+  const parts: Record<string, string> = {
+    instruction: ['【作者提问】', `提问范围：${input.mode}`, question].filter(Boolean).join('\n'),
+    selection_quote: s(input.selectionQuote) ? ['【引用片段】', s(input.selectionQuote)].join('\n') : '',
+    bible_compact: [
+      '【档案摘录】（每条带 id；若需修改或删除已有角色/关系/伏笔，请用对应工具并传该 id，不要重复新建）',
+      characters.length > 0 ? `角色：${stableStringify(characters)}` : '',
+      relations.length > 0 ? `关系：${stableStringify(relations)}` : '',
+      foreshadows.length > 0 ? `伏笔：${stableStringify(foreshadows)}` : '',
+    ].filter(Boolean).join('\n'),
+    factions_compact: factions.length > 0 ? ['【势力】', stableStringify(factions)].join('\n') : '',
+    items_compact: items.length > 0 ? ['【物品】', stableStringify(items)].join('\n') : '',
+    categories_compact: categories.length > 0 ? ['【分类】', stableStringify(categories)].join('\n') : '',
+    outline_beat_path: outline.length > 0 ? ['【大纲节点】', stableStringify(outline)].join('\n') : '',
+    worldview_compact:
+      worldSettings.length > 0
+        ? ['【世界观设定（每条带 id；回答与改写须与此一致，不得臆造）】', stableStringify(worldSettings)].join('\n')
+        : '',
+    continuity_brief: s(novel.continuityBrief).trim() ? ['【全书连续性摘要】', s(novel.continuityBrief).trim()].join('\n') : '',
+    novel_brief: [
+      '【作品信息】',
+      s(novel.title) ? `书名：${s(novel.title)}` : '',
+      s(novel.genre) ? `类型：${s(novel.genre)}` : '',
+      s(novel.perspective) ? `视角：${s(novel.perspective)}` : '',
+      s(novel.tone) ? `基调：${s(novel.tone)}` : '',
+      s(novel.summary) ? `简介：${s(novel.summary)}` : '',
+    ].filter(Boolean).join('\n'),
+  }
+  void scanText
+
+  const { pack, dropped } = trimAskPack(parts, ASK_TRIM_ORDER, ASK_INPUT_CHAR_BUDGET)
+  const prompt = Object.entries(pack).map(([, value]) => value).filter(Boolean).join('\n\n')
+  const usedLayers = Object.keys(pack).filter((key) => Boolean(pack[key]?.trim()))
+  return { prompt, warnings, droppedLayers: dropped, usedLayers, usedChars: estimatePackChars(pack), ragHits: [] }
 }
 
 function buildAskContextParts(
@@ -209,14 +325,7 @@ function buildAskContextParts(
   const chapters = [...(payload.chapters ?? [])].sort((a, b) => (a.chapterNo ?? 0) - (b.chapterNo ?? 0))
   const current = resolvePrimaryChapter(payload, input.chapterIds)
   if (!current) {
-    return {
-      prompt: '当前范围里没有可供阅读的章节正文。',
-      warnings: ['当前范围里没有可供阅读的章节正文。'],
-      droppedLayers: [],
-      usedLayers: [],
-      usedChars: 0,
-      ragHits: [],
-    }
+    return buildNoChapterAskParts(payload, input)
   }
 
   const currentIndex = chapters.findIndex((row) => s(row.id) === s(current.id))
@@ -285,6 +394,7 @@ function buildAskContextParts(
   const scopedIds = new Set(scopedCharacters.map((row) => s(row.id)))
   const characters = stableSortByKeys(
     scopedCharacters.map((row) => ({
+      id: s(row.id),
       name: s(row.name),
       aliases: stringList(row.aliases).slice(0, 5),
       gender: s(row.gender),
@@ -302,6 +412,7 @@ function buildAskContextParts(
         if (!from || !to) return null
         if (!scopedIds.has(s(from.id)) || !scopedIds.has(s(to.id))) return null
         return {
+          id: s(row.id),
           from: s(from.name),
           to: s(to.name),
           relationType: s(row.relationType),
@@ -326,6 +437,7 @@ function buildAskContextParts(
         )
       })
       .map((row) => ({
+        id: s(row.id),
         title: s(row.title),
         description: s(row.description).slice(0, 120),
         status: s(row.status),
@@ -346,6 +458,7 @@ function buildAskContextParts(
 
   const factions = stableSortByKeys(
     (payload.factions ?? []).slice(0, 16).map((row) => ({
+      id: s(row.id),
       name: s(row.name),
       leader: s(row.leader),
       notes: s(row.notes).slice(0, 100),
@@ -355,6 +468,7 @@ function buildAskContextParts(
 
   const items = stableSortByKeys(
     (payload.items ?? []).slice(0, 16).map((row) => ({
+      id: s(row.id),
       name: s(row.name),
       summary: s(row.summary).slice(0, 100),
     })),
@@ -363,6 +477,7 @@ function buildAskContextParts(
 
   const categories = stableSortByKeys(
     (payload.categories ?? []).slice(0, 20).map((row) => ({
+      id: s(row.id),
       name: s(row.name),
       notes: s(row.notes).slice(0, 80),
     })),
@@ -371,12 +486,31 @@ function buildAskContextParts(
 
   const timeline = stableSortByKeys(
     (payload.timelineEvents ?? []).slice(0, 12).map((row) => ({
+      id: s(row.id),
       title: s(row.title),
       summary: s(row.summary).slice(0, 100),
-      chapterId: row.chapterId ?? null,
+      chapterNoStart: row.chapterNoStart ?? null,
     })),
     ['title'],
   )
+
+  const worldSettingSource = payload.worldSettings ?? []
+  const relevantWorldSettings = (() => {
+    const matched = worldSettingSource.filter((row) => mentionsNameInText(s(row.name), scanText))
+    const base = matched.length > 0 ? matched : worldSettingSource
+    return stableSortByKeys(
+      base.slice(0, 12).map((row) => {
+        const cards = Array.isArray(row.attributes) ? row.attributes.filter((a) => a && (a.key || a.value)) : []
+        const cardText = cards.map((a) => `【${s(a.key)}】${s(a.value)}`).join('\n')
+        return {
+          id: s(row.id),
+          name: s(row.name),
+          content: (cardText || s(row.content)).slice(0, 400),
+        }
+      }),
+      ['name'],
+    ).filter((row) => row.name || row.content)
+  })()
 
   const novel = input.novel ?? {}
   const enableRag = input.enableRag !== false && !input.compactChapter
@@ -458,7 +592,7 @@ function buildAskContextParts(
           ].join('\n\n')
         : '',
     bible_compact: [
-      '【档案摘录】',
+      '【档案摘录】（每条带 id；若需修改或删除已有角色/关系/伏笔，请用对应工具并传该 id，不要重复新建。重写正文导致旧伏笔原文消失时，应更新或删除旧伏笔，而非新增）',
       characters.length > 0 ? `角色：${stableStringify(characters)}` : '',
       relations.length > 0 ? `关系：${stableStringify(relations)}` : '',
       relevantForeshadows.length > 0 ? `伏笔：${stableStringify(relevantForeshadows)}` : '',
@@ -469,6 +603,10 @@ function buildAskContextParts(
     items_compact: items.length > 0 ? ['【物品】', stableStringify(items)].join('\n') : '',
     categories_compact: categories.length > 0 ? ['【分类】', stableStringify(categories)].join('\n') : '',
     timeline_compact: timeline.length > 0 ? ['【时间线】', stableStringify(timeline)].join('\n') : '',
+    worldview_compact:
+      relevantWorldSettings.length > 0
+        ? ['【世界观设定（角色、地点、势力、规则的设定依据，回答与改写须与此一致，不得臆造）】', stableStringify(relevantWorldSettings)].join('\n')
+        : '',
     outline_beat_path: outlineBeatPath ? outlineBeatPath : '',
     continuity_brief: s(novel.continuityBrief).trim()
       ? ['【全书连续性摘要】', s(novel.continuityBrief).trim()].join('\n')
@@ -570,4 +708,46 @@ export function trimAskConversationHistory<T extends { role: string; content?: s
   const rest = history.filter((row) => row.role !== 'system')
   const kept = rest.slice(-maxMessages)
   return [...system, ...kept]
+}
+
+/**
+ * 修复对话历史里 tool_calls 与 tool 响应不配对的情况：
+ * - assistant 的每个 tool_call 必须有对应 role:'tool' 的响应消息；缺失则给该 assistant 去掉 tool_calls
+ * - 去掉找不到对应 tool_call 的孤立 tool 消息
+ * 否则上游 API 会报 400（tool_calls 后缺少 tool 响应）。
+ */
+export function sanitizeToolCallHistory<
+  T extends { role: string; content?: string | null; tool_calls?: Array<{ id: string }>; tool_call_id?: string },
+>(history: T[]): T[] {
+  if (!Array.isArray(history) || history.length === 0) return history
+  // 收集所有已存在的 tool 响应 id
+  const respondedIds = new Set<string>()
+  for (const msg of history) {
+    if (msg.role === 'tool' && msg.tool_call_id) respondedIds.add(String(msg.tool_call_id))
+  }
+  // 收集所有「被完整响应」的 tool_call id（用于过滤孤立 tool 消息）
+  const validCallIds = new Set<string>()
+  const out: T[] = []
+  for (const msg of history) {
+    if (msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+      const allResponded = msg.tool_calls.every((tc) => respondedIds.has(String(tc.id)))
+      if (allResponded) {
+        for (const tc of msg.tool_calls) validCallIds.add(String(tc.id))
+        out.push(msg)
+      } else {
+        // 去掉未配对的 tool_calls，保留文字内容（content 为空则补占位，避免空 assistant）
+        const { tool_calls, ...rest } = msg as T & { tool_calls?: unknown }
+        void tool_calls
+        out.push({ ...(rest as T), content: msg.content ?? '' })
+      }
+      continue
+    }
+    if (msg.role === 'tool') {
+      if (msg.tool_call_id && validCallIds.has(String(msg.tool_call_id))) out.push(msg)
+      // 否则丢弃孤立 tool 消息
+      continue
+    }
+    out.push(msg)
+  }
+  return out
 }

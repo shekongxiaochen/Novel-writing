@@ -7,7 +7,6 @@
         class="confirm-overlay"
         role="presentation"
         tabindex="-1"
-        @click.self="requestClose"
         @keydown.escape.prevent="requestClose"
       >
         <div class="confirm-dialog chapter-hub__foreshadow-dialog" role="dialog" aria-modal="true">

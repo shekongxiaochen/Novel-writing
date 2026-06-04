@@ -267,6 +267,8 @@ export type WorldSetting = {
   novelId: string
   name: string
   content: string
+  /** 结构化卡片（标题+内容），如 力量体系/地理/历史。新版主用此字段 */
+  attributes?: CharacterAttribute[]
   /** 设定分类（引用 Category.id） */
   categoryIds?: string[]
   createdAt: string
@@ -277,6 +279,7 @@ export type NewWorldSettingInput = {
   novelId: string
   name: string
   content: string
+  attributes?: CharacterAttribute[]
   categoryIds?: string[]
 }
 
@@ -512,6 +515,8 @@ export type AiPendingToolAction = {
 
 export type AiToolExecutionContext = {
   defaultChapterId?: string
+  selectionRange?: { chapterId: string; start: number; end: number }
+  focusEntity?: { kind: string; id: string; label: string }
 }
 
 export type EntityMatchType = 'new' | 'update' | 'possible_duplicate' | 'conflict'

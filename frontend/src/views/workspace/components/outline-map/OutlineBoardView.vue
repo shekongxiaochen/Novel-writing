@@ -22,6 +22,7 @@ const emit = defineEmits<{
   'cycle-status': [id: string]
   'toggle-storyline': [payload: { outlineId: string; storylineId: string }]
   reorder: [payload: { draggedId: string; targetId: string; position: DropPos }]
+  'ai-design': []
 }>()
 
 const storylinePickerId = ref('')
@@ -120,7 +121,18 @@ function tensionLevel(t?: OutlineTension): number {
 
 <template>
   <div class="ob">
-    <div class="ob__scroll">
+    <div v-if="columns.length === 0" class="ob__empty">
+      <div class="ob__empty-card">
+        <span class="ob__empty-badge">卷</span>
+        <h3 class="ob__empty-title">还没有情节点</h3>
+        <p class="ob__empty-hint">从第一个顶层节点开始搭你的故事骨架，或让 AI 帮你生成一份大纲。</p>
+        <div class="ob__empty-actions">
+          <button type="button" class="btn-secondary" @click="emit('ai-design')">AI 设计大纲</button>
+          <button type="button" class="btn-primary" @click="emit('create-root')">＋ 新增顶层节点</button>
+        </div>
+      </div>
+    </div>
+    <div v-else class="ob__scroll">
       <section v-for="col in columns" :key="col.root.id" class="ob__col">
         <header class="ob__col-head">
           <div class="ob__col-head-main">
@@ -226,6 +238,50 @@ function tensionLevel(t?: OutlineTension): number {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+.ob__empty {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.ob__empty-card {
+  flex: 0 0 300px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  background: color-mix(in srgb, var(--color-surface) 88%, var(--color-surface-muted) 12%);
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  border-radius: 16px;
+  padding: 18px 16px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 30%, transparent);
+}
+.ob__empty-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary-soft) 80%, transparent);
+  color: var(--color-primary);
+}
+.ob__empty-title {
+  margin: 0;
+  font-size: 1.02rem;
+}
+.ob__empty-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+.ob__empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 .ob__scroll {
   display: flex;

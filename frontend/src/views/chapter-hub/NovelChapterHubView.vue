@@ -351,6 +351,40 @@
       @remove-plant="onForeshadowPlantRemove"
       @remove-fulfill="onForeshadowFulfillRemove"
     />
+    <Teleport to="body">
+      <Transition name="confirm">
+        <div
+          v-if="foreshadowPickerOpen"
+          class="confirm-overlay"
+          role="presentation"
+          @keydown.escape.prevent="closeForeshadowPicker"
+        >
+          <div class="confirm-dialog chapter-hub__fs-picker" role="dialog" aria-modal="true">
+            <div class="confirm-dialog__accent" aria-hidden="true" />
+            <div class="confirm-dialog__body">
+              <h2 class="confirm-dialog__title">这段文字有 {{ foreshadowPickerPlants.length }} 个重叠伏笔</h2>
+              <p class="muted chapter-hub__fs-picker-hint">选择要修改或删除的伏笔。</p>
+              <ul class="chapter-hub__fs-picker-list scrollbar-paper">
+                <li v-for="p in foreshadowPickerPlants" :key="p.id" class="chapter-hub__fs-picker-item">
+                  <div class="chapter-hub__fs-picker-main">
+                    <strong>{{ p.title || '未命名伏笔' }}</strong>
+                    <span v-if="p.description" class="muted chapter-hub__fs-picker-desc">{{ p.description }}</span>
+                  </div>
+                  <div class="chapter-hub__fs-picker-actions">
+                    <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="onForeshadowPickerEdit(p.id)">修改</button>
+                    <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="onForeshadowPickerRemove(p.id)">删除</button>
+                  </div>
+                </li>
+              </ul>
+              <div class="confirm-dialog__actions">
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeForeshadowPicker">关闭</button>
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="onForeshadowPickerRemoveAll">删除全部（{{ foreshadowPickerPlants.length }}）</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
     <SaveToast :open="chapterHubSaveToastOpen" title="保存成功" message="修改已保存。" />
   </div>
 
@@ -2834,7 +2868,11 @@ function ignoreContinueDraft(): void {
 }
 
 function aiToolExecutionContext() {
-  return { defaultChapterId: selectedChapterId.value || selectedChapter.value?.id }
+  const sel = chapterPinnedQuoteSelection.value
+  return {
+    defaultChapterId: selectedChapterId.value || selectedChapter.value?.id,
+    selectionRange: sel ? { chapterId: sel.chapterId, start: sel.start, end: sel.end } : undefined,
+  }
 }
 
 function openChapterById(chapterId: string): void {
@@ -3149,6 +3187,15 @@ const foreshadowModalOpen = ref(false)
 const foreshadowModalMode = ref<'plant' | 'fulfill' | 'edit-plant' | 'edit-fulfill'>('plant')
 const editingForeshadowPlantId = ref('')
 const editingForeshadowFulfillmentId = ref('')
+
+// 正文同一处重叠多个伏笔时，先弹列表让用户选要操作哪个
+const foreshadowPickerOpen = ref(false)
+const foreshadowPickerPlantIds = ref<string[]>([])
+const foreshadowPickerPlants = computed(() =>
+  foreshadowPickerPlantIds.value
+    .map((id) => allForeshadowsForHub.value.find((p) => p.id === id))
+    .filter((p): p is ForeshadowPlant => !!p),
+)
 
 const {
   ctxMenuOpen,
@@ -3946,6 +3993,37 @@ function onPaperForeshadowClick(meta: ForeshadowHoverMeta): void {
   const plantId = String(meta.id ?? '').trim()
   const plant = allForeshadowsForHub.value.find((p) => p.id === plantId)
   if (!plant) return
+
+  // 照应处直接打开；植入处若与其它伏笔重叠，先弹选择列表
+  if (meta.segment !== 'fulfill') {
+    const overlapping = foreshadowsOverlappingPlant(plant)
+    if (overlapping.length > 1) {
+      foreshadowPickerPlantIds.value = overlapping.map((p) => p.id)
+      foreshadowPickerOpen.value = true
+      return
+    }
+  }
+  openForeshadowEditFromMeta(meta)
+}
+
+// 找出与给定伏笔植入区间重叠的所有伏笔（含自身），仅限同一植入章节
+function foreshadowsOverlappingPlant(plant: ForeshadowPlant): ForeshadowPlant[] {
+  const s = plant.plantStart
+  const e = plant.plantEnd
+  if (typeof s !== 'number' || typeof e !== 'number' || e <= s) return [plant]
+  return allForeshadowsForHub.value.filter((p) => {
+    if (p.plantChapterId !== plant.plantChapterId) return false
+    const ps = p.plantStart
+    const pe = p.plantEnd
+    if (typeof ps !== 'number' || typeof pe !== 'number' || pe <= ps) return false
+    return ps < e && pe > s
+  })
+}
+
+function openForeshadowEditFromMeta(meta: ForeshadowHoverMeta): void {
+  const plantId = String(meta.id ?? '').trim()
+  const plant = allForeshadowsForHub.value.find((p) => p.id === plantId)
+  if (!plant) return
   pendingForeshadowSelection.value = null
   editingForeshadowPlantId.value = plant.id
   if (meta.segment === 'fulfill') {
@@ -3959,6 +4037,29 @@ function onPaperForeshadowClick(meta: ForeshadowHoverMeta): void {
     foreshadowModalMode.value = 'edit-plant'
   }
   foreshadowModalOpen.value = true
+}
+
+function closeForeshadowPicker(): void {
+  foreshadowPickerOpen.value = false
+  foreshadowPickerPlantIds.value = []
+}
+
+function onForeshadowPickerEdit(plantId: string): void {
+  closeForeshadowPicker()
+  openForeshadowEditFromMeta({ id: plantId, segment: 'plant' } as ForeshadowHoverMeta)
+}
+
+function onForeshadowPickerRemove(plantId: string): void {
+  deleteForeshadowPlant(plantId)
+  foreshadowDataTick.value += 1
+  foreshadowPickerPlantIds.value = foreshadowPickerPlantIds.value.filter((id) => id !== plantId)
+  if (foreshadowPickerPlantIds.value.length === 0) closeForeshadowPicker()
+}
+
+function onForeshadowPickerRemoveAll(): void {
+  for (const id of foreshadowPickerPlantIds.value) deleteForeshadowPlant(id)
+  foreshadowDataTick.value += 1
+  closeForeshadowPicker()
 }
 
 function navigateToForeshadowAnchor(args: {

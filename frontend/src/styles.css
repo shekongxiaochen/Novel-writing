@@ -1620,6 +1620,16 @@ a:hover {
   gap: 16px;
 }
 
+/* AI 侧栏展开时，给主内容留出右侧空槽（具体宽度由内联样式按侧栏实际宽度提供） */
+.page-block--ai-open {
+  transition: padding-right 0.2s ease;
+}
+@media (max-width: 900px) {
+  .page-block--ai-open {
+    padding-right: 0 !important;
+  }
+}
+
 .page-hero {
   margin-bottom: 4px;
 }
@@ -2364,7 +2374,7 @@ button[type='submit']:hover,
 .workspace-items-hero {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   margin-bottom: 18px;
 }
@@ -2473,6 +2483,156 @@ button[type='submit']:hover,
 .workspace-ws-card__content {
   white-space: pre-wrap;
   line-height: 1.66;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ws-subcards {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.ws-subcard {
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 42%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 40%, transparent);
+}
+.ws-subcard__title {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  font-weight: 750;
+  color: var(--color-primary);
+}
+.ws-subcard--added {
+  border-left-color: #22c55e;
+  background: color-mix(in srgb, #22c55e 8%, transparent);
+}
+.ws-subcard--removed {
+  border-left-color: #ef4444;
+  background: color-mix(in srgb, #ef4444 8%, transparent);
+  opacity: 0.85;
+}
+.ws-subcard--removed .ws-subcard__body {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, #ef4444 70%, transparent);
+}
+.ws-subcard--changed {
+  border-left-color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 8%, transparent);
+}
+.ws-subcard__tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.ws-subcard__tag--add { background: color-mix(in srgb, #22c55e 22%, transparent); color: #15803d; }
+.ws-subcard__tag--del { background: color-mix(in srgb, #ef4444 22%, transparent); color: #b91c1c; }
+.ws-subcard__tag--chg { background: color-mix(in srgb, #f59e0b 22%, transparent); color: #b45309; }
+.ws-subcard__old {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, #ef4444 70%, var(--color-text-muted));
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, #ef4444 55%, transparent);
+}
+.ws-subcard__body {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ws-cards-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-card-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--color-primary-soft) 4%);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ws-card-row:focus-within {
+  border-left-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+.ws-card-row__title {
+  width: 100%;
+  font-weight: 650;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 0;
+  padding: 2px 56px 6px 0;
+  background: transparent;
+  font-size: 0.92rem;
+}
+.ws-card-row__title:focus {
+  outline: none;
+  border-bottom-color: var(--color-primary);
+}
+.ws-card-row__body {
+  width: 100%;
+  resize: vertical;
+  min-height: 60px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  background: var(--color-surface);
+}
+.ws-card-row__remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: auto;
+  min-width: 0;
+  padding: 2px 9px;
+  font-size: 0.72rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.ws-card-row__remove:hover {
+  color: var(--danger-text, #c0392b);
+  border-color: color-mix(in srgb, var(--danger-text, #c0392b) 40%, transparent);
+  background: color-mix(in srgb, var(--danger-text, #c0392b) 8%, transparent);
+}
+.ws-cards-editor > .btn-primary {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--color-primary);
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  border-radius: 10px;
+  padding: 7px 16px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  box-shadow: none;
+}
+.ws-cards-editor > .btn-primary:hover {
+  background: color-mix(in srgb, var(--color-primary-soft) 50%, transparent);
+  border-style: solid;
 }
 
 .workspace-category-toolbar {
@@ -2531,6 +2691,123 @@ button[type='submit']:hover,
     0 0 0 3px color-mix(in srgb, #f59e0b 18%, transparent),
     0 20px 40px color-mix(in srgb, #f59e0b 14%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 52%, transparent);
+}
+
+.workspace-item-card {
+  cursor: pointer;
+}
+
+.workspace-item-card--ai-focus {
+  border-color: color-mix(in srgb, var(--color-primary) 60%, var(--color-border-strong));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-primary) 32%, transparent),
+    0 14px 30px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.workspace-item-card--ai-pending {
+  box-shadow: 0 0 0 2px color-mix(in srgb, #f59e0b 24%, transparent);
+}
+/* 新增 = 绿 */
+.workspace-item-card--ai-create {
+  border-style: dashed;
+  border-color: color-mix(in srgb, #22c55e 62%, var(--color-border-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 24%, transparent);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, #22c55e 7%, transparent) 0,
+      color-mix(in srgb, #22c55e 7%, transparent) 8px,
+      transparent 8px,
+      transparent 16px
+    ),
+    var(--color-surface);
+}
+/* 修改 = 琥珀 */
+.workspace-item-card--ai-update {
+  border-color: color-mix(in srgb, #f59e0b 62%, var(--color-border-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #f59e0b 24%, transparent);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, #f59e0b 7%, transparent) 0,
+      color-mix(in srgb, #f59e0b 7%, transparent) 8px,
+      transparent 8px,
+      transparent 16px
+    ),
+    var(--color-surface);
+}
+/* 删除 = 红 */
+.workspace-item-card--ai-delete {
+  opacity: 0.85;
+  border-color: color-mix(in srgb, #ef4444 58%, var(--color-border-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ef4444 22%, transparent);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, #ef4444 7%, transparent) 0,
+      color-mix(in srgb, #ef4444 7%, transparent) 8px,
+      transparent 8px,
+      transparent 16px
+    ),
+    var(--color-surface);
+}
+.workspace-item-card--ai-delete .ws-subcard__body,
+.workspace-item-card--ai-delete .workspace-item-card__head h3 {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, #ef4444 70%, transparent);
+}
+.ai-pending-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 10px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+}
+.ai-pending-banner--create {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+}
+.ai-pending-banner--delete {
+  background: color-mix(in srgb, #ef4444 16%, transparent);
+}
+.ai-pending-banner__tag {
+  font-size: 0.7rem;
+  font-weight: 750;
+  color: color-mix(in srgb, #b45309 88%, var(--color-text) 12%);
+}
+.ai-pending-banner--create .ai-pending-banner__tag {
+  color: color-mix(in srgb, #15803d 88%, var(--color-text) 12%);
+}
+.ai-pending-banner--delete .ai-pending-banner__tag {
+  color: color-mix(in srgb, #b91c1c 88%, var(--color-text) 12%);
+}
+.ai-pending-banner__spacer {
+  flex: 1;
+}
+.ai-pending-banner__btn {
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 60%, transparent);
+  background: var(--color-surface);
+  border-radius: 7px;
+  padding: 2px 11px;
+  font-size: 0.74rem;
+  cursor: pointer;
+  color: var(--color-text);
+}
+.ai-pending-banner__btn--primary {
+  background: var(--color-primary);
+  color: var(--btn-on-primary, #fff);
+  border-color: transparent;
+}
+
+.workspace-item-card__focus-tag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  background: var(--color-primary);
+  color: var(--btn-on-primary, #fff);
 }
 
 .workspace-item-card__head {
@@ -5919,6 +6196,63 @@ a.module-item.module-item--link:focus-visible {
   padding: 12px 20px 16px;
   border-top: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
   background: color-mix(in srgb, var(--color-surface-muted) 42%, #f7f3e8 58%);
+}
+
+.chapter-hub__fs-picker.confirm-dialog {
+  max-width: 460px;
+  width: 100%;
+}
+
+.chapter-hub__fs-picker-hint {
+  margin: 4px 0 12px;
+  font-size: 0.82rem;
+}
+
+.chapter-hub__fs-picker-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chapter-hub__fs-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 30%, transparent);
+}
+
+.chapter-hub__fs-picker-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chapter-hub__fs-picker-desc {
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-hub__fs-picker-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chapter-hub__fs-picker-actions .confirm-dialog__btn {
+  padding: 5px 12px;
+  font-size: 0.8rem;
 }
 
 [data-theme='dark'] .chapter-hub__foreshadow-dialog.confirm-dialog {
@@ -9553,6 +9887,18 @@ select[size]::-webkit-scrollbar-thumb:hover {
   grid-template-columns: 1fr 420px;
   gap: 18px;
   align-items: stretch;
+}
+
+/* AI 侧栏展开占用了右侧空间时，角色图谱改单列堆叠，保证关系球宽度可用 */
+.page-block--ai-open .characters-graph-ui {
+  grid-template-columns: 1fr;
+}
+.page-block--ai-open .characters-graph-ui--two-rows {
+  grid-template-areas:
+    'topLeft'
+    'topRight'
+    'bottomLeft'
+    'bottomRight';
 }
 
 .characters-graph-ui--two-rows {
