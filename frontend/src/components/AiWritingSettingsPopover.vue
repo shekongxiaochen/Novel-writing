@@ -90,11 +90,41 @@
               </div>
             </div>
 
+            <!-- Style sample (few-shot anchor) -->
+            <div class="ai-settings-section">
+              <div class="ai-settings-section__head">
+                <span class="ai-settings-section__label">风格范文（可选，强烈推荐）</span>
+                <button
+                  v-if="sample.trim()"
+                  type="button"
+                  class="ai-settings-clear"
+                  @click="sample = ''"
+                >
+                  清空
+                </button>
+              </div>
+              <div class="ai-settings-editor">
+                <textarea
+                  ref="sampleRef"
+                  v-model="sample"
+                  class="ai-settings-textarea"
+                  rows="6"
+                  maxlength="2000"
+                  placeholder="粘贴一段你认可的文字（你自己写的、或喜欢的作品片段）。&#10;AI 会模仿它的语感、句式、节奏和用词习惯来续写——比纯文字描述更精准。&#10;&#10;注意：AI 只学“怎么写”，不会照抄这段的情节或句子。"
+                ></textarea>
+                <div class="ai-settings-textarea__footer">
+                  <span class="ai-settings-textarea__count" :class="{ 'ai-settings-textarea__count--warn': sample.length > 1900 }">
+                    {{ sample.length }}/2000
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <!-- Info -->
             <div class="ai-settings-info">
               <span class="ai-settings-info__icon">i</span>
               <p class="ai-settings-info__text">
-                会在每次 AI 续写和大纲生成时作为风格要求注入，在不违反基础规则的前提下让 AI 遵循你的风格。留空则使用默认风格。
+                提示词与范文都会在每次 AI 续写、大纲生成时作为风格参考注入。范文给“语感锚点”，比文字描述更能让 AI 抓住你的风格。留空则使用默认风格。
               </p>
             </div>
           </div>
@@ -186,16 +216,41 @@ const emit = defineEmits<{
 
 const panelRef = ref<HTMLElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const sampleRef = ref<HTMLTextAreaElement | null>(null)
 const draft = ref('')
+const sample = ref('')
 const saving = ref(false)
 const saved = ref(false)
 const activePresetId = ref('')
+
+// 用一个用户几乎不可能输入的分隔标记，把「风格指令」与「风格范文」拼进同一个 aiStylePrompt 字段，
+// 这样无需改数据库 schema 和后端，复用现有注入链路。
+const SAMPLE_MARKER = '\n\n【风格范文 — 仅模仿其语感/句式/节奏/用词，禁止照抄其情节与原句】\n'
+
+function splitStored(stored: string): { instruction: string; sample: string } {
+  const idx = stored.indexOf(SAMPLE_MARKER)
+  if (idx === -1) return { instruction: stored, sample: '' }
+  return {
+    instruction: stored.slice(0, idx),
+    sample: stored.slice(idx + SAMPLE_MARKER.length),
+  }
+}
+
+function combineStored(instruction: string, sampleText: string): string {
+  const a = instruction.trim()
+  const b = sampleText.trim()
+  if (!b) return a
+  return a ? `${a}${SAMPLE_MARKER}${b}` : `${SAMPLE_MARKER.trimStart()}${b}`
+}
 
 watch(
   () => props.open,
   async (open) => {
     if (!open) return
-    draft.value = props.novel?.aiStylePrompt ?? ''
+    const stored = props.novel?.aiStylePrompt ?? ''
+    const parts = splitStored(stored)
+    draft.value = parts.instruction
+    sample.value = parts.sample
     saved.value = false
     activePresetId.value = ''
     await nextTick()
@@ -223,7 +278,7 @@ async function handleSave(): Promise<void> {
   if (!novel) return
   saving.value = true
   saved.value = false
-  const trimmed = draft.value.trim()
+  const trimmed = combineStored(draft.value, sample.value)
   try {
     const session = getCurrentSession()
     if (session?.token) {

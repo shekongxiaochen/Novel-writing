@@ -5,7 +5,6 @@
         v-if="open && faction"
         class="confirm-overlay chapter-hub__faction-overlay"
         role="presentation"
-        @click.self="requestClose"
       >
         <div
           class="confirm-dialog chapter-hub__faction-modal-dialog"

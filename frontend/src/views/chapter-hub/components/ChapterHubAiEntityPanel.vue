@@ -331,11 +331,11 @@
                 <article class="chapter-hub-ai-suggestion">
                   <div class="chapter-hub-ai-suggestion__top">
                     <div class="chapter-hub-ai-suggestion__main">
-                      <strong>{{ run.classificationResult?.chapterType || '未给出分类' }}</strong>
+                      <strong>{{ chapterTypeLabel(run.classificationResult?.chapterType) }}</strong>
                       <p class="chapter-hub-ai-suggestion__summary">{{ run.classificationResult?.summary || '这次没有生成章节摘要。' }}</p>
                     </div>
                     <div class="chapter-hub-ai-suggestion__chips">
-                      <span v-if="run.classificationResult?.pacing" class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ run.classificationResult?.pacing }}</span>
+                      <span v-if="run.classificationResult?.pacing" class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ pacingLabel(run.classificationResult?.pacing) }}</span>
                       <span v-if="run.classificationResult?.tensionLevel" class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">张力 {{ run.classificationResult?.tensionLevel }}/5</span>
                     </div>
                   </div>
@@ -785,11 +785,11 @@
                 <article class="chapter-hub-ai-suggestion">
                   <div class="chapter-hub-ai-suggestion__top">
                     <div class="chapter-hub-ai-suggestion__main">
-                      <strong>{{ run.classificationResult?.chapterType || '未给出分类' }}</strong>
+                      <strong>{{ chapterTypeLabel(run.classificationResult?.chapterType) }}</strong>
                       <p class="chapter-hub-ai-suggestion__summary">{{ run.classificationResult?.summary || '这次没有生成章节摘要。' }}</p>
                     </div>
                     <div class="chapter-hub-ai-suggestion__chips">
-                      <span v-if="run.classificationResult?.pacing" class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ run.classificationResult?.pacing }}</span>
+                      <span v-if="run.classificationResult?.pacing" class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">{{ pacingLabel(run.classificationResult?.pacing) }}</span>
                       <span v-if="run.classificationResult?.tensionLevel" class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">张力 {{ run.classificationResult?.tensionLevel }}/5</span>
                     </div>
                   </div>
@@ -1511,6 +1511,34 @@ function suggestionStateLabel(status?: 'pending' | 'applied' | 'ignored'): strin
   if (status === 'applied') return '已采用'
   if (status === 'ignored') return '已忽略'
   return '待确认'
+}
+
+const CHAPTER_TYPE_LABELS: Record<string, string> = {
+  action: '动作',
+  dialogue: '对话',
+  description: '描写',
+  interior: '心理',
+  transition: '过渡',
+  montage: '蒙太奇',
+  other: '其他',
+}
+
+const PACING_LABELS: Record<string, string> = {
+  fast: '快节奏',
+  medium: '中等节奏',
+  slow: '慢节奏',
+}
+
+function chapterTypeLabel(value?: string): string {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!key) return '未给出分类'
+  return CHAPTER_TYPE_LABELS[key] ?? value!
+}
+
+function pacingLabel(value?: string): string {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!key) return ''
+  return PACING_LABELS[key] ?? value!
 }
 
 function adoptLabel(type: EntityMatchType): string {
@@ -3170,15 +3198,52 @@ function relationSummary(item: ExtractedRelation): string {
 .chapter-hub-ai-message__body--markdown :deep(ol),
 .chapter-hub-ai-message__body--markdown :deep(pre),
 .chapter-hub-ai-message__body--markdown :deep(blockquote),
+.chapter-hub-ai-message__body--markdown :deep(table) {
+  margin: 0 0 10px;
+}
+
 .chapter-hub-ai-message__body--markdown :deep(h1),
 .chapter-hub-ai-message__body--markdown :deep(h2),
 .chapter-hub-ai-message__body--markdown :deep(h3),
-.chapter-hub-ai-message__body--markdown :deep(h4) {
-  margin: 0 0 10px;
+.chapter-hub-ai-message__body--markdown :deep(h4),
+.chapter-hub-ai-message__body--markdown :deep(h5),
+.chapter-hub-ai-message__body--markdown :deep(h6) {
+  margin: 14px 0 7px;
+  line-height: 1.35;
+  font-weight: 750;
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-message__body--markdown :deep(h1) { font-size: 0.92rem; }
+.chapter-hub-ai-message__body--markdown :deep(h2) {
+  font-size: 0.84rem;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 36%, transparent);
+}
+.chapter-hub-ai-message__body--markdown :deep(h3) { font-size: 0.78rem; }
+.chapter-hub-ai-message__body--markdown :deep(h4),
+.chapter-hub-ai-message__body--markdown :deep(h5),
+.chapter-hub-ai-message__body--markdown :deep(h6) {
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--color-primary) 64%, var(--color-text) 36%);
+}
+
+.chapter-hub-ai-message__body--markdown :deep(*:first-child) {
+  margin-top: 0;
 }
 
 .chapter-hub-ai-message__body--markdown :deep(*:last-child) {
   margin-bottom: 0;
+}
+
+.chapter-hub-ai-message__body--markdown :deep(strong) {
+  font-weight: 750;
+  color: var(--color-text);
+}
+
+.chapter-hub-ai-message__body--markdown :deep(em) {
+  font-style: italic;
+  color: var(--color-text-soft, var(--color-text));
 }
 
 .chapter-hub-ai-message__body--markdown :deep(ul),
@@ -3187,31 +3252,86 @@ function relationSummary(item: ExtractedRelation): string {
 }
 
 .chapter-hub-ai-message__body--markdown :deep(li) {
-  margin: 4px 0;
+  margin: 3px 0;
+}
+
+.chapter-hub-ai-message__body--markdown :deep(li::marker) {
+  color: color-mix(in srgb, var(--color-primary) 60%, var(--color-text-muted));
+}
+
+.chapter-hub-ai-message__body--markdown :deep(li > ul),
+.chapter-hub-ai-message__body--markdown :deep(li > ol) {
+  margin: 3px 0 4px;
 }
 
 .chapter-hub-ai-message__body--markdown :deep(code) {
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--color-surface) 74%, transparent);
-  font-size: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 24%, transparent);
+  background: color-mix(in srgb, var(--color-surface-muted) 70%, transparent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.62rem;
+  color: color-mix(in srgb, var(--color-primary) 50%, var(--color-text) 50%);
 }
 
 .chapter-hub-ai-message__body--markdown :deep(pre) {
-  padding: 10px 11px;
+  padding: 11px 12px;
   overflow: auto;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-bg) 8%, var(--color-surface));
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 28%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 10%, var(--color-surface));
+}
+
+.chapter-hub-ai-message__body--markdown :deep(pre code) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.64rem;
+  line-height: 1.55;
 }
 
 .chapter-hub-ai-message__body--markdown :deep(blockquote) {
-  padding-left: 12px;
-  border-left: 3px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  padding: 4px 0 4px 12px;
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 22%, transparent);
+  border-radius: 0 8px 8px 0;
   color: var(--color-text-muted);
 }
 
 .chapter-hub-ai-message__body--markdown :deep(a) {
   color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+}
+
+.chapter-hub-ai-message__body--markdown :deep(a:hover) {
+  text-decoration-color: var(--color-primary);
+}
+
+.chapter-hub-ai-message__body--markdown :deep(hr) {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-strong) 32%, transparent);
+}
+
+.chapter-hub-ai-message__body--markdown :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.64rem;
+}
+
+.chapter-hub-ai-message__body--markdown :deep(th),
+.chapter-hub-ai-message__body--markdown :deep(td) {
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 28%, transparent);
+  text-align: left;
+}
+
+.chapter-hub-ai-message__body--markdown :deep(th) {
+  background: color-mix(in srgb, var(--color-surface-muted) 60%, transparent);
+  font-weight: 700;
 }
 
 @media (max-width: 1100px) {

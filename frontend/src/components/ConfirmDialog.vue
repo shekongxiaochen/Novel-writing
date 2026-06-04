@@ -6,7 +6,6 @@
         class="confirm-overlay"
         :class="overlayClass"
         role="presentation"
-        @click.self="emitCancel"
       >
         <div
           ref="panelRef"
