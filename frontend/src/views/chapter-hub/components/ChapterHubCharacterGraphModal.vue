@@ -5,7 +5,6 @@
         v-if="open && selectedGraphCharacter"
         class="confirm-overlay chapter-hub__char-graph-overlay"
         role="presentation"
-        @click.self="emitClose"
       >
         <div
           class="confirm-dialog chapter-hub__char-graph-dialog"
@@ -181,7 +180,6 @@
         v-if="open && characterAllChangesModalOpen && editingCharacter"
         class="confirm-overlay"
         role="presentation"
-        @click.self="closeCharacterAllChangesModal"
       >
         <div class="confirm-dialog chapter-hub__relation-edit-dialog" role="dialog" aria-modal="true">
           <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -282,7 +280,6 @@
         v-if="open && characterEditModalOpen && editingCharacter"
         class="confirm-overlay"
         role="presentation"
-        @click.self="closeCharacterEditModal"
       >
         <div class="confirm-dialog workspace-character-edit-dialog" role="dialog" aria-modal="true">
           <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -470,7 +467,6 @@
         v-if="open && relationEditModalOpen && selectedGraphCharacter"
         class="confirm-overlay"
         role="presentation"
-        @click.self="closeRelationEditModal"
       >
         <div class="confirm-dialog chapter-hub__relation-edit-dialog" role="dialog" aria-modal="true">
           <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -557,7 +553,6 @@
         v-if="open && relationAddModalOpen && selectedGraphCharacter"
         class="confirm-overlay"
         role="presentation"
-        @click.self="closeRelationAddModal"
       >
         <div class="confirm-dialog chapter-hub__relation-add-dialog" role="dialog" aria-modal="true">
           <div class="confirm-dialog__accent" aria-hidden="true" />

@@ -27,6 +27,7 @@ import type { WorkspaceSnapshotPayload } from './storage'
 import {
   buildAskFollowUpPrompt,
   buildAskUserPrompt,
+  sanitizeToolCallHistory,
   trimAskConversationHistory,
   type AskPromptBuildResult,
 } from './askContext'
@@ -195,6 +196,48 @@ function extractBalancedJsonObject(text: string): string | null {
   return null
 }
 
+function salvageTruncatedJson(text: string): string | null {
+  const start = text.indexOf('{')
+  if (start === -1) return null
+  let inString = false
+  let escaped = false
+  const stack: string[] = [] // 记录待闭合的 { / [
+  let lastComplete = -1 // 最近一个「完整键值对/元素」结束的位置（顶层对象内）
+  let result = ''
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i]
+    result += ch
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') { inString = true; continue }
+    if (ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === '}' || ch === ']') stack.pop()
+    // 在顶层对象（stack 深度为1）记录逗号位置，作为安全截断点
+    if (ch === ',' && stack.length >= 1) lastComplete = result.length
+  }
+  if (stack.length === 0) return result // 本就完整
+  // 截断发生：回退到最近一个完整元素，去掉尾随逗号，再补齐闭合符
+  let body = lastComplete > 0 ? result.slice(0, lastComplete - 1) : result
+  // 若仍在字符串中，补一个引号
+  // 重新扫描 body 计算需要补的闭合括号
+  const need: string[] = []
+  let s2 = false, e2 = false
+  for (const ch of body) {
+    if (s2) { if (e2) e2 = false; else if (ch === '\\') e2 = true; else if (ch === '"') s2 = false; continue }
+    if (ch === '"') s2 = true
+    else if (ch === '{') need.push('}')
+    else if (ch === '[') need.push(']')
+    else if (ch === '}' || ch === ']') need.pop()
+  }
+  if (s2) body += '"'
+  for (let i = need.length - 1; i >= 0; i -= 1) body += need[i]
+  return body
+}
+
 function parseAiJsonContent(content: string): JsonRecord {
   const raw = s(content)
   if (!raw) throw new Error('AI 返回内容为空，无法整理')
@@ -211,6 +254,16 @@ function parseAiJsonContent(content: string): JsonRecord {
     if (!candidate) continue
     try {
       return JSON.parse(candidate) as JsonRecord
+    } catch {
+      // continue
+    }
+  }
+
+  // 兜底：尝试修复被截断的 JSON（长输出超 token 被切断时）
+  const salvaged = salvageTruncatedJson(raw)
+  if (salvaged) {
+    try {
+      return JSON.parse(salvaged) as JsonRecord
     } catch {
       // continue
     }
@@ -721,7 +774,7 @@ function buildContinueUserPrompt(
   const parts: Record<string, string> = {
     instruction: [
       '【续写要求】',
-      `目标字数约 ${targetChars} 字（可略有浮动）。`,
+      `参考篇幅约 ${targetChars} 字（仅供参考，宁缺毋滥，不要为凑字数注水）。`,
       input.position === 'end' ? '续写位置：本章末尾之后。' : `续写位置：本章第 ${offset} 字处（光标处）之后。`,
       beatTaskLine,
       s(input.direction) ? `作者方向：${s(input.direction)}` : outlineIds.length > 0 ? '作者未额外指定方向，请严格按大纲节拍自然推进。' : '作者未额外指定方向，请自然推进当前场景。',
@@ -1280,7 +1333,7 @@ function buildNearbyChapterContext(payload: WorkspaceSnapshotPayload, chapterIds
 async function callAiPromptJson(
   promptType: string,
   userPrompt: string,
-  options?: { temperature?: number; aiStylePrompt?: string },
+  options?: { temperature?: number; aiStylePrompt?: string; maxTokens?: number },
 ): Promise<JsonRecord> {
   assertAiReady()
   const result = await postAiPrompt({
@@ -1288,6 +1341,7 @@ async function callAiPromptJson(
     user_prompt: userPrompt,
     ai_style_prompt: options?.aiStylePrompt,
     temperature: options?.temperature,
+    max_tokens: options?.maxTokens ?? 8192,
     response_format: 'json',
   })
   const content = result.content
@@ -2366,7 +2420,8 @@ export async function askAiWithToolsStream(
 
   if (isFollowUp) {
     // Follow-up: 历史中已含系统提示词（由后端首次注入），直接追加用户消息
-    const trimmed = trimAskConversationHistory(existingHistory ?? [])
+    const sanitized = sanitizeToolCallHistory(existingHistory ?? [])
+    const trimmed = trimAskConversationHistory(sanitized)
     messages = [...trimmed, { role: 'user', content: userContent }]
   } else {
     // 首次调用：系统提示词由后端注入，前端不发送
@@ -2755,7 +2810,7 @@ export async function generateWorldSettingDraftByAi(
     existingSetting?: { name: string; content: string }
     history: Array<{ label: string; prompt: string; answer: string }>
   },
-): Promise<{ name: string; content: string }> {
+): Promise<{ name: string; content: string; cards: Array<{ key: string; value: string }> }> {
   const parts = [
     `作品名：${s(input.novelTitle) || '未命名作品'}`,
     `类型：${s(input.novel?.genre) || '未指定'}`,
@@ -2768,9 +2823,15 @@ export async function generateWorldSettingDraftByAi(
   const prompt = parts.filter(Boolean).join('\n')
 
   const parsed = await callAiPromptJson('world_setting_draft', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt })
+  const rawCards = Array.isArray(parsed.cards) ? parsed.cards : []
+  const cards = rawCards
+    .map((c) => c as { key?: string; title?: string; value?: string; content?: string })
+    .map((c) => ({ key: s(c.key ?? c.title), value: s(c.value ?? c.content) }))
+    .filter((c) => c.key || c.value)
   return {
     name: s(parsed.name) || '未命名世界观设定',
     content: s(parsed.content) || '',
+    cards,
   }
 }
 

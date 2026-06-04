@@ -1,5 +1,10 @@
 <template>
-  <section class="page-block" v-if="novel">
+  <section
+    class="page-block"
+    :class="{ 'page-block--ai-open': aiSidebarOpen && activeTab !== 'write' }"
+    :style="(aiSidebarOpen && activeTab !== 'write') ? { paddingRight: `min(${aiSidebarWidth}px, 92vw)` } : undefined"
+    v-if="novel"
+  >
     <header ref="workspaceChromeAnchorRef" class="header-row">
       <div>
         <h1>{{ novel.title }}</h1>
@@ -161,9 +166,7 @@
     <section class="card outline-console-card outline-console-card--map-only" v-if="activeTab === 'outline'">
       <header class="outline-map-hero">
         <div class="outline-map-hero__copy">
-          <span class="outline-map-hero__eyebrow">Outline</span>
           <h2>大纲</h2>
-          <p class="muted">管理情节点、章节绑定和推进状态，保持结构清晰、编辑直接。</p>
         </div>
         <dl class="outline-map-hero__stats" aria-label="大纲统计">
           <div>
@@ -239,7 +242,7 @@
         </Transition>
       </header>
 
-      <div v-if="outlineItems.length === 0" class="outline-map-empty-state">
+      <div v-if="outlineItems.length === 0 && outlineMapViewMode === 'map'" class="outline-map-empty-state">
         <h2>先建立第一张情节导图</h2>
         <p class="muted">创建第一个节点后，这里会直接呈现思维导图和右侧编辑区。</p>
         <div class="outline-map-empty-state__actions">
@@ -262,6 +265,7 @@
           @cycle-status="cycleOutlineStatus"
           @toggle-storyline="toggleOutlineStoryline"
           @reorder="reorderOutlineNode"
+          @ai-design="openOutlineAiDesignerCreate"
         />
         <OutlineMindMapCanvas
           v-else
@@ -299,7 +303,7 @@
 
       <Teleport to="body">
         <Transition name="confirm">
-          <div v-if="outlineAiDesignerOpen" class="confirm-overlay" role="presentation" @click.self="closeOutlineAiDesigner">
+          <div v-if="outlineAiDesignerOpen" class="confirm-overlay" role="presentation">
             <div class="confirm-dialog workspace-outline-dialog workspace-outline-ai-dialog" role="dialog" aria-modal="true">
               <div class="confirm-dialog__accent" aria-hidden="true" />
               <div class="confirm-dialog__body workspace-outline-dialog__body">
@@ -366,7 +370,7 @@
                   </button>
                 </div>
 
-                <div class="workspace-outline-dialog__scroll scrollbar-paper workspace-outline-ai-dialog__scroll">
+                <div ref="outlineAiScrollRef" class="workspace-outline-dialog__scroll scrollbar-paper workspace-outline-ai-dialog__scroll">
                   <template v-if="outlineAiDesignerStep === 'intro'">
                     <section v-if="!hasWorldviewForOutline" class="workspace-outline-ai-panel workspace-outline-ai-gate">
                       <div class="workspace-outline-ai-gate__icon" aria-hidden="true">◍</div>
@@ -725,7 +729,7 @@
         </Transition>
 
         <Transition name="confirm">
-          <div v-if="outlineCreateOpen" class="confirm-overlay" role="presentation" @click.self="closeOutlineCreate">
+          <div v-if="outlineCreateOpen" class="confirm-overlay" role="presentation">
             <div class="confirm-dialog workspace-outline-dialog workspace-outline-create-dialog" role="dialog" aria-modal="true">
               <div class="confirm-dialog__accent" aria-hidden="true" />
               <div class="confirm-dialog__body workspace-outline-dialog__body">
@@ -769,7 +773,6 @@
             v-if="outlineDetailOpenId && activeOutlineDetailItem"
             class="confirm-overlay"
             role="presentation"
-            @click.self="closeOutlineDetail"
           >
             <div class="confirm-dialog workspace-outline-dialog workspace-outline-detail-dialog" role="dialog" aria-modal="true">
               <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -1242,7 +1245,6 @@
               v-if="characterAllChangesModalOpen && selectedGraphCharacter"
               class="confirm-overlay"
               role="presentation"
-              @click.self="closeWorkspaceCharacterAllChangesModal"
             >
               <div class="confirm-dialog chapter-hub__relation-edit-dialog" role="dialog" aria-modal="true">
                 <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -1345,7 +1347,6 @@
               v-if="characterEditMode && selectedGraphCharacter"
               class="confirm-overlay"
               role="presentation"
-              @click.self="requestCloseCharacterEdit"
             >
               <div class="confirm-dialog workspace-character-edit-dialog" role="dialog" aria-modal="true">
                 <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -1593,7 +1594,6 @@
             v-if="characterCreateOpen"
             class="confirm-overlay"
             role="presentation"
-            @click.self="closeCharacterCreate"
           >
             <div class="confirm-dialog workspace-character-create-dialog" role="dialog" aria-modal="true">
               <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -1770,11 +1770,7 @@
 
     <section class="card workspace-items-card" v-if="activeTab === 'items'">
       <div class="workspace-items-hero">
-        <div>
-          <p class="workspace-items-hero__eyebrow">Inventory</p>
-          <h2>物品</h2>
-          <p class="muted workspace-items-hero__sub">记录关键道具、持有者和首次出现章节，让线索与设定不丢失。</p>
-        </div>
+        <h2>物品</h2>
         <button type="button" class="btn-primary workspace-items-hero__btn" @click="openItemCreate">新增物品</button>
       </div>
 
@@ -1798,15 +1794,15 @@
       <p v-else-if="filteredItems.length === 0" class="muted workspace-items-no-result">没有符合条件的物品</p>
 
       <div v-else class="workspace-item-grid">
-        <article v-for="item in filteredItems" :id="`workspace-item-${item.id}`" :key="item.id" class="workspace-item-card" :class="{ 'workspace-item-card--focused': focusedItemId === item.id }">
+        <article v-for="item in filteredItems" :id="`workspace-item-${item.id}`" :key="item.id" class="workspace-item-card" :class="{ 'workspace-item-card--focused': focusedItemId === item.id, 'workspace-item-card--ai-focus': aiFocusId === item.id }" @click="setAiFocus(item.id)">
           <div class="workspace-item-card__head">
             <div>
-              <p class="workspace-item-card__kicker">物品</p>
+              <p class="workspace-item-card__kicker">物品<span v-if="aiFocusId === item.id" class="workspace-item-card__focus-tag">AI 聚焦中</span></p>
               <h3>{{ item.name }}</h3>
             </div>
             <div class="workspace-item-card__actions">
-              <button type="button" class="faction-row__edit" @click="openItemEdit(item.id)">修改</button>
-              <button type="button" class="faction-row__delete" @click="openItemDelete(item.id)">删除</button>
+              <button type="button" class="faction-row__edit" @click.stop="openItemEdit(item.id)">修改</button>
+              <button type="button" class="faction-row__delete" @click.stop="openItemDelete(item.id)">删除</button>
             </div>
           </div>
           <div class="workspace-item-card__meta">
@@ -1848,7 +1844,7 @@
 
     <Teleport to="body">
       <Transition name="confirm">
-        <div v-if="itemCreateOpen" class="confirm-overlay" role="presentation" @click.self="requestCloseItemCreate">
+        <div v-if="itemCreateOpen" class="confirm-overlay" role="presentation">
           <div class="confirm-dialog workspace-item-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
             <div class="confirm-dialog__body workspace-item-dialog__body">
@@ -1935,7 +1931,7 @@
 
     <Teleport to="body">
       <Transition name="confirm">
-        <div v-if="itemEditOpen" class="confirm-overlay" role="presentation" @click.self="requestCloseItemEdit">
+        <div v-if="itemEditOpen" class="confirm-overlay" role="presentation">
           <div class="confirm-dialog workspace-item-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
             <div class="confirm-dialog__body workspace-item-dialog__body">
@@ -2134,7 +2130,7 @@
 
     <Teleport to="body">
       <Transition name="confirm">
-        <div v-if="factionEditOpen" class="confirm-overlay" role="presentation" @click.self="requestCloseFactionEdit">
+        <div v-if="factionEditOpen" class="confirm-overlay" role="presentation">
           <div class="confirm-dialog workspace-faction-edit-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
             <Transition name="chapter-hub-save-toast">
@@ -2290,7 +2286,6 @@
           v-if="factionCreateOpen"
           class="confirm-overlay"
           role="presentation"
-          @click.self="closeFactionCreate"
         >
           <div class="confirm-dialog workspace-faction-create-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -2350,11 +2345,7 @@
 
     <section class="card workspace-items-card" v-if="activeTab === 'categories'">
       <div class="workspace-items-hero">
-        <div>
-          <p class="workspace-items-hero__eyebrow">Taxonomy</p>
-          <h2>分类</h2>
-          <p class="muted workspace-items-hero__sub">用统一的分类标签归拢角色、势力与设定，便于筛选和批量管理。</p>
-        </div>
+        <h2>分类</h2>
         <button type="button" class="btn-primary workspace-items-hero__btn" @click="openCategoryCreate">添加分类</button>
       </div>
 
@@ -2384,16 +2375,16 @@
         <p v-if="categoryCenterFilteredCategories.length === 0" class="muted workspace-items-no-result">没有符合条件的分类</p>
 
         <div v-else class="workspace-item-grid">
-          <article v-for="cat in categoryCenterFilteredCategories" :key="cat.id" class="workspace-item-card">
+          <article v-for="cat in categoryCenterFilteredCategories" :key="cat.id" class="workspace-item-card" :class="{ 'workspace-item-card--ai-focus': aiFocusId === cat.id }" @click="setAiFocus(cat.id)">
             <div class="workspace-item-card__head">
               <div>
-                <p class="workspace-item-card__kicker">分类</p>
+                <p class="workspace-item-card__kicker">分类<span v-if="aiFocusId === cat.id" class="workspace-item-card__focus-tag">AI 聚焦中</span></p>
                 <h3>{{ cat.name }}</h3>
               </div>
               <div class="workspace-item-card__actions">
-                <button type="button" class="faction-row__edit" @click="openCategoryEdit(cat.id)">修改</button>
-                <button type="button" class="faction-row__edit" @click="openCategoryBindModal(cat.id)">绑定</button>
-                <button type="button" class="faction-row__delete" @click="openCategoryDelete(cat.id)">删除</button>
+                <button type="button" class="faction-row__edit" @click.stop="openCategoryEdit(cat.id)">修改</button>
+                <button type="button" class="faction-row__edit" @click.stop="openCategoryBindModal(cat.id)">绑定</button>
+                <button type="button" class="faction-row__delete" @click.stop="openCategoryDelete(cat.id)">删除</button>
               </div>
             </div>
             <p v-if="(cat.notes ?? '').trim()" class="workspace-item-card__summary">{{ cat.notes }}</p>
@@ -2443,7 +2434,6 @@
           v-if="categoryBindModalOpen && categoryBindModalCategoryId"
           class="confirm-overlay"
           role="presentation"
-          @click.self="requestCancelCategoryBindModal"
         >
           <div class="confirm-dialog chapter-hub__relation-edit-dialog workspace-category-bind-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -2568,7 +2558,7 @@
 
     <Teleport to="body">
       <Transition name="confirm">
-        <div v-if="categoryEditOpen" class="confirm-overlay" role="presentation" @click.self="requestCloseCategoryEdit">
+        <div v-if="categoryEditOpen" class="confirm-overlay" role="presentation">
           <div class="confirm-dialog workspace-category-edit-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
             <div class="confirm-dialog__body workspace-category-edit-dialog__body">
@@ -2614,7 +2604,6 @@
           v-if="categoryCreateOpen"
           class="confirm-overlay"
           role="presentation"
-          @click.self="closeCategoryCreate"
         >
           <div class="confirm-dialog workspace-category-edit-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -2727,7 +2716,6 @@
           v-if="foreshadowEditOpen"
           class="confirm-overlay"
           role="presentation"
-          @click.self="requestCloseForeshadowEdit"
         >
           <div class="confirm-dialog workspace-foreshadow-edit-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -2815,7 +2803,6 @@
           v-if="foreshadowJumpOpen && foreshadowJumpTarget"
           class="confirm-overlay"
           role="presentation"
-          @click.self="closeForeshadowJumpModal"
         >
           <div class="confirm-dialog workspace-foreshadow-jump-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -2848,11 +2835,7 @@
 
     <section class="card workspace-items-card" v-if="activeTab === 'worldsettings'">
       <div class="workspace-items-hero">
-        <div>
-          <p class="workspace-items-hero__eyebrow">Worldbuilding</p>
-          <h2>世界观设定</h2>
-          <p class="muted workspace-items-hero__sub">沉淀世界的规则、地理、势力与历史，AI 设计大纲和续写都会以此为基准。</p>
-        </div>
+        <h2>世界观设定</h2>
         <div class="workspace-items-hero__actions">
           <button type="button" class="btn-secondary" @click="openWorldSettingAiCreate">AI 生成</button>
           <button type="button" class="btn-primary workspace-items-hero__btn" @click="openWorldSettingCreate">新增设定</button>
@@ -2906,25 +2889,117 @@
             :id="`world-setting-row-${ws.id}`"
             :key="ws.id"
             class="workspace-item-card"
+            :class="{
+              'workspace-item-card--ai-focus': aiFocusId === ws.id,
+              'workspace-item-card--ai-pending': worldSettingPending.updates.has(ws.id) || worldSettingPending.deletes.has(ws.id),
+              'workspace-item-card--ai-update': worldSettingPending.updates.has(ws.id) && !worldSettingPending.deletes.has(ws.id),
+              'workspace-item-card--ai-delete': worldSettingPending.deletes.has(ws.id),
+            }"
+            @click="setAiFocus(ws.id)"
           >
+            <div v-if="worldSettingPending.updates.has(ws.id) || worldSettingPending.deletes.has(ws.id)" class="ai-pending-banner" :class="{ 'ai-pending-banner--delete': worldSettingPending.deletes.has(ws.id) }">
+              <span class="ai-pending-banner__tag">{{ worldSettingPending.deletes.has(ws.id) ? 'AI 待删除' : 'AI 待修改' }}</span>
+              <span class="ai-pending-banner__spacer" />
+              <button type="button" class="ai-pending-banner__btn ai-pending-banner__btn--primary" @click.stop="adoptAiPending(worldSettingPending.deletes.get(ws.id) || worldSettingPending.updates.get(ws.id)!.actionId)">采用</button>
+              <button type="button" class="ai-pending-banner__btn" @click.stop="discardAiPending(worldSettingPending.deletes.get(ws.id) || worldSettingPending.updates.get(ws.id)!.actionId)">忽略</button>
+            </div>
             <div class="workspace-item-card__head">
               <div>
-                <p class="workspace-item-card__kicker">世界观</p>
-                <h3>{{ ws.name }}</h3>
+                <p class="workspace-item-card__kicker">世界观<span v-if="aiFocusId === ws.id" class="workspace-item-card__focus-tag">AI 聚焦中</span></p>
+                <h3>{{ worldSettingPending.updates.get(ws.id)?.name ?? ws.name }}</h3>
               </div>
               <div class="workspace-item-card__actions">
-                <button type="button" class="faction-row__edit" title="修改设定" @click="openWorldSettingEdit(ws.id)">修改</button>
-                <button type="button" class="faction-row__edit" title="AI 编辑" @click="openWorldSettingAiEdit(ws.id)">AI</button>
-                <button type="button" class="faction-row__delete" title="删除设定" @click="openWorldSettingDelete(ws.id)">删除</button>
+                <button type="button" class="faction-row__edit" title="修改设定" @click.stop="openWorldSettingEdit(ws.id)">修改</button>
+                <button type="button" class="faction-row__edit" title="AI 编辑" @click.stop="openWorldSettingAiEdit(ws.id)">AI</button>
+                <button type="button" class="faction-row__delete" title="删除设定" @click.stop="openWorldSettingDelete(ws.id)">删除</button>
               </div>
             </div>
             <div v-if="categoryNamesByIds(ws.categoryIds).length > 0" class="workspace-item-card__meta">
               <span v-for="name in categoryNamesByIds(ws.categoryIds)" :key="`wscat-${ws.id}-${name}`">分类：{{ name }}</span>
             </div>
-            <p class="workspace-item-card__summary workspace-ws-card__content">{{ ws.content ? (ws.content.length > 200 ? ws.content.slice(0, 200) + '…' : ws.content) : '暂无内容' }}</p>
+            <div v-if="worldSettingPending.updates.has(ws.id)" class="ws-subcards scrollbar-paper">
+              <div
+                v-for="card in worldSettingCardDiff(ws)"
+                :key="card.id"
+                class="ws-subcard"
+                :class="{
+                  'ws-subcard--added': card.status === 'added',
+                  'ws-subcard--removed': card.status === 'removed',
+                  'ws-subcard--changed': card.status === 'changed',
+                }"
+              >
+                <p class="ws-subcard__title">
+                  <span v-if="card.status === 'added'" class="ws-subcard__tag ws-subcard__tag--add">新增</span>
+                  <span v-else-if="card.status === 'removed'" class="ws-subcard__tag ws-subcard__tag--del">删除</span>
+                  <span v-else-if="card.status === 'changed'" class="ws-subcard__tag ws-subcard__tag--chg">修改</span>
+                  {{ card.key || '未命名' }}
+                </p>
+                <p v-if="card.status === 'changed'" class="ws-subcard__old">{{ card.oldValue }}</p>
+                <p class="ws-subcard__body">{{ card.value }}</p>
+              </div>
+            </div>
+            <div v-else-if="(ws.attributes ?? []).length > 0" class="ws-subcards scrollbar-paper">
+              <div v-for="card in ws.attributes" :key="card.id" class="ws-subcard">
+                <p class="ws-subcard__title">{{ card.key || '未命名' }}</p>
+                <p class="ws-subcard__body">{{ card.value }}</p>
+              </div>
+            </div>
+            <p v-else class="workspace-item-card__summary muted">暂无内容</p>
+          </article>
+
+          <article
+            v-for="phantom in worldSettingPending.creates"
+            :key="phantom.id"
+            class="workspace-item-card workspace-item-card--ai-pending workspace-item-card--ai-create"
+          >
+            <div class="ai-pending-banner ai-pending-banner--create">
+              <span class="ai-pending-banner__tag">AI 待新增</span>
+              <span class="ai-pending-banner__spacer" />
+              <button type="button" class="ai-pending-banner__btn ai-pending-banner__btn--primary" @click="adoptAiPending(phantom.id)">采用</button>
+              <button type="button" class="ai-pending-banner__btn" @click="discardAiPending(phantom.id)">忽略</button>
+            </div>
+            <div class="workspace-item-card__head">
+              <div>
+                <p class="workspace-item-card__kicker">世界观</p>
+                <h3>{{ phantom.name }}</h3>
+              </div>
+            </div>
+            <div v-if="phantom.attributes.length > 0" class="ws-subcards scrollbar-paper">
+              <div v-for="card in phantom.attributes" :key="card.id" class="ws-subcard">
+                <p class="ws-subcard__title">{{ card.key || '未命名' }}</p>
+                <p class="ws-subcard__body">{{ card.value }}</p>
+              </div>
+            </div>
           </article>
         </div>
       </template>
+
+      <div v-if="worldSettings.length === 0 && worldSettingPending.creates.length > 0" class="workspace-item-grid">
+        <article
+          v-for="phantom in worldSettingPending.creates"
+          :key="phantom.id"
+          class="workspace-item-card workspace-item-card--ai-pending workspace-item-card--ai-create"
+        >
+          <div class="ai-pending-banner ai-pending-banner--create">
+            <span class="ai-pending-banner__tag">AI 待新增</span>
+            <span class="ai-pending-banner__spacer" />
+            <button type="button" class="ai-pending-banner__btn ai-pending-banner__btn--primary" @click="adoptAiPending(phantom.id)">采用</button>
+            <button type="button" class="ai-pending-banner__btn" @click="discardAiPending(phantom.id)">忽略</button>
+          </div>
+          <div class="workspace-item-card__head">
+            <div>
+              <p class="workspace-item-card__kicker">世界观</p>
+              <h3>{{ phantom.name }}</h3>
+            </div>
+          </div>
+          <div v-if="phantom.attributes.length > 0" class="ws-subcards scrollbar-paper">
+            <div v-for="card in phantom.attributes" :key="card.id" class="ws-subcard">
+              <p class="ws-subcard__title">{{ card.key || '未命名' }}</p>
+              <p class="ws-subcard__body">{{ card.value }}</p>
+            </div>
+          </div>
+        </article>
+      </div>
 
       <ConfirmDialog
         v-model="worldSettingDeleteOpen"
@@ -2943,7 +3018,6 @@
           v-if="worldSettingCreateOpen"
           class="confirm-overlay"
           role="presentation"
-          @click.self="worldSettingCreateOpen = false"
         >
           <div class="confirm-dialog workspace-faction-create-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -2954,10 +3028,17 @@
                   设定名称 *
                   <input v-model="worldSettingForm.name" maxlength="100" required autocomplete="off" placeholder="例：修炼境界体系" />
                 </label>
-                <label style="margin-top: 10px">
-                  设定内容
-                  <textarea v-model="worldSettingForm.content" rows="8" placeholder="详细描述这个世界观设定…" style="width: 100%; resize: vertical; min-height: 120px"></textarea>
-                </label>
+                <section class="ws-cards-editor" style="margin-top: 10px">
+                  <div class="faction-custom-fields__head">
+                    <p class="character-custom-list__title">设定卡片（按维度分块，如 力量体系 / 地理 / 历史）</p>
+                  </div>
+                  <div v-for="card in worldSettingForm.cards" :key="card.id" class="ws-card-row">
+                    <input v-model="card.key" class="ws-card-row__title" maxlength="40" placeholder="卡片标题（如 境界划分）" />
+                    <textarea v-model="card.value" class="ws-card-row__body" rows="3" maxlength="2000" placeholder="这一块的具体内容…"></textarea>
+                    <button type="button" class="ws-card-row__remove" @click="removeWorldSettingFormCard(card.id)">删除</button>
+                  </div>
+                  <button type="button" class="btn-primary" @click="addWorldSettingFormCard">＋ 添加卡片</button>
+                </section>
                 <div class="character-custom-fields faction-custom-fields" style="margin-top: 10px">
                   <div class="faction-custom-fields__head">
                     <p class="character-custom-list__title">分类</p>
@@ -3011,21 +3092,28 @@
           v-if="worldSettingEditOpen"
           class="confirm-overlay"
           role="presentation"
-          @click.self="worldSettingEditOpen = false"
         >
           <div class="confirm-dialog workspace-faction-edit-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
             <div class="confirm-dialog__body workspace-faction-edit-dialog__body">
               <h2 class="confirm-dialog__title">修改世界观设定</h2>
+              <div class="workspace-faction-edit-dialog__scroll scrollbar-paper">
               <div class="form-grid" style="margin-top: 12px">
                 <label>
                   设定名称 *
                   <input v-model="worldSettingEditDraft.name" maxlength="100" required />
                 </label>
-                <label style="margin-top: 10px">
-                  设定内容
-                  <textarea v-model="worldSettingEditDraft.content" rows="8" style="width: 100%; resize: vertical; min-height: 120px"></textarea>
-                </label>
+                <section class="ws-cards-editor" style="margin-top: 10px">
+                  <div class="faction-custom-fields__head">
+                    <p class="character-custom-list__title">设定卡片（按维度分块，如 力量体系 / 地理 / 历史）</p>
+                  </div>
+                  <div v-for="card in worldSettingEditDraft.cards" :key="card.id" class="ws-card-row">
+                    <input v-model="card.key" class="ws-card-row__title" maxlength="40" placeholder="卡片标题（如 境界划分）" />
+                    <textarea v-model="card.value" class="ws-card-row__body" rows="3" maxlength="2000" placeholder="这一块的具体内容…"></textarea>
+                    <button type="button" class="ws-card-row__remove" @click="removeWorldSettingEditCard(card.id)">删除</button>
+                  </div>
+                  <button type="button" class="btn-primary" @click="addWorldSettingEditCard">＋ 添加卡片</button>
+                </section>
                 <div class="character-custom-fields faction-custom-fields" style="margin-top: 10px">
                   <div class="faction-custom-fields__head">
                     <p class="character-custom-list__title">分类</p>
@@ -3055,6 +3143,7 @@
                   </div>
                 </div>
               </div>
+              </div>
               <div class="confirm-dialog__actions" style="margin-top: 14px">
                 <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="worldSettingEditOpen = false">
                   取消
@@ -3075,7 +3164,6 @@
           v-if="worldSettingAiOpen"
           class="confirm-overlay ws-ai-overlay"
           role="presentation"
-          @click.self="worldSettingAiOpen = false"
         >
           <div class="confirm-dialog ws-ai-dialog" role="dialog" aria-modal="true">
             <div class="confirm-dialog__accent" aria-hidden="true" />
@@ -3261,16 +3349,17 @@
                     />
                   </label>
 
-                  <label class="ws-ai-field">
-                    <span class="ws-ai-field__label">设定内容</span>
-                    <textarea
-                      v-model="worldSettingAiDraftContent"
-                      class="ws-ai-textarea ws-ai-textarea--large"
-                      rows="16"
-                      placeholder="世界观设定详细内容…"
-                    />
-                    <span class="ws-ai-field__hint">{{ worldSettingAiDraftContent.length }} 字</span>
-                  </label>
+                  <div class="ws-ai-field">
+                    <span class="ws-ai-field__label">设定卡片（可逐张修改、增删）</span>
+                    <div class="ws-cards-editor">
+                      <div v-for="card in worldSettingAiDraftCards" :key="card.id" class="ws-card-row">
+                        <input v-model="card.key" class="ws-card-row__title" maxlength="40" placeholder="卡片标题（如 力量体系）" />
+                        <textarea v-model="card.value" class="ws-card-row__body" rows="3" maxlength="2000" placeholder="这一块的具体内容…"></textarea>
+                        <button type="button" class="ws-card-row__remove" @click="removeWorldSettingAiDraftCard(card.id)">删除</button>
+                      </div>
+                      <button type="button" class="btn-primary" @click="addWorldSettingAiDraftCard">＋ 添加卡片</button>
+                    </div>
+                  </div>
 
                   <div class="ws-ai-field">
                     <span class="ws-ai-field__label">分类标签</span>
@@ -3332,6 +3421,18 @@
         </div>
       </Transition>
     </Teleport>
+
+    <WorkspaceAiSidebar
+      ref="workspaceAiSidebarRef"
+      v-if="activeTab !== 'write'"
+      :novel-id="novelId"
+      :novel="novel ?? null"
+      :focus-entity="aiFocusEntity"
+      @applied="reloadWorkspaceFromAi"
+      @pending-change="onAiPendingChange"
+      @open-change="(v) => (aiSidebarOpen = v)"
+      @width-change="(w) => (aiSidebarWidth = w)"
+    />
 
   </section>
 
@@ -3424,6 +3525,7 @@ import type {
   Character,
   Chapter,
   CharacterAttribute,
+  AiPendingToolAction,
   CharacterFactionMembership,
   CharacterRelation,
   Faction,
@@ -3449,6 +3551,7 @@ import CharacterRelationFocusSphere from '../../components/CharacterRelationFocu
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import OutlineMindMapCanvas from './components/outline-map/OutlineMindMapCanvas.vue'
 import OutlineBoardView from './components/outline-map/OutlineBoardView.vue'
+import WorkspaceAiSidebar from './components/WorkspaceAiSidebar.vue'
 import OutlineMindMapInspector from './components/outline-map/OutlineMindMapInspector.vue'
 import { useOutlineChapterMapping } from '../../features/outline-map/composables/useOutlineChapterMapping'
 import { useOutlineMindMapLayout } from '../../features/outline-map/composables/useOutlineMindMapLayout'
@@ -3594,6 +3697,14 @@ const outlineAiWriteToast = ref('')
 let outlineAiWriteToastTimer: ReturnType<typeof setTimeout> | null = null
 const outlineAiInterviewHistory = ref<OutlineAiFollowupTurn[]>([])
 const outlineAiCurrentQuestion = ref<OutlineAiInterviewQuestion | null>(null)
+const outlineAiScrollRef = ref<HTMLElement | null>(null)
+// 访谈每弹出新问题时，弹窗滚动到底部跟随
+watch([outlineAiCurrentQuestion, () => outlineAiInterviewHistory.value.length], () => {
+  void nextTick(() => {
+    const el = outlineAiScrollRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+})
 const outlineAiCurrentAnswer = ref('')
 const outlineAiCurrentCustom = ref('')
 const outlineAiOptionNotes = ref<Record<string, string>>({})
@@ -3706,11 +3817,11 @@ const foreshadowJumpTarget = ref<ForeshadowPlant | null>(null)
 const worldSettings = ref<WorldSetting[]>([])
 const worldSettingKeywordFilter = ref('')
 const worldSettingCreateOpen = ref(false)
-const worldSettingForm = reactive({ name: '', content: '', categoryIds: [] as string[] })
+const worldSettingForm = reactive({ name: '', content: '', categoryIds: [] as string[], cards: [] as CharacterAttribute[] })
 const worldSettingFormError = ref('')
 const worldSettingEditOpen = ref(false)
 const worldSettingEditId = ref('')
-const worldSettingEditDraft = reactive({ name: '', content: '', categoryIds: [] as string[] })
+const worldSettingEditDraft = reactive({ name: '', content: '', categoryIds: [] as string[], cards: [] as CharacterAttribute[] })
 const worldSettingDeleteOpen = ref(false)
 const worldSettingDeleteId = ref('')
 type WorldSettingAiStep = 'interview' | 'draft'
@@ -3729,6 +3840,7 @@ const worldSettingAiCoveredDimensions = ref<string[]>([])
 const worldSettingAiRationale = ref('')
 const worldSettingAiDraftName = ref('')
 const worldSettingAiDraftContent = ref('')
+const worldSettingAiDraftCards = ref<CharacterAttribute[]>([])
 const worldSettingAiDraftCategoryIds = ref<string[]>([])
 const timelineForm = reactive({
   storyLabel: '',
@@ -4708,22 +4820,151 @@ function onFocusSphereNodeSelect(id: string): void {
   graphFocusSphereSelectedId.value = id
 }
 
+function reloadWorkspaceEntities(id: string): void {
+  chapters.value = getChaptersByNovelId(id)
+  outlineItems.value = getOutlineByNovelId(id)
+  outlineStorylines.value = getOutlineStorylinesByNovelId(id)
+  characters.value = getCharactersByNovelId(id)
+  characterRelations.value = getCharacterRelationsByNovelId(id)
+  factions.value = getFactionsByNovelId(id)
+  items.value = getItemsByNovelId(id)
+  categories.value = getCategoriesByNovelId(id)
+  characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(id)
+  timelineEvents.value = getTimelineByNovelId(id)
+  foreshadows.value = getForeshadowsByNovelId(id)
+  worldSettings.value = getWorldSettingsByNovelId(id)
+}
+
+function reloadWorkspaceFromAi(): void {
+  if (novelId.value) reloadWorkspaceEntities(novelId.value)
+}
+
+// ── AI 待采用修改：原位 diff 预览 ──────────────────────────────────────────
+const workspaceAiSidebarRef = ref<{ applyOneById: (id: string) => void; ignoreOneById: (id: string) => void } | null>(null)
+const aiPendingActions = ref<AiPendingToolAction[]>([])
+const aiSidebarOpen = ref(false)
+const aiSidebarWidth = ref(420)
+function onAiPendingChange(actions: AiPendingToolAction[]): void {
+  aiPendingActions.value = actions
+}
+function adoptAiPending(id: string): void {
+  workspaceAiSidebarRef.value?.applyOneById(id)
+}
+function discardAiPending(id: string): void {
+  workspaceAiSidebarRef.value?.ignoreOneById(id)
+}
+function parsePendingArgs(json: string): Record<string, any> {
+  try {
+    return JSON.parse(json) ?? {}
+  } catch {
+    return {}
+  }
+}
+function pendingCardsToAttrs(raw: unknown): CharacterAttribute[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((c) => c as { key?: string; title?: string; value?: string; content?: string })
+    .map((c) => ({ id: uid(), key: String(c.key ?? c.title ?? '').trim(), value: String(c.value ?? c.content ?? '').trim() }))
+    .filter((c) => c.key || c.value)
+}
+
+/** 世界观的待采用项：新建（phantom）/ 修改（overlay）/ 删除（标记） */
+const worldSettingPending = computed(() => {
+  const creates: Array<{ id: string; name: string; attributes: CharacterAttribute[] }> = []
+  const updates = new Map<string, { actionId: string; name?: string; attributes?: CharacterAttribute[] }>()
+  const deletes = new Map<string, string>()
+  for (const action of aiPendingActions.value) {
+    const fn = action.toolCall.function.name
+    const args = parsePendingArgs(action.toolCall.function.arguments)
+    if (fn === 'create_world_setting') {
+      creates.push({
+        id: action.id,
+        name: String(args.name ?? '未命名设定'),
+        attributes: pendingCardsToAttrs(args.cards) || [],
+      })
+    } else if (fn === 'update_world_setting' && args.id) {
+      updates.set(String(args.id), {
+        actionId: action.id,
+        name: args.name != null ? String(args.name) : undefined,
+        attributes: args.cards != null ? pendingCardsToAttrs(args.cards) : undefined,
+      })
+    } else if (fn === 'delete_world_setting' && args.id) {
+      deletes.set(String(args.id), action.id)
+    }
+  }
+  return { creates, updates, deletes }
+})
+
+type WsCardDiff = { id: string; key: string; value: string; status: 'same' | 'added' | 'removed' | 'changed'; oldValue?: string }
+/** 某条世界观若有待修改，按卡片标题(key)对比新旧，返回带 added/removed/changed 标记的合并列表 */
+function worldSettingCardDiff(ws: WorldSetting): WsCardDiff[] {
+  const pending = worldSettingPending.value.updates.get(ws.id)
+  const oldCards = (ws.attributes ?? []).filter((c) => c && (c.key || c.value))
+  if (!pending || pending.attributes === undefined) {
+    return oldCards.map((c) => ({ id: c.id, key: c.key, value: c.value, status: 'same' as const }))
+  }
+  const newCards = pending.attributes
+  const oldByKey = new Map(oldCards.map((c) => [c.key.trim(), c]))
+  const newByKey = new Map(newCards.map((c) => [c.key.trim(), c]))
+  const out: WsCardDiff[] = []
+  // 旧卡片：保留 / 修改 / 删除
+  for (const oc of oldCards) {
+    const match = newByKey.get(oc.key.trim())
+    if (!match) {
+      out.push({ id: oc.id, key: oc.key, value: oc.value, status: 'removed' })
+    } else if (match.value.trim() !== oc.value.trim()) {
+      out.push({ id: oc.id, key: oc.key, value: match.value, oldValue: oc.value, status: 'changed' })
+    } else {
+      out.push({ id: oc.id, key: oc.key, value: oc.value, status: 'same' })
+    }
+  }
+  // 新增卡片（旧里没有的 key）
+  for (const nc of newCards) {
+    if (!oldByKey.has(nc.key.trim())) {
+      out.push({ id: nc.id, key: nc.key, value: nc.value, status: 'added' })
+    }
+  }
+  return out
+}
+
+const aiFocusId = ref('')
+function setAiFocus(id: string): void {
+  aiFocusId.value = aiFocusId.value === id ? '' : id
+}
+
+const aiFocusEntity = computed<{ kind: string; id: string; label: string } | null>(() => {
+  if (activeTab.value === 'outline' && activeOutlineMapId.value) {
+    const it = outlineItems.value.find((o) => o.id === activeOutlineMapId.value)
+    if (it) return { kind: '大纲节点', id: it.id, label: it.title || '未命名节点' }
+  }
+  if (activeTab.value === 'characters' && graphFocusCharacterId.value) {
+    const c = characters.value.find((x) => x.id === graphFocusCharacterId.value)
+    if (c) return { kind: '角色', id: c.id, label: c.name || '未命名角色' }
+  }
+  if (activeTab.value === 'factions' && aiFocusId.value) {
+    const f = factions.value.find((x) => x.id === aiFocusId.value)
+    if (f) return { kind: '势力', id: f.id, label: f.name || '未命名势力' }
+  }
+  if (activeTab.value === 'items' && aiFocusId.value) {
+    const it = items.value.find((x) => x.id === aiFocusId.value)
+    if (it) return { kind: '物品', id: it.id, label: it.name || '未命名物品' }
+  }
+  if (activeTab.value === 'categories' && aiFocusId.value) {
+    const c = categories.value.find((x) => x.id === aiFocusId.value)
+    if (c) return { kind: '分类', id: c.id, label: c.name || '未命名分类' }
+  }
+  if (activeTab.value === 'worldsettings' && aiFocusId.value) {
+    const w = worldSettings.value.find((x) => x.id === aiFocusId.value)
+    if (w) return { kind: '世界观设定', id: w.id, label: w.name || '未命名设定' }
+  }
+  return null
+})
+
 watch(
   novelId,
   (id) => {
-    chapters.value = getChaptersByNovelId(id)
-    outlineItems.value = getOutlineByNovelId(id)
-    outlineStorylines.value = getOutlineStorylinesByNovelId(id)
-    characters.value = getCharactersByNovelId(id)
-    characterRelations.value = getCharacterRelationsByNovelId(id)
+    reloadWorkspaceEntities(id)
     graphFocusCharacterId.value = characters.value[0]?.id ?? ''
-    factions.value = getFactionsByNovelId(id)
-    items.value = getItemsByNovelId(id)
-    categories.value = getCategoriesByNovelId(id)
-    characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(id)
-    timelineEvents.value = getTimelineByNovelId(id)
-    foreshadows.value = getForeshadowsByNovelId(id)
-    worldSettings.value = getWorldSettingsByNovelId(id)
     factionEditOpen.value = false
     factionEditId.value = ''
     applyRoutePrefill()
@@ -4950,7 +5191,9 @@ function backToOutlineAiExpand(): void {
 }
 
 function closeOutlineAiDesigner(): void {
-  if (outlineAiDesignerLoading.value || outlineAiDesignerWriting.value) return
+  // 写入磁盘期间不可关闭（避免写一半丢失）；仅 AI 生成中（loading）允许点外部关闭
+  if (outlineAiDesignerWriting.value) return
+  outlineAiDesignerLoading.value = false
   outlineAiDesignerOpen.value = false
 }
 
@@ -4986,7 +5229,7 @@ async function requestNextOutlineAiQuestion(): Promise<boolean> {
         },
         aiStylePrompt: novel.value.aiStylePrompt,
         history: collectOutlineAiInterviewHistory(),
-        remainingRounds: Math.max(0, 6 - outlineAiInterviewHistory.value.length),
+        remainingRounds: Math.max(0, 12 - outlineAiInterviewHistory.value.length),
       },
     )
     outlineAiDesignerRationale.value = result.rationale
@@ -5062,13 +5305,7 @@ async function submitOutlineAiInterviewAnswer(): Promise<void> {
   outlineAiCurrentQuestion.value = null
   outlineAiCurrentAnswer.value = ''
   outlineAiCurrentCustom.value = ''
-  if (outlineAiInterviewHistory.value.length >= 6) {
-    await generateOutlineAiOptions()
-    return
-  }
-  // Early exit if all 5 dimensions covered after 3+ rounds
-  const allDimsCovered = outlineAiCoveredDimensions.value.length >= 5
-  if (allDimsCovered && outlineAiInterviewHistory.value.length >= 3) {
+  if (outlineAiInterviewHistory.value.length >= 12) {
     await generateOutlineAiOptions()
     return
   }
@@ -7985,8 +8222,24 @@ function openWorldSettingCreate(): void {
   worldSettingForm.name = ''
   worldSettingForm.content = ''
   worldSettingForm.categoryIds = []
+  worldSettingForm.cards = [{ id: uid(), key: '', value: '' }]
   worldSettingFormError.value = ''
   worldSettingCreateOpen.value = true
+}
+
+function addWorldSettingFormCard(): void {
+  worldSettingForm.cards.push({ id: uid(), key: '', value: '' })
+}
+function removeWorldSettingFormCard(id: string): void {
+  const i = worldSettingForm.cards.findIndex((c) => c.id === id)
+  if (i >= 0) worldSettingForm.cards.splice(i, 1)
+}
+function addWorldSettingEditCard(): void {
+  worldSettingEditDraft.cards.push({ id: uid(), key: '', value: '' })
+}
+function removeWorldSettingEditCard(id: string): void {
+  const i = worldSettingEditDraft.cards.findIndex((c) => c.id === id)
+  if (i >= 0) worldSettingEditDraft.cards.splice(i, 1)
 }
 
 function handleCreateWorldSetting(): void {
@@ -7998,7 +8251,8 @@ function handleCreateWorldSetting(): void {
   createWorldSetting({
     novelId: novelId.value,
     name: worldSettingForm.name,
-    content: worldSettingForm.content,
+    content: '',
+    attributes: worldSettingForm.cards,
     categoryIds: worldSettingForm.categoryIds,
   })
   worldSettings.value = getWorldSettingsByNovelId(novelId.value)
@@ -8012,6 +8266,8 @@ function openWorldSettingEdit(id: string): void {
   worldSettingEditDraft.name = ws.name
   worldSettingEditDraft.content = ws.content
   worldSettingEditDraft.categoryIds = [...(ws.categoryIds ?? [])]
+  const cards = (ws.attributes ?? []).map((a) => ({ id: a.id || uid(), key: a.key, value: a.value }))
+  worldSettingEditDraft.cards = cards.length > 0 ? cards : [{ id: uid(), key: '', value: '' }]
   worldSettingEditOpen.value = true
 }
 
@@ -8021,7 +8277,8 @@ function handleSaveWorldSettingEdit(): void {
   updateWorldSetting({
     id: worldSettingEditId.value,
     name: worldSettingEditDraft.name,
-    content: worldSettingEditDraft.content,
+    content: '',
+    attributes: worldSettingEditDraft.cards,
     categoryIds: worldSettingEditDraft.categoryIds,
   })
   worldSettings.value = getWorldSettingsByNovelId(novelId.value)
@@ -8077,6 +8334,7 @@ function resetWorldSettingAiState(): void {
   worldSettingAiRationale.value = ''
   worldSettingAiDraftName.value = ''
   worldSettingAiDraftContent.value = ''
+  worldSettingAiDraftCards.value = []
   worldSettingAiDraftCategoryIds.value = []
 }
 
@@ -8134,7 +8392,7 @@ async function requestNextWorldSettingAiQuestion(): Promise<boolean> {
         aiStylePrompt: novel.value.aiStylePrompt,
         existingSetting: existing ? { name: existing.name, content: existing.content } : undefined,
         history: collectWorldSettingAiHistory(),
-        remainingRounds: Math.max(0, 6 - worldSettingAiInterviewHistory.value.length),
+        remainingRounds: Math.max(0, 12 - worldSettingAiInterviewHistory.value.length),
       },
     )
     worldSettingAiRationale.value = result.rationale
@@ -8172,12 +8430,7 @@ async function submitWorldSettingAiInterviewAnswer(): Promise<void> {
   worldSettingAiCurrentQuestion.value = null
   worldSettingAiCurrentAnswer.value = ''
   worldSettingAiCurrentCustom.value = ''
-  if (worldSettingAiInterviewHistory.value.length >= 6) {
-    await generateWorldSettingAiDraft()
-    return
-  }
-  const allDimsCovered = worldSettingAiCoveredDimensions.value.length >= 5
-  if (allDimsCovered && worldSettingAiInterviewHistory.value.length >= 3) {
+  if (worldSettingAiInterviewHistory.value.length >= 12) {
     await generateWorldSettingAiDraft()
     return
   }
@@ -8213,6 +8466,11 @@ async function generateWorldSettingAiDraft(): Promise<void> {
       },
     )
     worldSettingAiDraftName.value = result.name
+    worldSettingAiDraftCards.value = (result.cards ?? []).map((c) => ({ id: uid(), key: c.key, value: c.value }))
+    if (worldSettingAiDraftCards.value.length === 0) {
+      const fallback = String(result.content ?? '').trim()
+      worldSettingAiDraftCards.value = fallback ? [{ id: uid(), key: '概述', value: fallback }] : [{ id: uid(), key: '', value: '' }]
+    }
     worldSettingAiDraftContent.value = result.content
     worldSettingAiStep.value = 'draft'
   } catch (error: unknown) {
@@ -8222,6 +8480,13 @@ async function generateWorldSettingAiDraft(): Promise<void> {
   }
 }
 
+function addWorldSettingAiDraftCard(): void {
+  worldSettingAiDraftCards.value.push({ id: uid(), key: '', value: '' })
+}
+function removeWorldSettingAiDraftCard(id: string): void {
+  worldSettingAiDraftCards.value = worldSettingAiDraftCards.value.filter((c) => c.id !== id)
+}
+
 function saveWorldSettingAiDraft(): void {
   if (!novel.value) return
   if (!worldSettingAiDraftName.value.trim()) return
@@ -8229,14 +8494,16 @@ function saveWorldSettingAiDraft(): void {
     updateWorldSetting({
       id: worldSettingAiTargetId.value,
       name: worldSettingAiDraftName.value.trim(),
-      content: worldSettingAiDraftContent.value.trim(),
+      content: '',
+      attributes: worldSettingAiDraftCards.value,
       categoryIds: worldSettingAiDraftCategoryIds.value,
     })
   } else {
     createWorldSetting({
       novelId: novel.value.id,
       name: worldSettingAiDraftName.value.trim(),
-      content: worldSettingAiDraftContent.value.trim(),
+      content: '',
+      attributes: worldSettingAiDraftCards.value,
       categoryIds: worldSettingAiDraftCategoryIds.value,
     })
   }
