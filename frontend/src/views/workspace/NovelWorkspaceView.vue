@@ -141,7 +141,7 @@
           <h3 class="ws-ov-card__title">人物阵容</h3>
           <p class="ws-ov-cast-counts">角色 {{ overviewCast.characterCount }} · 势力 {{ overviewCast.factionCount }} · 关系 {{ overviewCast.relationCount }}</p>
           <div class="ws-ov-cast-names">
-            <span v-for="c in overviewCast.mains" :key="c.id" class="ws-ov-cast-chip">{{ c.name || '未命名' }}</span>
+            <span v-for="c in overviewCast.mains" :key="c.id" class="ws-ov-cast-chip">{{ charDisplay(c) || '未命名' }}</span>
             <span v-if="overviewCast.mains.length === 0" class="muted">还没有角色</span>
           </div>
           <button type="button" class="ws-ov-btn ws-ov-btn--ghost" @click="switchTab('characters')">看角色</button>
@@ -824,7 +824,7 @@
                         <span>POV</span>
                         <select :value="activeOutlineDetailItem.povCharacterId ?? ''" @change="onOutlinePovChange(activeOutlineDetailItem.id, $event)">
                           <option value="">不指定</option>
-                          <option v-for="c in characters" :key="`ol-pov-${activeOutlineDetailItem.id}-${c.id}`" :value="c.id">{{ c.name }}</option>
+                          <option v-for="c in characters" :key="`ol-pov-${activeOutlineDetailItem.id}-${c.id}`" :value="c.id">{{ charDisplay(c) }}</option>
                         </select>
                       </label>
                       <label class="outline-dialog-field">
@@ -870,7 +870,7 @@
                           :class="{ 'outline-card__bind-chip--active': isOutlineCharacterBound(activeOutlineDetailItem, c.id) }"
                           @click="toggleOutlineCharacterBind(activeOutlineDetailItem.id, c.id)"
                         >
-                          {{ c.name }}
+                          {{ charDisplay(c) }}
                         </button>
                         <span v-if="characters.length === 0" class="muted">暂无角色可关联</span>
                       </div>
@@ -887,7 +887,7 @@
                           :class="{ 'outline-card__bind-chip--active': isOutlineFactionBound(activeOutlineDetailItem, f.id) }"
                           @click="toggleOutlineFactionBind(activeOutlineDetailItem.id, f.id)"
                         >
-                          {{ f.name }}
+                          {{ factionDisplay(f) }}
                         </button>
                         <span v-if="factions.length === 0" class="muted">暂无势力可关联</span>
                       </div>
@@ -1094,7 +1094,7 @@
               <div v-if="selectedGraphCharacter" class="character-panel__main">
                 <div class="character-panel__body character-panel__body--scroll scrollbar-paper">
                   <div class="character-panel__hero">
-                    <p class="character-panel__name">{{ selectedGraphCharacter.name }}</p>
+                    <p class="character-panel__name">{{ charDisplay(selectedGraphCharacter) }}</p>
                     <div class="character-panel__hero-chips">
                       <span class="character-panel__chip">
                         {{
@@ -1702,7 +1702,7 @@
                               :class="{ 'workspace-dd__item--active': row.factionId === f.id }"
                               @click="selectCharacterCreateMembershipFaction(idx, f.id)"
                             >
-                              {{ f.name }}
+                              {{ factionDisplay(f) }}
                             </button>
                           </div>
                         </div>
@@ -2077,7 +2077,7 @@
         <li v-for="f in filteredFactions" :key="f.id" class="list-item" :id="`faction-row-${f.id}`">
           <div class="chapter-main">
             <div class="faction-row__head">
-              <strong class="faction-row__title">{{ f.name }}</strong>
+              <strong class="faction-row__title">{{ factionDisplay(f) }}</strong>
               <div class="faction-row__actions">
                 <button type="button" class="faction-row__edit" title="修改势力" @click="openFactionEdit(f.id)">
                   修改
@@ -2198,7 +2198,7 @@
                       @click="toggleFactionEditMemberModal(c.id)"
                     >
                       <span class="category-bind-chip__state">{{ factionEditDraft.memberCharIds.includes(c.id) ? '✓' : '+' }}</span>
-                      {{ c.name }}
+                      {{ charDisplay(c) }}
                     </button>
                   </div>
                 </div>
@@ -2492,7 +2492,7 @@
                     <span class="category-bind-chip__state" aria-hidden="true">{{
                       categoryHasCharacter(categoryBindModalCategoryId, c.id) ? '✓' : '+'
                     }}</span>
-                    {{ c.name }}
+                    {{ charDisplay(c) }}
                   </button>
                   <div class="action-row" style="margin-top: 10px">
                     <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="loadMoreCategoryBindModalCharacters">
@@ -2516,7 +2516,7 @@
                     <span class="category-bind-chip__state" aria-hidden="true">{{
                       categoryHasFaction(categoryBindModalCategoryId, f.id) ? '✓' : '+'
                     }}</span>
-                    {{ f.name }}
+                    {{ factionDisplay(f) }}
                   </button>
                   <div class="action-row" style="margin-top: 10px">
                     <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="loadMoreCategoryBindModalFactions">
@@ -3503,7 +3503,7 @@ import {
   updateWorldSetting,
   deleteWorldSetting,
 } from '../../lib/storage'
-import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../lib/characterLabels'
+import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText, buildDisplayNameMap } from '../../lib/characterLabels'
 import {
   designOutlineInterviewTurnByAi,
   designOutlineOptionsByAi,
@@ -5855,7 +5855,7 @@ function resetOutlineCreateForm(): void {
 
 function outlinePovName(item: OutlineItem): string {
   if (!item.povCharacterId) return '未设置 POV'
-  return characters.value.find((c) => c.id === item.povCharacterId)?.name ?? '未设置 POV'
+  return characterNameByIdMap.value.get(item.povCharacterId) ?? characters.value.find((c) => c.id === item.povCharacterId)?.name ?? '未设置 POV'
 }
 
 function outlineTensionText(value?: OutlineTension): string {
@@ -5937,8 +5937,9 @@ function isOutlineCharacterBound(item: OutlineItem, charId: string): boolean {
 }
 
 function outlineCharacterNames(item: OutlineItem): string {
+  const map = characterNameByIdMap.value
   const names = (item.characterIds ?? [])
-    .map((id) => characters.value.find((c) => c.id === id)?.name ?? '')
+    .map((id) => map.get(id) ?? characters.value.find((c) => c.id === id)?.name ?? '')
     .filter(Boolean)
   return names.length ? names.join('、') : '未关联角色'
 }
@@ -5958,8 +5959,9 @@ function isOutlineFactionBound(item: OutlineItem, factionId: string): boolean {
 }
 
 function outlineFactionNames(item: OutlineItem): string {
+  const map = factionNameByIdMap.value
   const names = (item.factionIds ?? [])
-    .map((id) => factions.value.find((f) => f.id === id)?.name ?? '')
+    .map((id) => map.get(id) ?? factions.value.find((f) => f.id === id)?.name ?? '')
     .filter(Boolean)
   return names.length ? names.join('、') : '未关联势力'
 }
@@ -7373,8 +7375,19 @@ function saveCategoryBindingChanges(categoryId: string): void {
   cancelCategoryBindingChanges(categoryId)
 }
 
-const characterNameByIdMap = computed(() => new Map(characters.value.map((c) => [c.id, c.name])))
-const factionNameByIdMap = computed(() => new Map(factions.value.map((f) => [f.id, f.name])))
+const characterNameByIdMap = computed(() =>
+  buildDisplayNameMap(characters.value.map((c) => ({ id: c.id, name: c.name, createdAt: c.createdAt }))),
+)
+const factionNameByIdMap = computed(() =>
+  buildDisplayNameMap(factions.value.map((f) => ({ id: f.id, name: f.name, createdAt: f.createdAt }))),
+)
+// 模板用:取角色/势力的显示名(同名加后缀 张三1/张三2)
+function charDisplay(c: { id: string; name?: string | null }): string {
+  return characterNameByIdMap.value.get(c.id) ?? (c.name ?? '')
+}
+function factionDisplay(f: { id: string; name?: string | null }): string {
+  return factionNameByIdMap.value.get(f.id) ?? (f.name ?? '')
+}
 
 function categoryBoundCharacterNames(categoryId: string): string[] {
   ensureCategoryDraft(categoryId)
@@ -7774,7 +7787,7 @@ const visibleCharacters = computed(() => {
 
 function factionNameById(id?: string | null): string {
   if (!id) return ''
-  return factions.value.find((f) => f.id === id)?.name ?? ''
+  return factionNameByIdMap.value.get(id) ?? factions.value.find((f) => f.id === id)?.name ?? ''
 }
 
 function characterNameById(id?: string | null): string {

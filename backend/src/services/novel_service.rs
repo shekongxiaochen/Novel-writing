@@ -22,6 +22,13 @@ impl NovelService {
     
     /// 创建小说
     pub async fn create_novel(&self, user_id: &str, req: CreateNovelRequest) -> Result<Novel> {
+        // 0. 字段长度校验，防止超长字符串滥用存储
+        validate_novel_field("标题", &req.title, 200)?;
+        validate_novel_field("简介", &req.summary, 5000)?;
+        validate_novel_field("类型", &req.genre, 100)?;
+        validate_novel_field("视角", &req.perspective, 100)?;
+        validate_novel_field("基调", &req.tone, 100)?;
+
         // 1. 生成或验证ID
         let novel_id = req.id.unwrap_or_else(|| id::generate_id());
         
@@ -54,11 +61,7 @@ impl NovelService {
         let now = time::now_utc();
         
         let ai_style_prompt = req.ai_style_prompt.unwrap_or_default();
-        let ai_style_prompt = if ai_style_prompt.len() > 5000 {
-            ai_style_prompt[..5000].to_string()
-        } else {
-            ai_style_prompt
-        };
+        let ai_style_prompt = truncate_chars(&ai_style_prompt, 5000);
 
         sqlx::query(
             r#"
@@ -193,6 +196,13 @@ impl NovelService {
     
     /// 更新小说
     pub async fn update_novel(&self, novel_id: &str, user_id: &str, req: UpdateNovelRequest) -> Result<Novel> {
+        // 0. 字段长度校验
+        if let Some(v) = &req.title { validate_novel_field("标题", v, 200)?; }
+        if let Some(v) = &req.summary { validate_novel_field("简介", v, 5000)?; }
+        if let Some(v) = &req.genre { validate_novel_field("类型", v, 100)?; }
+        if let Some(v) = &req.perspective { validate_novel_field("视角", v, 100)?; }
+        if let Some(v) = &req.tone { validate_novel_field("基调", v, 100)?; }
+
         // 1. 验证所有权
         self.get_novel(novel_id, user_id).await?;
         
@@ -221,11 +231,7 @@ impl NovelService {
             params.push(tone);
         }
         if let Some(ai_style_prompt) = req.ai_style_prompt {
-            let ai_style_prompt = if ai_style_prompt.len() > 5000 {
-                ai_style_prompt[..5000].to_string()
-            } else {
-                ai_style_prompt
-            };
+            let ai_style_prompt = truncate_chars(&ai_style_prompt, 5000);
             updates.push("ai_style_prompt = ?");
             params.push(ai_style_prompt);
         }
@@ -341,6 +347,19 @@ impl NovelService {
     
     /// 更新快照（优化版 - 增量更新）
     pub async fn update_snapshot(&self, novel_id: &str, user_id: &str, payload: Value) -> Result<Snapshot> {
+        // 0. 限制快照体积，防止单条 payload 过大撑爆存储/内存(纵深防御,叠加全局 body limit)
+        const MAX_SNAPSHOT_BYTES: usize = 12 * 1024 * 1024; // 12MB
+        let payload_size = serde_json::to_vec(&payload)
+            .map(|v| v.len())
+            .unwrap_or(usize::MAX);
+        if payload_size > MAX_SNAPSHOT_BYTES {
+            return Err(AppError::Validation(format!(
+                "快照数据过大({}MB)，超过 {}MB 上限",
+                payload_size / (1024 * 1024),
+                MAX_SNAPSHOT_BYTES / (1024 * 1024)
+            )));
+        }
+
         // 1. 验证所有权
         self.get_novel(novel_id, user_id).await?;
         
@@ -427,5 +446,25 @@ impl NovelService {
             "foreshadows": [],
             "worldSettings": []
         })
+    }
+}
+
+/// 字段长度校验:超过 max 个字符则拒绝(按 Unicode 字符计)
+fn validate_novel_field(label: &str, value: &str, max: usize) -> Result<()> {
+    if value.chars().count() > max {
+        return Err(AppError::Validation(format!(
+            "{}过长,最多 {} 字",
+            label, max
+        )));
+    }
+    Ok(())
+}
+
+/// 按 Unicode 字符安全截断(避免 UTF-8 多字节边界 panic)
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max).collect()
     }
 }

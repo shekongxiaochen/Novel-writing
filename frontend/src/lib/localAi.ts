@@ -24,6 +24,8 @@ import { assertAiReady, postAiCompletion, postAiCompletionStream, postAiPrompt, 
 import { buildPendingToolActions } from '../features/chapter-hub/lib/aiPendingToolActions'
 import { AI_WRITE_TOOLS, executeToolCall } from './aiTools'
 import type { WorkspaceSnapshotPayload } from './storage'
+import { getCharacterStateAtPosition, recordCharacterChangeFields } from './storage'
+import type { CharacterNarrativeState } from './storage'
 import {
   buildAskFollowUpPrompt,
   buildAskUserPrompt,
@@ -33,6 +35,7 @@ import {
 } from './askContext'
 import { buildContinueRagHits, formatContinueRagSnippetsForPrompt, type ContinueRagSnippet } from './continueRag'
 import { buildOutlineBeatPathForChapter } from './outlineBeatPack'
+import { buildDisplayNameMap } from './characterLabels'
 import { buildOutlineAiContextPack } from './outlineContextPack'
 
 export type { AskPromptBuildResult } from './askContext'
@@ -646,6 +649,32 @@ function buildContinueUserPrompt(
   }
 
   const scopedIds = new Set(scopedCharacters.map((row) => s(row.id)))
+  // 同名实体显示名映射(在全书集合上计算,使张三1/张三2 互相知晓),喂给 AI 以便区分同名角色/势力
+  const charDisplayNameMap = buildDisplayNameMap(
+    (payload.characters ?? []).map((row) => ({ id: s(row.id), name: s(row.name), createdAt: s(row.createdAt) })),
+  )
+  const factionDisplayNameMap = buildDisplayNameMap(
+    (payload.factions ?? []).map((row) => ({ id: s(row.id), name: s(row.name), createdAt: s(row.createdAt) })),
+  )
+  const charDisplay = (id: string, fallback: string): string => charDisplayNameMap.get(s(id)) || fallback
+  // 逐章叙事状态:取该角色「截至当前章锚点位置」的最新状态(角色状态机),作为静态档案之上的覆盖层
+  const narrativeStateText = (charId: string): string => {
+    try {
+      const resolved = getCharacterStateAtPosition(s(charId), s(current.id), offset, chapters)
+      const st = resolved?.event?.narrativeState
+      if (!st) return ''
+      const parts = [
+        s(st.location) ? `位置:${s(st.location)}` : '',
+        s(st.condition) ? `状态:${s(st.condition)}` : '',
+        Array.isArray(st.knownInfo) && st.knownInfo.length > 0 ? `已知:${st.knownInfo.map((x) => s(x)).filter(Boolean).join('、')}` : '',
+        Array.isArray(st.possessions) && st.possessions.length > 0 ? `持有:${st.possessions.map((x) => s(x)).filter(Boolean).join('、')}` : '',
+        Array.isArray(st.relationDelta) && st.relationDelta.length > 0 ? `关系变动:${st.relationDelta.map((x) => s(x)).filter(Boolean).join('、')}` : '',
+      ].filter(Boolean)
+      return parts.length > 0 ? `${parts.join('；')}（截至第${st.chapterNo}章）` : ''
+    } catch {
+      return ''
+    }
+  }
   const characters = stableSortByKeys(
     scopedCharacters.map((row) => {
       const attrs = Array.isArray(row.attributes)
@@ -655,7 +684,7 @@ function buildContinueUserPrompt(
             .join('；')
         : ''
       return {
-        name: s(row.name),
+        name: charDisplay(s(row.id), s(row.name)),
         aliases: stringList(row.aliases).slice(0, 4),
         gender: s(row.gender),
         age: s(row.age),
@@ -664,6 +693,7 @@ function buildContinueUserPrompt(
         arc: s(row.arc),
         notes: s(row.notes).slice(0, 200),
         attrs: attrs.slice(0, 200),
+        现状: narrativeStateText(s(row.id)).slice(0, 300),
         firstCh: typeof row.firstAppearanceChapterNo === 'number' ? row.firstAppearanceChapterNo : undefined,
       }
     }),
@@ -677,8 +707,8 @@ function buildContinueUserPrompt(
       if (!from || !to) return null
       if (!scopedIds.has(s(from.id)) || !scopedIds.has(s(to.id))) return null
       return {
-        from: s(from.name),
-        to: s(to.name),
+        from: charDisplay(s(from.id), s(from.name)),
+        to: charDisplay(s(to.id), s(to.name)),
         relationType: s(row.relationType),
         note: s(row.note).slice(0, 80),
       }
@@ -689,11 +719,11 @@ function buildContinueUserPrompt(
   // 角色势力归属
   const membershipLines: string[] = []
   if (payload.characterFactionMemberships?.length && payload.factions?.length) {
-    const factionMap = new Map(payload.factions.map((f) => [s(f.id), s(f.name)]))
     for (const m of payload.characterFactionMemberships) {
-      const charName = scopedCharacters.find((c) => s(c.id) === s(m.characterId))?.name
-      const facName = factionMap.get(s(m.factionId))
-      if (charName && facName) membershipLines.push(`${s(charName)} → ${s(facName)}`)
+      const charRow = scopedCharacters.find((c) => s(c.id) === s(m.characterId))
+      const charName = charRow ? charDisplay(s(charRow.id), s(charRow.name)) : ''
+      const facName = factionDisplayNameMap.get(s(m.factionId)) || ''
+      if (charName && facName) membershipLines.push(`${charName} → ${facName}`)
     }
   }
 
@@ -783,6 +813,22 @@ function buildContinueUserPrompt(
       .filter(Boolean)
       .join('\n'),
     anchor: ['【锚点正文 —— 必须紧接其后续写，禁止重复】', anchor].join('\n'),
+    golden_three:
+      typeof current.chapterNo === 'number' && current.chapterNo <= 3
+        ? [
+            '【黄金三章铁律 —— 仅限前三章，必须严格执行】',
+            '本章处于全书前三章，开局决定读者留存，按以下硬规则写：',
+            '1. 主角必须在前 300 字内登场亮相。',
+            '2. 第一个爽点或钩子必须在 1000 字内落地，不得延后。',
+            '3. 禁止背景设定堆砌、禁止天气/景物式开场、禁止序章楔子、禁止旁白铺陈世界观。',
+            '4. 出场主要角色不超过 3 个，信息密度服从"先抓人再交代"。',
+            current.chapterNo === 1
+              ? '5. 本章（第1章）必须明确点出主角的核心目标，并亮出全书最大卖点/钩子。'
+              : '',
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : '',
     chapter_meta: [
       '【当前章】',
       `第 ${current.chapterNo} 章 ${s(current.title)}`,
@@ -797,7 +843,7 @@ function buildContinueUserPrompt(
         ? ['【前情提要】', ...prevSummaries.map((row) => `第 ${row.chapterNo} 章《${row.title}》：${row.summary}`)].join('\n')
         : '',
     bible_compact: [
-      '【作品档案（节选）】',
+      `【角色当前状态（截至第 ${current.chapterNo} 章，视为事实基准，续写须与此一致，不得回退或矛盾）】`,
       characters.length > 0 ? `角色：${stableStringify(characters)}` : '',
       membershipLines.length > 0 ? `势力归属：${membershipLines.join('；')}` : '',
       relations.length > 0 ? `关系：${stableStringify(relations)}` : '',
@@ -838,7 +884,7 @@ function buildContinueUserPrompt(
   // 单独成一条消息置于动态块之前，使其落入可命中 DeepSeek 前缀缓存的稳定前缀；
   // 动态块仅含本次的续写指令、当前章信息、锚点正文与检索片段。
   const contextOrder = ['novel_brief', 'continuity_brief', 'arc_context', 'outline_beat_path', 'prev_summaries', 'prev_tail', 'bible_compact']
-  const dynamicOrder = ['instruction', 'chapter_meta', 'anchor', 'rag_snippets']
+  const dynamicOrder = ['instruction', 'golden_three', 'chapter_meta', 'anchor', 'rag_snippets']
 
   const contextPrompt = contextOrder
     .map((key) => pack[key])
@@ -894,8 +940,13 @@ export async function continueChapterFromWorkspaceStream(
   const targetChars = Math.max(400, Math.min(6000, Math.trunc(Number(input.targetChars ?? 1500))))
   const maxTokens = Math.max(4096, Math.min(16384, Math.ceil(targetChars * 2.5)))
 
+  // 取当前章所属的 novelId，供后端做语义向量检索（补充相关前文）
+  const currentChapter = (payload.chapters ?? []).find((c) => c.id === input.chapterId)
+  const novelId = currentChapter?.novelId || undefined
+
   const { text } = await postAiPromptStream({
     prompt_type: 'continue',
+    novel_id: novelId,
     user_prompt: prompt,
     context_prompt: contextPrompt || undefined,
     ai_style_prompt: input.aiStylePrompt,
@@ -1349,7 +1400,97 @@ async function callAiPromptJson(
   throw new Error('AI 返回格式无效')
 }
 
+export type CharacterStateExtractResult = {
+  updated: Array<{ characterId: string; name: string; state: CharacterNarrativeState }>
+  warnings: string[]
+}
 
+/**
+ * 角色状态机抽取：写完一章后，让 AI 抽取本章中状态发生变化的角色，
+ * 写入逐章叙事状态历史(narrativeState)，供续写时注入"截至当前章的真实现状"。
+ * 仅记录本章真有变化的角色(增量)，无变化不写。
+ */
+export async function runCharacterStateExtract(
+  payload: WorkspaceSnapshotPayload,
+  chapterId: string,
+): Promise<CharacterStateExtractResult> {
+  const warnings: string[] = []
+  const updated: CharacterStateExtractResult['updated'] = []
+  const chapters = [...(payload.chapters ?? [])].sort((a, b) => (a.chapterNo ?? 0) - (b.chapterNo ?? 0))
+  const idx = chapters.findIndex((row) => s(row.id) === s(chapterId))
+  const current = idx >= 0 ? chapters[idx] : null
+  if (!current) return { updated, warnings: ['未找到目标章节，跳过角色状态抽取。'] }
+  const content = String(current.content ?? '').trim()
+  if (!content) return { updated, warnings: ['本章正文为空，跳过角色状态抽取。'] }
+  const chapterNo = typeof current.chapterNo === 'number' ? current.chapterNo : idx + 1
+
+  // 筛出场角色(限24人,复用续写同款逻辑)
+  const characterSource = (payload.characters ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    aliases: row.aliases,
+  }))
+  const { rows: scoped } = pickCharactersForContinueContext(characterSource, content, [], 24)
+  if (scoped.length === 0) return { updated, warnings: ['本章未匹配到出场角色，跳过。'] }
+
+  // 每个出场角色附上"截至上一章"的已知状态，让 AI 做差分而非全量重述
+  const roster = scoped.map((row) => {
+    const prev = getCharacterStateAtPosition(s(row.id), s(current.id), 0, chapters)
+    const st = prev?.event?.narrativeState
+    return {
+      name: s(row.name),
+      上一章状态: st
+        ? { location: s(st.location), condition: s(st.condition), knownInfo: st.knownInfo ?? [], possessions: st.possessions ?? [] }
+        : null,
+    }
+  })
+
+  const prompt = [
+    `当前章节：第 ${chapterNo} 章 ${s(current.title)}`,
+    `本章正文：\n${content.slice(0, 8000)}`,
+    `本章出场角色及其截至上一章的已知状态 JSON：${stableStringify(roster)}`,
+    '请只输出本章中状态发生变化的角色，格式遵循系统提示。',
+  ].join('\n\n')
+
+  let parsed: JsonRecord
+  try {
+    parsed = await callAiPromptJson('character_state_extract', prompt, { temperature: 0.2 })
+  } catch (err) {
+    return { updated, warnings: [`角色状态抽取失败：${err instanceof Error ? err.message : String(err)}`] }
+  }
+
+  const states = Array.isArray(parsed.states) ? parsed.states : []
+  const nameToId = new Map<string, string>()
+  for (const row of scoped) nameToId.set(s(row.name), s(row.id))
+
+  for (const raw of states as JsonRecord[]) {
+    const name = s(raw.name)
+    const charId = nameToId.get(name)
+    if (!charId) {
+      warnings.push(`抽取到未匹配的角色名「${name}」，已忽略。`)
+      continue
+    }
+    const state: CharacterNarrativeState = {
+      location: s(raw.location),
+      condition: s(raw.condition),
+      knownInfo: stringList(raw.knownInfo),
+      possessions: stringList(raw.possessions),
+      relationDelta: stringList(raw.relationDelta),
+      chapterNo,
+    }
+    // 全空视为无变化，不写入
+    if (!state.location && !state.condition && state.knownInfo.length === 0 && state.possessions.length === 0 && state.relationDelta.length === 0) {
+      continue
+    }
+    recordCharacterChangeFields(charId, ['narrativeState'], {
+      chapterId: s(current.id),
+      anchorStart: 0,
+      narrativeState: state,
+    })
+    updated.push({ characterId: charId, name, state })
+  }
+  return { updated, warnings }
+}
 
 function isLikelyUnnamedDescriptor(name: string): boolean {
   const text = s(name)

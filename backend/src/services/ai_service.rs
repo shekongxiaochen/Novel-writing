@@ -172,7 +172,11 @@ impl AiService {
 
             let new_balance = match charge_billable(&wallet, &user_id, charge, &billing_clone).await {
                 Ok(b) => b,
-                Err(_) => balance,
+                Err(e) => {
+                    // 扣费时发生数据库等异常：记录日志便于对账，不再静默忽略
+                    tracing::error!("stream charge failed for user {}: {:?}", user_id, e);
+                    wallet.balance(&user_id).await.unwrap_or(balance)
+                }
             };
 
             let meta = append_balance_meta_event(new_balance);
@@ -201,12 +205,15 @@ async fn charge_billable(
         return wallet.balance(user_id).await;
     }
     let balance = wallet.balance(user_id).await?;
-    if balance < charge {
-        return Err(AppError::InsufficientBalance);
+    // 余额不足以支付全部费用时，扣光剩余余额（而非一分不扣），
+    // 这样用户无法靠“扣费失败被吞掉”反复白嫖；扣到 0 后下次调用会被 balance<=0 拦截。
+    let effective = charge.min(balance);
+    if effective <= 0 {
+        return Ok(balance);
     }
     let job_id = id::generate_id();
     wallet
-        .deduct_tokens(user_id, charge, billing, &job_id)
+        .deduct_tokens(user_id, effective, billing, &job_id)
         .await
 }
 

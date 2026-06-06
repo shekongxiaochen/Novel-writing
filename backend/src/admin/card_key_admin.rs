@@ -212,17 +212,22 @@ async fn export_codes(
 
     let mut sql = "SELECT code FROM card_keys WHERE 1=1".to_string();
     if !filter_status.is_empty() {
-        sql.push_str(" AND status = '");
-        sql.push_str(&filter_status);
-        sql.push('\'');
+        sql.push_str(" AND status = ?");
     }
-    if !filter_amount.is_empty() {
-        sql.push_str(" AND amount_yuan = ");
-        sql.push_str(&filter_amount);
+    let amount_val = parse_amount_filter(&filter_amount);
+    if amount_val.is_some() {
+        sql.push_str(" AND amount_yuan = ?");
     }
     sql.push_str(" ORDER BY created_at DESC");
 
-    let rows: Vec<(String,)> = sqlx::query_as(&sql)
+    let mut q = sqlx::query_as::<_, (String,)>(&sql);
+    if !filter_status.is_empty() {
+        q = q.bind(&filter_status);
+    }
+    if let Some(a) = amount_val {
+        q = q.bind(a);
+    }
+    let rows: Vec<(String,)> = q
         .fetch_all(&state.db)
         .await
         .map_err(|e| {
@@ -235,6 +240,15 @@ async fn export_codes(
         [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
         text,
     ))
+}
+
+/// 把前端传来的金额过滤参数解析成整数;非法值返回 None(忽略该过滤),杜绝 SQL 注入
+fn parse_amount_filter(raw: &str) -> Option<i64> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    t.parse::<i64>().ok()
 }
 
 async fn load_stats(state: &CardKeyAdminState) -> Result<StatsRow, crate::error::AppError> {
@@ -260,15 +274,20 @@ async fn load_count(
 ) -> Result<i64, crate::error::AppError> {
     let mut sql = "SELECT COUNT(*) AS c FROM card_keys WHERE 1=1".to_string();
     if !filter_status.is_empty() {
-        sql.push_str(" AND status = '");
-        sql.push_str(filter_status);
-        sql.push('\'');
+        sql.push_str(" AND status = ?");
     }
-    if !filter_amount.is_empty() {
-        sql.push_str(" AND amount_yuan = ");
-        sql.push_str(filter_amount);
+    let amount_val = parse_amount_filter(filter_amount);
+    if amount_val.is_some() {
+        sql.push_str(" AND amount_yuan = ?");
     }
-    let row: (i64,) = sqlx::query_as(&sql).fetch_one(&state.db).await?;
+    let mut q = sqlx::query_as::<_, (i64,)>(&sql);
+    if !filter_status.is_empty() {
+        q = q.bind(filter_status);
+    }
+    if let Some(a) = amount_val {
+        q = q.bind(a);
+    }
+    let row: (i64,) = q.fetch_one(&state.db).await?;
     Ok(row.0)
 }
 
@@ -280,20 +299,24 @@ async fn load_cards(
 ) -> Result<Vec<CardKeyRow>, crate::error::AppError> {
     let mut sql = "SELECT id, code, amount_yuan, status, used_by_user_id, used_at, created_at FROM card_keys WHERE 1=1".to_string();
     if !filter_status.is_empty() {
-        sql.push_str(" AND status = '");
-        sql.push_str(filter_status);
-        sql.push('\'');
+        sql.push_str(" AND status = ?");
     }
-    if !filter_amount.is_empty() {
-        sql.push_str(" AND amount_yuan = ");
-        sql.push_str(filter_amount);
+    let amount_val = parse_amount_filter(filter_amount);
+    if amount_val.is_some() {
+        sql.push_str(" AND amount_yuan = ?");
     }
-    sql.push_str(" ORDER BY created_at DESC LIMIT ");
-    sql.push_str(&PAGE_SIZE.to_string());
-    sql.push_str(" OFFSET ");
-    sql.push_str(&((page - 1) * PAGE_SIZE).to_string());
+    sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
 
-    let rows = sqlx::query_as::<_, CardKeyRow>(&sql)
+    let mut q = sqlx::query_as::<_, CardKeyRow>(&sql);
+    if !filter_status.is_empty() {
+        q = q.bind(filter_status);
+    }
+    if let Some(a) = amount_val {
+        q = q.bind(a);
+    }
+    let rows = q
+        .bind(PAGE_SIZE)
+        .bind((page - 1) * PAGE_SIZE)
         .fetch_all(&state.db)
         .await?;
     Ok(rows)

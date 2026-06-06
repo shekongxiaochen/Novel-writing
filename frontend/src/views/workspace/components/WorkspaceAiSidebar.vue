@@ -117,7 +117,12 @@ watch(() => props.novelId, (id) => loadChat(id), { immediate: true })
 const focusLabel = computed(() => props.focusEntity?.label ?? '')
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 function renderInline(text: string): string {
