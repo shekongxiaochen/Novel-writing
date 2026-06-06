@@ -115,13 +115,98 @@ pub async fn update_snapshot(
     Json(req): Json<UpdateSnapshotRequest>,
 ) -> Result<Json<SnapshotResponse>> {
     tracing::info!("Updating snapshot for novel: {}", novel_id);
-    
+
     let snapshot = state.novels.update_snapshot(&novel_id, &user.id, req.payload).await?;
-    
+
+    // 保存成功后，后台异步增量索引章节向量（不阻塞保存返回）。
+    // 隔离：update_snapshot 已校验 novel 归属(user_id)，此处仅在已授权的快照上工作。
+    {
+        let index = state.embedding_index.clone();
+        let nid = snapshot.novel_id.clone();
+        let payload = snapshot.payload.clone();
+        tokio::spawn(async move {
+            if let Err(e) = index.sync_novel(&nid, &payload).await {
+                tracing::warn!("后台索引向量失败 novel {}: {:?}", nid, e);
+            }
+        });
+    }
+
     Ok(Json(SnapshotResponse {
         novel_id: snapshot.novel_id,
         version: snapshot.version,
         payload: snapshot.payload,
         updated_at: snapshot.updated_at,
+    }))
+}
+
+#[derive(serde::Serialize)]
+pub struct CharacterStatesResponse {
+    states: Vec<crate::services::character_state_service::CharacterStateRow>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct PutCharacterStatesRequest {
+    states: Vec<crate::services::character_state_service::CharacterStateRow>,
+}
+
+/// GET /novels/:id/character-states - 拉取角色逐章状态(冷启动/换设备恢复)
+pub async fn get_character_states(
+    Extension(user): Extension<User>,
+    State(state): State<Arc<AppState>>,
+    Path(novel_id): Path<String>,
+) -> Result<Json<CharacterStatesResponse>> {
+    // 隔离:先校验小说归属
+    state.novels.get_novel(&novel_id, &user.id).await?;
+    let states = state.character_states.list_all(&novel_id).await?;
+    Ok(Json(CharacterStatesResponse { states }))
+}
+
+/// PUT /novels/:id/character-states - 批量 upsert 角色逐章状态
+pub async fn put_character_states(
+    Extension(user): Extension<User>,
+    State(state): State<Arc<AppState>>,
+    Path(novel_id): Path<String>,
+    Json(req): Json<PutCharacterStatesRequest>,
+) -> Result<Json<MessageResponse>> {
+    // 隔离:先校验小说归属
+    state.novels.get_novel(&novel_id, &user.id).await?;
+    let n = state.character_states.upsert_states(&novel_id, &req.states).await?;
+    Ok(Json(MessageResponse {
+        message: format!("已保存 {} 条角色状态", n),
+    }))
+}
+
+#[derive(serde::Serialize)]
+pub struct AutoApplyLogResponse {
+    logs: Vec<crate::services::auto_apply_log_service::AutoApplyLogRow>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct PutAutoApplyLogRequest {
+    logs: Vec<crate::services::auto_apply_log_service::AutoApplyLogRow>,
+}
+
+/// GET /novels/:id/auto-apply-log - 拉取自动入库日志(冷启动/换设备恢复)
+pub async fn get_auto_apply_log(
+    Extension(user): Extension<User>,
+    State(state): State<Arc<AppState>>,
+    Path(novel_id): Path<String>,
+) -> Result<Json<AutoApplyLogResponse>> {
+    state.novels.get_novel(&novel_id, &user.id).await?;
+    let logs = state.auto_apply_log.list_all(&novel_id).await?;
+    Ok(Json(AutoApplyLogResponse { logs }))
+}
+
+/// PUT /novels/:id/auto-apply-log - 批量 upsert 自动入库日志
+pub async fn put_auto_apply_log(
+    Extension(user): Extension<User>,
+    State(state): State<Arc<AppState>>,
+    Path(novel_id): Path<String>,
+    Json(req): Json<PutAutoApplyLogRequest>,
+) -> Result<Json<MessageResponse>> {
+    state.novels.get_novel(&novel_id, &user.id).await?;
+    let n = state.auto_apply_log.upsert_logs(&novel_id, &req.logs).await?;
+    Ok(Json(MessageResponse {
+        message: format!("已保存 {} 条自动入库日志", n),
     }))
 }

@@ -16,7 +16,7 @@
             <div class="chapter-hub__char-graph-head">
               <div class="chapter-hub__char-graph-head-text">
                 <h2 id="chapter-hub-char-graph-title" class="chapter-hub__char-graph-title">
-                  {{ selectedGraphCharacter.name }} · 关系
+                  {{ selectedGraphCharacterDisplayName }} · 关系
                 </h2>
                 <p class="chapter-hub__char-graph-sub muted">
                   左侧为工作台「角色」页下方的同款聚焦 3D 关系图；可拖拽旋转查看。
@@ -88,7 +88,7 @@
                   <div v-if="editingCharacter" class="character-panel__main">
                     <div class="character-panel__body character-panel__body--scroll scrollbar-paper">
                       <div class="character-panel__hero">
-                        <p class="character-panel__name">{{ editingCharacter.name }}</p>
+                        <p class="character-panel__name">{{ editingCharacterDisplayName }}</p>
                         <div class="character-panel__hero-chips">
                           <span class="character-panel__chip">
                             {{ editingCharacter.firstAppearanceChapterNo != null ? `首见 · 第 ${editingCharacter.firstAppearanceChapterNo} 章` : '首见 · 暂未出场' }}
@@ -184,7 +184,7 @@
         <div class="confirm-dialog chapter-hub__relation-edit-dialog" role="dialog" aria-modal="true">
           <div class="confirm-dialog__accent" aria-hidden="true" />
           <div class="confirm-dialog__body chapter-hub__relation-edit-dialog-body">
-            <h2 class="confirm-dialog__title">角色全部更改 · {{ editingCharacter.name }}</h2>
+            <h2 class="confirm-dialog__title">角色全部更改 · {{ editingCharacterDisplayName }}</h2>
             <div class="chapter-hub__relation-edit-top">
               <label class="chapter-hub__relation-edit-field">
                 <span>查看字段</span>
@@ -494,7 +494,7 @@
                 >
                   <div class="chapter-hub__relation-edit-row-head">
                     <p class="chapter-hub__relation-edit-target">
-                      {{ selectedGraphCharacter.name }} · {{ row.targetName }}
+                      {{ selectedGraphCharacterDisplayName }} · {{ characterNameById(row.targetCharacterId) }}
                     </p>
                     <button
                       type="button"
@@ -506,7 +506,7 @@
                   </div>
                   <label class="chapter-hub__relation-edit-field">
                     <span class="chapter-hub__relation-edit-sentence">
-                      「<strong>{{ selectedGraphCharacter.name }}</strong>」是「<strong>{{ row.targetName }}</strong>」的
+                      「<strong>{{ selectedGraphCharacterDisplayName }}</strong>」是「<strong>{{ characterNameById(row.targetCharacterId) }}</strong>」的
                     </span>
                     <input
                       v-model="row.centerToOtherType"
@@ -517,7 +517,7 @@
                   </label>
                   <label class="chapter-hub__relation-edit-field">
                     <span class="chapter-hub__relation-edit-sentence">
-                      「<strong>{{ row.targetName }}</strong>」是「<strong>{{ selectedGraphCharacter.name }}</strong>」的
+                      「<strong>{{ characterNameById(row.targetCharacterId) }}</strong>」是「<strong>{{ selectedGraphCharacterDisplayName }}</strong>」的
                     </span>
                     <input
                       v-model="row.otherToCenterType"
@@ -559,7 +559,7 @@
           <div class="confirm-dialog__body chapter-hub__relation-add-dialog-body">
             <h2 class="confirm-dialog__title">新增角色关系</h2>
             <p class="muted chapter-hub__relation-edit-sub">
-              为球心「{{ selectedGraphCharacter.name }}」与另一名本作角色建立双向称谓（与「编辑角色关系」中的两行含义相同）。
+              为球心「{{ selectedGraphCharacterDisplayName }}」与另一名本作角色建立双向称谓（与「编辑角色关系」中的两行含义相同）。
             </p>
             <div class="chapter-hub__relation-add-form scrollbar-paper">
               <label class="chapter-hub__relation-edit-field">
@@ -601,7 +601,7 @@
                         :class="{ 'workspace-dd__item--active': newRelationTargetId === c.id }"
                         @click="selectRelationAddTarget(c.id)"
                       >
-                        {{ c.name || '未命名角色' }}
+                        {{ characterNameById(c.id) }}
                       </button>
                       <p v-if="relationAddNewCandidates.length === 0" class="muted relation-target-dd__empty">
                         本作中已没有可与球心新建关系的角色。
@@ -615,7 +615,7 @@
               </label>
               <label v-if="newRelationTargetName" class="chapter-hub__relation-edit-field">
                 <span class="chapter-hub__relation-edit-sentence">
-                  「<strong>{{ selectedGraphCharacter.name }}</strong>」是「<strong>{{ newRelationTargetName }}</strong>」的
+                  「<strong>{{ selectedGraphCharacterDisplayName }}</strong>」是「<strong>{{ characterNameById(newRelationTargetId) }}</strong>」的
                 </span>
                 <input
                   v-model="newRelationCenterToOther"
@@ -626,7 +626,7 @@
               </label>
               <label v-if="newRelationTargetName" class="chapter-hub__relation-edit-field">
                 <span class="chapter-hub__relation-edit-sentence">
-                  「<strong>{{ newRelationTargetName }}</strong>」是「<strong>{{ selectedGraphCharacter.name }}</strong>」的
+                  「<strong>{{ characterNameById(newRelationTargetId) }}</strong>」是「<strong>{{ selectedGraphCharacterDisplayName }}</strong>」的
                 </span>
                 <input
                   v-model="newRelationOtherToCenter"
@@ -733,6 +733,7 @@ import {
   type CharacterChangeEvent,
 } from '../../../lib/storage'
 import type { Category, Character, CharacterFactionMembership, CharacterRelation, Faction, Item } from '../../../types'
+import { buildDisplayNameMap } from '../../../lib/characterLabels'
 
 const props = defineProps<{
   open: boolean
@@ -801,8 +802,25 @@ function onFocusSphereNodeSelect(id: string): void {
 const selectedGraphCharacter = computed(
   () => props.characters.find((c) => c.id === props.focusCharacterId) ?? null
 )
+// 同名实体显示名映射(作者视图:张三1/张三2),在全书集合上计算
+const characterDisplayNameMap = computed(() =>
+  buildDisplayNameMap(props.characters.map((c) => ({ id: c.id, name: c.name, createdAt: c.createdAt }))),
+)
+const factionDisplayNameMap = computed(() =>
+  buildDisplayNameMap(factionOptions.value.map((f) => ({ id: f.id, name: f.name, createdAt: f.createdAt }))),
+)
+const selectedGraphCharacterDisplayName = computed(() =>
+  selectedGraphCharacter.value
+    ? characterDisplayNameMap.value.get(selectedGraphCharacter.value.id) ?? selectedGraphCharacter.value.name
+    : '',
+)
 const editingCharacter = computed(
   () => props.characters.find((c) => c.id === editingCharacterId.value) ?? selectedGraphCharacter.value ?? null
+)
+const editingCharacterDisplayName = computed(() =>
+  editingCharacter.value
+    ? characterDisplayNameMap.value.get(editingCharacter.value.id) ?? editingCharacter.value.name
+    : '',
 )
 const graphCharacterMemberships = computed(() => {
   const c = editingCharacter.value
@@ -1300,7 +1318,7 @@ function jumpToCharacterChange(row: {
 }
 
 function factionNameById(id: string): string {
-  return factionOptions.value.find((f) => f.id === id)?.name ?? '未命名势力'
+  return factionDisplayNameMap.value.get(id) ?? factionOptions.value.find((f) => f.id === id)?.name ?? '未命名势力'
 }
 
 function relatedRelationsByFocus(focusCharacterId: string): CharacterRelation[] {
@@ -1318,7 +1336,7 @@ function visibleCharactersByFocus(focusCharacterId: string): Character[] {
 }
 
 function characterNameById(id: string): string {
-  return props.characters.find((c) => c.id === id)?.name ?? '角色'
+  return characterDisplayNameMap.value.get(id) ?? props.characters.find((c) => c.id === id)?.name ?? '角色'
 }
 
 function hangCurrentGraph(): void {

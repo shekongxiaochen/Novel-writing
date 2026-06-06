@@ -1,6 +1,6 @@
 <template>
   <main v-if="!isNovelContext" class="cursor-shell-home">
-    <header class="cursor-shell-home__head">
+    <header class="cursor-shell-home__head" data-tauri-drag-region>
       <h1 class="cursor-shell-home__title">小说工作台</h1>
       <div class="cursor-shell-home__head-actions">
         <template v-if="isLoggedIn">
@@ -22,6 +22,7 @@
         <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="handleThemePickerClick">
           <span class="cursor-shell__menu-title">主题</span>
         </button>
+        <WindowControls />
       </div>
     </header>
     <RouterView />
@@ -33,7 +34,7 @@
     :class="{ 'is-sidebar-collapsed': sidebarCollapsed, 'is-resizing-sidebar': isResizingSidebar }"
     :style="novelShellStyle"
   >
-    <header class="cursor-shell__menu-bar">
+    <header class="cursor-shell__menu-bar" data-tauri-drag-region>
       <button
         v-for="tab in workspaceTabs"
         :key="tab.key"
@@ -45,13 +46,6 @@
       >
         <span class="cursor-shell__menu-title">{{ tab.label }}</span>
       </button>
-      <div
-        class="cursor-shell__menu-poem"
-        :title="`${currentMenuPoem.line} —— ${currentMenuPoem.source}`"
-      >
-        <span class="cursor-shell__menu-poem-line">{{ currentMenuPoem.line }}</span>
-        <span class="cursor-shell__menu-poem-source">—— {{ currentMenuPoem.source }}</span>
-      </div>
       <button
         type="button"
         class="cursor-shell__collapse-btn cursor-shell__collapse-btn--menu"
@@ -124,6 +118,7 @@
           <span class="cursor-shell__menu-title">AI</span>
         </button>
       </div>
+      <WindowControls />
     </header>
     <aside class="cursor-shell__sidebar cursor-shell__sidebar--chapters">
       <div class="cursor-shell__brand-row">
@@ -574,7 +569,6 @@ import { useAuth } from './composables/useAuth'
 import { requestAiAccess } from './composables/useAiAccess'
 import { useCloudSync } from './composables/useCloudSync'
 import { Teleport } from 'vue'
-import { menuPoems } from './data/menuPoems'
 import AuthDialog from './components/AuthDialog.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import CreateNovelDialog from './components/CreateNovelDialog.vue'
@@ -582,6 +576,7 @@ import NovelShelfDialog from './components/NovelShelfDialog.vue'
 import ThemePickerPopover from './components/ThemePickerPopover.vue'
 import SaveToast from './components/SaveToast.vue'
 import AiWritingSettingsPopover from './components/AiWritingSettingsPopover.vue'
+import WindowControls from './components/WindowControls.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -746,8 +741,6 @@ const SIDEBAR_MIN = 248
 const SIDEBAR_MAX = 520
 const AI_STUDIO_WIDTH_MIN = 360
 const AI_STUDIO_WIDTH_MAX = 720
-const poemIndex = ref(0)
-let poemRotateTimer: number | null = null
 const aiStudioShellOpen = ref(readInitialAiStudioShellOpen())
 
 watch(
@@ -920,11 +913,7 @@ function chapterWordCount(content?: string | null): number {
   return String(content ?? '').replace(/\s/g, '').length
 }
 
-const currentMenuPoem = computed(() => {
-  if (menuPoems.length === 0) return { line: '文心雕龙，笔落生花。', source: '系统诗词库' }
-  const idx = ((poemIndex.value % menuPoems.length) + menuPoems.length) % menuPoems.length
-  return menuPoems[idx]
-})
+
 
 const currentNovelId = computed(() => {
   const id = route.params.id ?? route.params.novelId
@@ -1818,14 +1807,6 @@ onMounted(() => {
     /* ignore */
   }
 })
-onMounted(() => {
-  if (menuPoems.length > 0) poemIndex.value = Math.floor(Math.random() * menuPoems.length)
-  if (menuPoems.length > 1) {
-    poemRotateTimer = window.setInterval(() => {
-      poemIndex.value = (poemIndex.value + 1) % menuPoems.length
-    }, 16000)
-  }
-})
 onUnmounted(() => window.removeEventListener('storage', onStorage))
 onUnmounted(() => window.removeEventListener('novel-writing:changed', onNovelDataChanged))
 onUnmounted(() => window.removeEventListener('novel-writing:open-auth', onOpenAuthEvent as EventListener))
@@ -1839,8 +1820,6 @@ onUnmounted(() => {
   summaryStudioResizeCleanup?.()
   document.body.classList.remove('is-resizing-summary-studio')
   document.body.style.userSelect = ''
-  if (poemRotateTimer != null) window.clearInterval(poemRotateTimer)
-  poemRotateTimer = null
   if (chapterSummarySaveToastTimer != null) window.clearTimeout(chapterSummarySaveToastTimer)
   chapterSummarySaveToastTimer = null
 })

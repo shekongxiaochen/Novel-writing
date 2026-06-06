@@ -317,6 +317,7 @@ export async function fetchWalletBalance(): Promise<number> {
 
 type AiPromptBody = {
   prompt_type: string
+  novel_id?: string
   user_prompt: string
   context_prompt?: string
   ai_style_prompt?: string

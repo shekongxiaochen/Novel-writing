@@ -15,7 +15,7 @@
         @mouseenter="emit('update:activeIndex', idx)"
         @mousedown.prevent="emit('apply', item.name)"
       >
-        <span class="chapter-hub__name-suggest-name">{{ item.name }}</span>
+        <span class="chapter-hub__name-suggest-name">{{ item.displayLabel ?? item.name }}</span>
         <span v-if="item.kind !== 'character'" class="chapter-hub__name-suggest-kind" :class="`chapter-hub__name-suggest-kind--${item.kind}`">
           {{ item.kind === 'faction' ? '势力' : '物品' }}
         </span>
@@ -27,7 +27,7 @@
 <script setup lang="ts">
 defineProps<{
   open: boolean
-  list: Array<{ id: string; name: string; kind: 'character' | 'faction' | 'item' }>
+  list: Array<{ id: string; name: string; kind: 'character' | 'faction' | 'item'; displayLabel?: string }>
   activeIndex: number
   direction: 'down' | 'up'
   panelStyle: Record<string, string>

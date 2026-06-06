@@ -125,7 +125,7 @@
                         @click="toggleMember(c.id)"
                       >
                         <span class="category-bind-chip__state">{{ memberCharIds.includes(c.id) ? '已绑定' : '未绑定' }}</span>
-                        {{ c.name }}
+                        {{ characterDisplay(c) }}
                       </small>
                     </div>
                     <div v-if="boundMembers.length > 0" style="margin-top: 14px">
@@ -135,7 +135,7 @@
                         class="chapter-hub__faction-field chapter-hub__faction-field--full"
                         style="margin-top: 8px"
                       >
-                        <span class="chapter-hub__faction-field-label">{{ m.name }} 描述（最多10字）</span>
+                        <span class="chapter-hub__faction-field-label">{{ characterDisplay(m) }} 描述（最多10字）</span>
                         <input
                           :value="memberDescByCharId[m.id] ?? ''"
                           class="chapter-hub__faction-input"
@@ -227,7 +227,7 @@ import {
   type FactionStateSnapshot,
   updateFaction,
 } from '../../../lib/storage'
-import { characterMatchLabels } from '../../../lib/characterLabels'
+import { characterMatchLabels, buildDisplayNameMap } from '../../../lib/characterLabels'
 import type { Category, Character, Faction, Item } from '../../../types'
 
 const props = defineProps<{
@@ -270,7 +270,15 @@ const initialDraft = ref({
 })
 
 function characterName(characterId: string): string {
-  return props.characters.find((c) => c.id === characterId)?.name ?? '未知'
+  return charDisplayNameMap.value.get(characterId) ?? props.characters.find((c) => c.id === characterId)?.name ?? '未知'
+}
+
+// 同名角色显示名(作者视图:张三1/张三2)
+const charDisplayNameMap = computed(() =>
+  buildDisplayNameMap(props.characters.map((c) => ({ id: c.id, name: c.name, createdAt: c.createdAt }))),
+)
+function characterDisplay(c: { id: string; name: string }): string {
+  return charDisplayNameMap.value.get(c.id) ?? c.name
 }
 
 function normalizeItemIds(ids: string[]): string[] {

@@ -67,6 +67,22 @@ function writeScopedStorageItem(key: string, value: string): void {
   localStorage.setItem(scopedStorageKey(key), value)
 }
 
+/** 通用按用户 scope 隔离的 JSON 读取(供 autoApply/log 等模块复用,避免自拼 key 导致隔离口径不一致) */
+export function readScopedJson<T>(key: string, fallback: T): T {
+  const raw = readScopedStorageItem(key)
+  if (!raw) return fallback
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+/** 通用按用户 scope 隔离的 JSON 写入 */
+export function writeScopedJson<T>(key: string, value: T): void {
+  writeScopedStorageItem(key, JSON.stringify(value))
+}
+
 export type WorkspaceSnapshotPayload = {
   chapters?: Chapter[]
   outline?: OutlineItem[]
@@ -86,12 +102,12 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-function uid(): string {
+export function uid(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
 }
 
 let _emitTimer: ReturnType<typeof setTimeout> | null = null
-function emitStorageChange(): void {
+export function emitStorageChange(): void {
   if (typeof window === 'undefined') return
   if (_emitTimer != null) return // already scheduled — coalesce
   _emitTimer = setTimeout(() => {
@@ -1686,6 +1702,22 @@ export type CharacterChangeDetail = {
 
 export type EntityStateSnapshot = CharacterStateSnapshot | FactionStateSnapshot
 
+/** 角色的逐章「叙事状态」——随剧情演进、与静态档案(goal/secret/arc)互补。 */
+export type CharacterNarrativeState = {
+  /** 当前所在位置 */
+  location: string
+  /** 身体/精神状态(如"右臂重伤未愈") */
+  condition: string
+  /** 已掌握的关键信息 */
+  knownInfo: string[]
+  /** 持有的关键物品 */
+  possessions: string[]
+  /** 本章关系变化(自由文本,如"与李四决裂") */
+  relationDelta: string[]
+  /** 截至章号(冗余,便于排序/注入) */
+  chapterNo: number
+}
+
 export type CharacterChangeEvent = {
   fields: string[]
   updatedAt: string
@@ -1696,6 +1728,8 @@ export type CharacterChangeEvent = {
   fieldValues?: Record<string, string>
   beforeSnapshot?: EntityStateSnapshot | null
   afterSnapshot?: EntityStateSnapshot | null
+  /** 逐章叙事状态(角色状态机);仅在本章状态有变化时写入 */
+  narrativeState?: CharacterNarrativeState | null
 }
 
 type CharacterChangeHistoryRow = {
@@ -1744,6 +1778,7 @@ function appendCharacterLastChangedFields(
     fieldValues?: Record<string, string>
     beforeSnapshot?: CharacterStateSnapshot | null
     afterSnapshot?: CharacterStateSnapshot | null
+    narrativeState?: CharacterNarrativeState | null
   },
 ): void {
   const id = String(characterId ?? '').trim()
@@ -1810,6 +1845,7 @@ export function recordCharacterChangeFields(
     fieldValues?: Record<string, string>
     beforeSnapshot?: CharacterStateSnapshot | null
     afterSnapshot?: CharacterStateSnapshot | null
+    narrativeState?: CharacterNarrativeState | null
   },
 ): void {
   const id = String(characterId ?? '').trim()
@@ -1825,6 +1861,7 @@ export function recordCharacterChangeFields(
     fieldValues: options?.fieldValues,
     beforeSnapshot: options?.beforeSnapshot,
     afterSnapshot: options?.afterSnapshot,
+    narrativeState: options?.narrativeState,
   })
 }
 
@@ -2344,6 +2381,60 @@ export function getCharactersByNovelId(novelId: string): Character[] {
   return getAllCharacters()
     .filter((c) => c.novelId === novelId)
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+}
+
+/** 后端同步用:一条角色状态行 */
+export type CharacterNarrativeStateRow = {
+  character_id: string
+  chapter_id: string
+  chapter_no: number
+  state_json: string
+}
+
+/** 导出某本小说所有角色的逐章叙事状态(供 PUT 到后端) */
+export function collectCharacterNarrativeStates(novelId: string): CharacterNarrativeStateRow[] {
+  const out: CharacterNarrativeStateRow[] = []
+  for (const ch of getCharactersByNovelId(novelId)) {
+    for (const ev of getCharacterChangeHistory(ch.id)) {
+      const st = ev.narrativeState
+      if (!st) continue
+      out.push({
+        character_id: ch.id,
+        chapter_id: String(ev.chapterId ?? ''),
+        chapter_no: typeof st.chapterNo === 'number' ? st.chapterNo : 0,
+        state_json: JSON.stringify(st),
+      })
+    }
+  }
+  return out
+}
+
+/** 从后端拉回的状态行写回本地历史(冷启动/换设备恢复;按 chapterId 去重,不覆盖已有更全的本地记录) */
+export function importCharacterNarrativeStates(rows: CharacterNarrativeStateRow[]): number {
+  let imported = 0
+  for (const row of rows) {
+    const charId = String(row.character_id ?? '').trim()
+    if (!charId) continue
+    let st: CharacterNarrativeState | null = null
+    try {
+      st = JSON.parse(row.state_json) as CharacterNarrativeState
+    } catch {
+      continue
+    }
+    if (!st) continue
+    // 已存在同章事件则跳过,避免重复
+    const exists = getCharacterChangeHistory(charId).some(
+      (ev) => ev.narrativeState && String(ev.chapterId ?? '') === String(row.chapter_id ?? ''),
+    )
+    if (exists) continue
+    recordCharacterChangeFields(charId, ['narrativeState'], {
+      chapterId: String(row.chapter_id ?? ''),
+      anchorStart: 0,
+      narrativeState: st,
+    })
+    imported += 1
+  }
+  return imported
 }
 
 function getAllCharacterRelations(): CharacterRelation[] {

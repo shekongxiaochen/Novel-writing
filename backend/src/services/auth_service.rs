@@ -263,6 +263,11 @@ impl AuthService {
 
         let user = Self::row_to_user(row.ok_or(AppError::Unauthorized)?);
 
+        // 拒绝已被封禁/停用的账户，即使其 token 仍未过期
+        if !user.is_active {
+            return Err(AppError::Unauthorized);
+        }
+
         let now = time::now_utc();
         sqlx::query("UPDATE user_sessions SET last_seen_at = ? WHERE id = ?")
             .bind(now)

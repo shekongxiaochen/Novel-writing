@@ -33,7 +33,7 @@ pub async fn prompt_chat(
     Json(req): Json<AiPromptRequest>,
 ) -> Result<Response> {
     // 1. 验证 prompt_type 有效
-    if prompt_registry::get_system_prompt(&req.prompt_type).is_none() {
+    if !prompt_registry::is_valid_prompt_type(&req.prompt_type) {
         return Err(AppError::Validation(format!(
             "无效的 prompt_type: {}",
             req.prompt_type
@@ -57,17 +57,41 @@ pub async fn prompt_chat(
         }
     }
 
-    // 3. 构造 messages
+    // 3. 语义检索：续写类调用且带 novel_id 时，检索相关旧文拼进上下文（失败则静默跳过）
+    let mut effective_context = req.context_prompt.clone();
+    if req.prompt_type == "continue" {
+        if let Some(nid) = req.novel_id.as_deref() {
+            // 隔离：先校验该 novel 归属当前用户，越权直接跳过（不报错、不检索）
+            if state.novels.get_novel(nid, &user.id).await.is_ok() {
+                let hits = state.embedding_index.search(nid, &req.user_prompt, 5).await;
+                if !hits.is_empty() {
+                    let mut recap = String::from("【相关前文回顾】（系统按语义自动检索，供保持连贯，勿照抄）\n");
+                    for h in &hits {
+                        recap.push_str(&format!("- 第{}章：{}\n", h.chapter_no, h.content.trim()));
+                    }
+                    effective_context = Some(match effective_context {
+                        Some(c) if !c.trim().is_empty() => format!("{}\n\n{}", recap, c),
+                        _ => recap,
+                    });
+                    tracing::info!("续写检索命中 {} 段相关前文 (novel {})", hits.len(), nid);
+                }
+            }
+        }
+    }
+
+    // 4. 构造 messages（系统提示词支持后台自定义，实时从数据库读取）
     let messages = prompt_registry::build_messages(
+        &state.settings,
         &req.prompt_type,
         &req.user_prompt,
         req.ai_style_prompt.as_deref(),
         req.response_format.as_deref(),
-        req.context_prompt.as_deref(),
+        effective_context.as_deref(),
     )
+    .await
     .ok_or_else(|| AppError::Validation(format!("无效的 prompt_type: {}", req.prompt_type)))?;
 
-    // 4. 构造 response_format
+    // 5. 构造 response_format
     let response_format = req.response_format.as_deref().and_then(|f| {
         if f == "json" {
             Some(json!({ "type": "json_object" }))
@@ -76,11 +100,11 @@ pub async fn prompt_chat(
         }
     });
 
-    // 5. 钳制 temperature 和 max_tokens（防止滥用）
+    // 6. 钳制 temperature 和 max_tokens（防止滥用）
     let temperature = req.temperature.map(|t| t.clamp(0.0, 2.0));
     let max_tokens = req.max_tokens.map(|m| m.min(16384));
 
-    // 6. 构造 AiChatRequest 并调用现有 AI 服务
+    // 7. 构造 AiChatRequest 并调用现有 AI 服务
     let chat_req = AiChatRequest {
         messages,
         temperature,

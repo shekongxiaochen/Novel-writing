@@ -1,11 +1,11 @@
 import { nextTick, ref, type ComputedRef, type Ref } from 'vue'
 import { updateChapter } from '../../../lib/storage'
-import { characterMatchLabels } from '../../../lib/characterLabels'
+import { characterMatchLabels, buildDisplayNameMap } from '../../../lib/characterLabels'
 import { getCaretPixelOffset, scrollCaretIntoView } from '../caretGeometry'
 import { getTypingPrefixInfo, resolveNamePrefix } from '../nameSuggestUtils'
 import type { Chapter, Character, Faction, Item } from '../../../types'
 
-type NameSuggestRow = { id: string; name: string; kind: 'character' | 'faction' | 'item' }
+type NameSuggestRow = { id: string; name: string; kind: 'character' | 'faction' | 'item'; displayLabel: string }
 
 function sortNameSuggestRows(rows: NameSuggestRow[]): NameSuggestRow[] {
   return [...rows].sort((a, b) => {
@@ -70,24 +70,36 @@ export function useChapterHubNameSuggest(deps: {
       return
     }
 
+    // 同名实体显示名映射(作者视图:张三1/张三2)。仅用于下拉显示,插入正文仍用底名。
+    const charDisplayMap = buildDisplayNameMap(
+      characters.value.map((c) => ({ id: c.id, name: c.name, createdAt: c.createdAt })),
+    )
+    const factionDisplayMap = buildDisplayNameMap(
+      factions.value.map((f) => ({ id: f.id, name: f.name, createdAt: f.createdAt })),
+    )
+    // 角色行:若命中的 label 是主名,显示带后缀的显示名;若命中别名,显示别名本身。
+    const charLabel = (c: Character, label: string): string =>
+      label === c.name ? charDisplayMap.get(c.id) ?? label : label
+    const factionLabel = (f: Faction): string => factionDisplayMap.get(f.id) ?? f.name
+
     const normalizedPrefix = prefix.toLowerCase()
     const startsWithMatches: NameSuggestRow[] = []
     for (const c of characters.value) {
       for (const label of characterMatchLabels(c)) {
         if (!label) continue
         if (label.toLowerCase().startsWith(normalizedPrefix)) {
-          startsWithMatches.push({ id: `ch:${c.id}:${label}`, name: label, kind: 'character' })
+          startsWithMatches.push({ id: `ch:${c.id}:${label}`, name: label, kind: 'character', displayLabel: charLabel(c, label) })
         }
       }
     }
     for (const f of factions.value) {
       if (f.name && f.name.toLowerCase().startsWith(normalizedPrefix)) {
-        startsWithMatches.push({ id: f.id, name: f.name, kind: 'faction' })
+        startsWithMatches.push({ id: f.id, name: f.name, kind: 'faction', displayLabel: factionLabel(f) })
       }
     }
     for (const item of items.value) {
       if (item.name && item.name.toLowerCase().startsWith(normalizedPrefix)) {
-        startsWithMatches.push({ id: `item:${item.id}`, name: item.name, kind: 'item' })
+        startsWithMatches.push({ id: `item:${item.id}`, name: item.name, kind: 'item', displayLabel: item.name })
       }
     }
 
@@ -96,18 +108,18 @@ export function useChapterHubNameSuggest(deps: {
       for (const label of characterMatchLabels(c)) {
         if (!label) continue
         if (!label.toLowerCase().startsWith(normalizedPrefix) && label.includes(prefix)) {
-          includeMatches.push({ id: `ch:${c.id}:${label}`, name: label, kind: 'character' })
+          includeMatches.push({ id: `ch:${c.id}:${label}`, name: label, kind: 'character', displayLabel: charLabel(c, label) })
         }
       }
     }
     for (const f of factions.value) {
       if (f.name && !f.name.toLowerCase().startsWith(normalizedPrefix) && f.name.includes(prefix)) {
-        includeMatches.push({ id: f.id, name: f.name, kind: 'faction' })
+        includeMatches.push({ id: f.id, name: f.name, kind: 'faction', displayLabel: factionLabel(f) })
       }
     }
     for (const item of items.value) {
       if (item.name && !item.name.toLowerCase().startsWith(normalizedPrefix) && item.name.includes(prefix)) {
-        includeMatches.push({ id: `item:${item.id}`, name: item.name, kind: 'item' })
+        includeMatches.push({ id: `item:${item.id}`, name: item.name, kind: 'item', displayLabel: item.name })
       }
     }
 
@@ -116,17 +128,20 @@ export function useChapterHubNameSuggest(deps: {
         id: `ch:${c.id}:${label}`,
         name: label,
         kind: 'character' as const,
+        displayLabel: charLabel(c, label),
       })),
     )
     const allFactionRows: NameSuggestRow[] = factions.value.map((f) => ({
       id: f.id,
       name: f.name,
       kind: 'faction' as const,
+      displayLabel: factionLabel(f),
     }))
     const allItemRows: NameSuggestRow[] = items.value.map((item) => ({
       id: `item:${item.id}`,
       name: item.name,
       kind: 'item' as const,
+      displayLabel: item.name,
     }))
 
     const list = sortNameSuggestRows(

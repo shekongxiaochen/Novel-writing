@@ -10,6 +10,7 @@ mod services;
 mod utils;
 
 use axum::{
+    extract::DefaultBodyLimit,
     middleware as axum_middleware,
     routing::{get, post},
     Router,
@@ -18,7 +19,8 @@ use config::Config;
 use handlers::{ai, auth, billing, health, novels};
 use middleware::{auth_middleware, cors_layer};
 use services::{
-    AiProviderService, AiService, AppState, AuthService, CacheService, CardKeyService, NovelService,
+    AiProviderService, AiService, AppState, AuthService, AutoApplyLogService, CacheService, CardKeyService,
+    CharacterStateService, EmbeddingIndexService, EmbeddingProviderService, NovelService,
     SettingsService, WalletService,
 };
 use std::sync::Arc;
@@ -85,6 +87,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wallet = Arc::new(WalletService::new(db.clone()));
     let card_keys = Arc::new(CardKeyService::new(db.clone(), (*wallet).clone()));
     let providers = Arc::new(AiProviderService::new(db.clone()));
+    let embedding_index = Arc::new(EmbeddingIndexService::new(
+        db.clone(),
+        EmbeddingProviderService::new(db.clone()),
+    ));
+    let character_states = Arc::new(CharacterStateService::new(db.clone()));
+    let auto_apply_log = Arc::new(AutoApplyLogService::new(db.clone()));
     let state = Arc::new(AppState {
         auth: Arc::new(AuthService::new(
             db.clone(),
@@ -103,6 +111,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             (*wallet).clone(),
             (*providers).clone(),
         )),
+        embedding_index,
+        character_states,
+        auto_apply_log,
     });
 
     tracing::info!("Services initialized");
@@ -133,6 +144,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/novels/:id/snapshot",
             get(novels::get_snapshot).put(novels::update_snapshot),
         )
+        .route(
+            "/novels/:id/character-states",
+            get(novels::get_character_states).put(novels::put_character_states),
+        )
+        .route(
+            "/novels/:id/auto-apply-log",
+            get(novels::get_auto_apply_log).put(novels::put_auto_apply_log),
+        )
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -143,6 +162,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(cors_layer(&config.cors_origins))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
+        // 全局请求体上限 16MB，防止超大快照/正文 payload 造成内存与存储滥用(DoS)
+        .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
         .with_state(state);
 
     if config.admin_enabled {
