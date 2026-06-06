@@ -2,48 +2,30 @@
   "name": "frontend",
   "version": "1.0.0",
   "type": "module",
-  "main": "electron-main.cjs",
   "scripts": {
     "dev": "vite --port 5174",
     "build": "vite build",
     "preview": "vite preview --port 5174",
-    "electron:dev": "npm run build && electron .",
-    "dist:win": "npm run build && electron-builder --win portable --x64"
-  },
-  "build": {
-    "appId": "com.novelwriting.assistant",
-    "productName": "Novel Writing Assistant",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron-main.cjs",
-      "package.json"
-    ],
-    "win": {
-      "target": [
-        "portable"
-      ],
-      "artifactName": "NovelWritingAssistant-${version}-${arch}.${ext}"
-    },
-    "compression": "store"
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
     "three": "^0.183.2",
     "vue": "^3.5.31",
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@types/node": "^25.5.0",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/compiler-sfc": "^3.5.31",
-    "electron": "^42.0.1",
-    "electron-builder": "^26.8.1",
     "typescript": "^6.0.2",
     "vite": "^8.0.3"
   }

@@ -538,9 +538,55 @@ export type AiSuggestionUiState = {
   action?: 'create' | 'merge' | 'ignore' | null
   editorEntityType?: 'character' | 'faction' | 'item' | null
   editorTargetId?: string | null
+  /** true=AI 自动入库(非用户手动点采用),供面板显示"已自动录入"徽标与撤销入口 */
+  auto?: boolean
 }
 
-/** AI 整理时对该条角色身份的确信度 */
+/** 自动入库涉及的数据模块 */
+export type AutoApplyModule =
+  | 'characters'
+  | 'factions'
+  | 'items'
+  | 'memberships'
+  | 'relations'
+  | 'outlineItems'
+  | 'foreshadows'
+  | 'classification'
+
+/** 自动入库的操作类型 */
+export type AutoApplyAction = 'create' | 'merge'
+
+/** decideAutoAction 的判定结果 */
+export type AutoApplyDecision = 'auto-create' | 'auto-merge' | 'needs-confirm' | 'skip'
+
+/** 一条可撤销的自动入库操作日志 */
+export type AutoApplyLogEntry = {
+  id: string
+  novelId: string
+  /** 触发本次入库的来源章节 */
+  chapterId: string
+  chapterNo: number | null
+  module: AutoApplyModule
+  action: AutoApplyAction
+  /** create=新建实体 id;merge=被更新的已有实体 id */
+  entityId: string
+  /** 展示用标签(角色名/势力名/大纲标题等) */
+  entityLabel: string
+  /** 抽取阶段的匹配类型,留痕用 */
+  matchType: EntityMatchType
+  /** merge 前被更新实体的深拷贝快照(create 为 null),撤销时整体还原 */
+  beforeSnapshot: unknown | null
+  /** 入库后内容摘要(展示用) */
+  afterSummary?: string
+  /** 本次实际改动的字段名(merge 时供面板显示 diff) */
+  changedFields?: string[]
+  createdAt: string
+  /** 是否已被撤销(标记不物删,保留审计) */
+  undone: boolean
+  undoneAt?: string | null
+}
+
+/** 整理时该条角色身份的确信度 */
 export type ExtractedIdentityStatus = 'certain' | 'uncertain' | 'possible_same_person'
 
 export type ExtractedCharacter = {

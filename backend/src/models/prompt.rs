@@ -6,6 +6,9 @@ use serde::Deserialize;
 pub struct AiPromptRequest {
     /// 提示词类型标识，如 "continue", "outline_options", "extract" 等
     pub prompt_type: String,
+    /// 当前小说 ID（可选）。续写类调用传入后，后端会做语义检索补充相关前文。
+    #[serde(default)]
+    pub novel_id: Option<String>,
     /// 前端组装好的用户提示词全文（每次调用都会变化的动态内容）
     pub user_prompt: String,
     /// 稳定的作品上下文（角色档案/大纲/作品信息等），同一本书内多次调用基本不变。

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>向量服务 — {{ admin_title }}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="/admin/_static/admin.css" />
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased font-sans min-h-screen">
+  <header class="border-b border-zinc-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="/admin/" class="text-zinc-500 hover:text-zinc-900 text-sm"><i class="fa-solid fa-arrow-left mr-1"></i>控制台</a>
+        <span class="text-zinc-300">/</span>
+        <span class="text-sm font-semibold">向量服务</span>
+      </div>
+      <span class="text-xs text-zinc-500">{{ admin_title }}</span>
+    </div>
+    <div class="max-w-5xl mx-auto px-6 flex items-center gap-1 text-sm -mb-px">
+      <a href="/admin/user-ops" class="px-3 py-2 border-b-2 border-transparent text-zinc-500 hover:text-zinc-900 hover:border-zinc-300">用户与余额</a>
+      <a href="/admin/ai-config" class="px-3 py-2 border-b-2 border-transparent text-zinc-500 hover:text-zinc-900 hover:border-zinc-300">AI 服务配置</a>
+      <a href="/admin/embedding-config" class="px-3 py-2 border-b-2 border-zinc-900 text-zinc-900 font-medium">向量服务</a>
+      <a href="/admin/card-keys" class="px-3 py-2 border-b-2 border-transparent text-zinc-500 hover:text-zinc-900 hover:border-zinc-300">卡密管理</a>
+    </div>
+  </header>
+
+  {% if page == "list" %}
+  {# ── 列表视图 ── #}
+  <main class="max-w-5xl mx-auto px-6 py-8 space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-lg font-semibold">向量服务（语义检索）</h1>
+        <p class="text-sm text-zinc-500 mt-1">用于长篇续写时「按意思」检索旧章与设定。配置后写作端自动启用；未配置则回退关键词检索。</p>
+      </div>
+      <a href="/admin/embedding-config/new"
+         class="inline-flex items-center gap-2 bg-zinc-900 text-white rounded-md px-4 py-2 text-sm font-semibold hover:bg-zinc-800">
+        <i class="fa-solid fa-plus"></i> 添加服务
+      </a>
+    </div>
+
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-zinc-50 border-b border-zinc-200">
+          <tr>
+            <th class="px-4 py-3 text-left font-medium text-zinc-600">名称</th>
+            <th class="px-4 py-3 text-left font-medium text-zinc-600">模型</th>
+            <th class="px-4 py-3 text-center font-medium text-zinc-600">维度</th>
+            <th class="px-4 py-3 text-right font-medium text-zinc-600">输入单价</th>
+            <th class="px-4 py-3 text-center font-medium text-zinc-600">倍率</th>
+            <th class="px-4 py-3 text-center font-medium text-zinc-600">状态</th>
+            <th class="px-4 py-3 text-center font-medium text-zinc-600">操作</th>
+          </tr>
+        </thead>
+        <tbody id="provider-tbody"></tbody>
+      </table>
+      <div id="empty-state" class="hidden py-12 text-center text-zinc-400">
+        <i class="fa-solid fa-vector-square text-2xl mb-2"></i>
+        <p>暂无向量服务，请点击上方按钮添加。</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const rows = {{ rows_json|safe }};
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function renderTable() {
+      const tbody = document.getElementById('provider-tbody');
+      const empty = document.getElementById('empty-state');
+      if (rows.length === 0) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+      empty.classList.add('hidden');
+      tbody.innerHTML = rows.map(r => `
+        <tr class="border-b border-zinc-100 last:border-0 ${r.is_active ? 'bg-emerald-50/40' : ''}">
+          <td class="px-4 py-3 font-medium">${esc(r.name)}</td>
+          <td class="px-4 py-3"><code class="text-xs bg-zinc-100 px-1.5 py-0.5 rounded">${esc(r.model)}</code></td>
+          <td class="px-4 py-3 text-center">${r.dimension}</td>
+          <td class="px-4 py-3 text-right">${r.price_per_1m_input_yuan}</td>
+          <td class="px-4 py-3 text-center">${r.consumption_multiplier}x</td>
+          <td class="px-4 py-3 text-center">
+            ${r.is_active
+              ? '<span class="inline-flex items-center gap-1 text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full text-xs font-medium"><i class="fa-solid fa-circle text-[6px]"></i>活跃</span>'
+              : '<span class="text-zinc-400 text-xs">-</span>'}
+          </td>
+          <td class="px-4 py-3 text-center space-x-2">
+            ${!r.is_active ? `
+              <form method="post" action="/admin/embedding-config/activate" class="inline">
+                <input type="hidden" name="id" value="${r.id}" />
+                <button type="submit" class="text-emerald-600 hover:text-emerald-800 text-xs font-medium"><i class="fa-solid fa-check-circle"></i> 激活</button>
+              </form>` : ''}
+            <a href="/admin/embedding-config/${r.id}/edit" class="text-zinc-600 hover:text-zinc-900 text-xs font-medium"><i class="fa-solid fa-pen"></i> 编辑</a>
+            ${!r.is_active ? `
+              <form method="post" action="/admin/embedding-config/delete" class="inline" onsubmit="return confirm('确定删除「${esc(r.name)}」？')">
+                <input type="hidden" name="id" value="${r.id}" />
+                <button type="submit" class="text-red-500 hover:text-red-700 text-xs font-medium"><i class="fa-solid fa-trash"></i> 删除</button>
+              </form>` : ''}
+          </td>
+        </tr>`).join('');
+    }
+    renderTable();
+  </script>
+
+  {% else %}
+  {# ── 表单视图（增/改） ── #}
+  <main class="max-w-3xl mx-auto px-6 py-8 space-y-6">
+    {% if error %}
+    <div class="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+      <i class="fa-solid fa-circle-exclamation mr-1"></i> {{ error }}
+    </div>
+    {% endif %}
+    {% if test_ok %}
+    <div class="px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">{{ test_ok }}</div>
+    {% endif %}
+
+    <form method="post" action="/admin/embedding-config/save" class="space-y-6" id="provider-form">
+      <input type="hidden" name="id" value="{{ id }}" />
+
+      <section class="bg-white rounded-lg border border-zinc-200 shadow-sm p-6 space-y-4">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <i class="fa-solid fa-vector-square text-zinc-400"></i> {{ page_title }}
+        </h2>
+        <p class="text-sm text-zinc-500">密钥仅存服务器，用户端不可见。可先填密钥后点「测试连接」。推荐阿里百炼 text-embedding-v4。</p>
+
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">预设</span>
+          <select id="provider-type" onchange="onTypeChange(this)" class="w-full rounded-md border-zinc-200 text-sm">
+            <option value="">-- 选择预设 --</option>
+            <option value="bailian">阿里百炼 text-embedding-v4</option>
+          </select>
+        </label>
+
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">实例名称</span>
+          <input name="name" type="text" required value="{{ name }}" placeholder="如 阿里百炼向量"
+                 class="w-full rounded-md border-zinc-200 text-sm" />
+        </label>
+
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">API 密钥</span>
+          <input name="api_key" type="password" autocomplete="new-password" placeholder="{{ api_key_placeholder }}"
+                 class="w-full rounded-md border-zinc-200 text-sm" />
+        </label>
+
+        <label class="block space-y-1">
+          <span class="text-sm font-medium">API 地址（Base URL）</span>
+          <input name="base_url" type="url" required value="{{ base_url }}"
+                 placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                 class="w-full rounded-md border-zinc-200 text-sm" />
+        </label>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label class="block space-y-1">
+            <span class="text-sm font-medium">模型 ID</span>
+            <input name="model" type="text" required value="{{ model }}" placeholder="text-embedding-v4"
+                   class="w-full rounded-md border-zinc-200 text-sm" />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-sm font-medium">向量维度</span>
+            <input name="dimension" type="number" min="64" max="2048" required value="{{ dimension }}" placeholder="1024"
+                   class="w-full rounded-md border-zinc-200 text-sm" />
+          </label>
+        </div>
+
+        <button type="submit" formaction="/admin/embedding-config/test" formmethod="post"
+                class="inline-flex items-center gap-2 border border-zinc-300 rounded-md px-4 py-2 text-sm font-medium hover:bg-zinc-50">
+          <i class="fa-solid fa-satellite-dish"></i> 测试连接
+        </button>
+      </section>
+
+      <section class="bg-white rounded-lg border border-zinc-200 shadow-sm p-6 space-y-4">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <i class="fa-solid fa-gauge-high text-zinc-400"></i> 计费设置
+        </h2>
+        <p class="text-sm text-zinc-500">向量服务仅按输入计费。每次扣费 = 输入 token × 单价 / 百万 × <strong>消耗倍率</strong>（单位：元）。</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label class="block space-y-1">
+            <span class="text-sm font-medium">输入单价（元 / 百万 token）</span>
+            <input name="price_per_1m_input_yuan" type="number" step="0.0001" min="0" required
+                   value="{{ price_per_1m_input_yuan }}" class="w-full rounded-md border-zinc-200 text-sm" />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-sm font-medium">消耗倍率</span>
+            <input name="consumption_multiplier" type="number" step="0.1" min="0.1" max="10" required
+                   value="{{ consumption_multiplier }}" class="w-full rounded-md border-zinc-200 text-sm" />
+          </label>
+        </div>
+      </section>
+
+      <div class="flex items-center gap-3">
+        <button type="submit" class="bg-zinc-900 text-white rounded-md px-5 py-2.5 text-sm font-semibold hover:bg-zinc-800">保存</button>
+        <a href="/admin/embedding-config" class="text-sm text-zinc-500 hover:text-zinc-800">返回列表</a>
+      </div>
+    </form>
+  </main>
+
+  <script>
+    const PRESETS = {
+      bailian: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'text-embedding-v4', dimension: 1024, price: 0.5 },
+    };
+    function onTypeChange(sel) {
+      const p = PRESETS[sel.value];
+      if (!p) return;
+      const f = document.getElementById('provider-form');
+      f.base_url.value = p.base_url;
+      f.model.value = p.model;
+      f.dimension.value = p.dimension;
+      if (!f.price_per_1m_input_yuan.value) f.price_per_1m_input_yuan.value = p.price;
+      if (!f.name.value.trim()) f.name.value = sel.options[sel.selectedIndex].text;
+    }
+  </script>
+
+  {% endif %}
+</body>
+</html>

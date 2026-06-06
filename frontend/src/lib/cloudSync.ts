@@ -8,7 +8,8 @@ import {
   upsertNovelRecord,
 } from './storage'
 import type { WorkspaceSnapshotPayload } from './storage'
-import type { Novel } from '../types'
+import type { CharacterNarrativeStateRow } from './storage'
+import type { Novel, AutoApplyLogEntry } from '../types'
 
 type RemoteNovel = {
   id: string
@@ -142,6 +143,110 @@ async function deleteRemoteNovel(novelId: string): Promise<void> {
   await request<{ message: string }>(`/novels/${novelId}`, {
     method: 'DELETE',
   })
+}
+
+/** 上传某本小说的角色逐章状态到后端 */
+export async function putRemoteCharacterStates(
+  novelId: string,
+  states: CharacterNarrativeStateRow[],
+): Promise<void> {
+  await request<{ message: string }>(`/novels/${novelId}/character-states`, {
+    method: 'PUT',
+    body: JSON.stringify({ states }),
+  })
+}
+
+/** 从后端拉取某本小说的角色逐章状态 */
+export async function getRemoteCharacterStates(
+  novelId: string,
+): Promise<CharacterNarrativeStateRow[]> {
+  const resp = await request<{ states: CharacterNarrativeStateRow[] }>(
+    `/novels/${novelId}/character-states`,
+  )
+  return Array.isArray(resp?.states) ? resp.states : []
+}
+
+type RemoteAutoApplyLogRow = {
+  id: string
+  chapter_id: string
+  chapter_no: number | null
+  module: string
+  action: string
+  entity_id: string
+  entity_label: string
+  match_type: string
+  before_snapshot: string | null
+  after_summary: string | null
+  changed_fields: string | null
+  undone: boolean
+  created_at: string
+  undone_at: string | null
+}
+
+function toRemoteAutoApplyLog(e: AutoApplyLogEntry): RemoteAutoApplyLogRow {
+  return {
+    id: e.id,
+    chapter_id: e.chapterId,
+    chapter_no: e.chapterNo,
+    module: e.module,
+    action: e.action,
+    entity_id: e.entityId,
+    entity_label: e.entityLabel,
+    match_type: e.matchType,
+    before_snapshot: e.beforeSnapshot != null ? JSON.stringify(e.beforeSnapshot) : null,
+    after_summary: e.afterSummary ?? null,
+    changed_fields: e.changedFields ? JSON.stringify(e.changedFields) : null,
+    undone: Boolean(e.undone),
+    created_at: e.createdAt,
+    undone_at: e.undoneAt ?? null,
+  }
+}
+
+function fromRemoteAutoApplyLog(novelId: string, r: RemoteAutoApplyLogRow): AutoApplyLogEntry {
+  return {
+    id: r.id,
+    novelId,
+    chapterId: r.chapter_id,
+    chapterNo: r.chapter_no,
+    module: r.module as AutoApplyLogEntry['module'],
+    action: r.action as AutoApplyLogEntry['action'],
+    entityId: r.entity_id,
+    entityLabel: r.entity_label,
+    matchType: r.match_type as AutoApplyLogEntry['matchType'],
+    beforeSnapshot: r.before_snapshot ? safeParse(r.before_snapshot) : null,
+    afterSummary: r.after_summary ?? undefined,
+    changedFields: r.changed_fields ? (safeParse(r.changed_fields) as string[]) : undefined,
+    undone: Boolean(r.undone),
+    createdAt: r.created_at,
+    undoneAt: r.undone_at ?? null,
+  }
+}
+
+function safeParse(s: string): unknown {
+  try {
+    return JSON.parse(s)
+  } catch {
+    return null
+  }
+}
+
+/** 上传某本小说的自动入库日志到后端 */
+export async function putRemoteAutoApplyLog(
+  novelId: string,
+  logs: AutoApplyLogEntry[],
+): Promise<void> {
+  await request<{ message: string }>(`/novels/${novelId}/auto-apply-log`, {
+    method: 'PUT',
+    body: JSON.stringify({ logs: logs.map(toRemoteAutoApplyLog) }),
+  })
+}
+
+/** 从后端拉取某本小说的自动入库日志 */
+export async function getRemoteAutoApplyLog(novelId: string): Promise<AutoApplyLogEntry[]> {
+  const resp = await request<{ logs: RemoteAutoApplyLogRow[] }>(
+    `/novels/${novelId}/auto-apply-log`,
+  )
+  return Array.isArray(resp?.logs) ? resp.logs.map((r) => fromRemoteAutoApplyLog(novelId, r)) : []
 }
 
 function applyLocalNovelUpdate(base: Novel, remote: Novel | null, updatedAt: string): Novel {

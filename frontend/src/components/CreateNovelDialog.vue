@@ -30,7 +30,7 @@
 
           <div class="confirm-dialog__actions create-novel-dialog__actions">
             <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="emit('close')">取消</button>
-            <button type="submit" class="confirm-dialog__btn confirm-dialog__btn--danger" :disabled="isCreating">
+            <button type="submit" class="btn-primary create-novel-dialog__submit" :disabled="isCreating || !form.title.trim()">
               {{ isCreating ? '创建中...' : '创建并进入' }}
             </button>
           </div>
@@ -137,22 +137,55 @@ function handleCreate(): void {
 
 .create-novel-dialog__form {
   display: grid;
-  gap: 14px;
-  padding: 20px 22px 22px;
+  gap: 18px;
+  padding: 22px 22px 22px;
+}
+
+.create-novel-dialog__form label {
+  display: grid;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
 }
 
 .create-novel-dialog__input {
   min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 50%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  color: var(--color-text);
+  font-size: 0.94rem;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.create-novel-dialog__input::placeholder {
+  color: color-mix(in srgb, var(--color-text-muted) 70%, transparent);
+}
+
+.create-novel-dialog__input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-primary) 65%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
 }
 
 .create-novel-dialog__textarea {
-  min-height: 96px;
+  min-height: 104px;
   resize: vertical;
+  line-height: 1.6;
 }
 
 .create-novel-dialog__actions {
   justify-content: flex-end;
-  margin-top: 6px;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.create-novel-dialog__submit {
+  min-width: 132px;
 }
 
 @media (max-width: 640px) {

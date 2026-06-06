@@ -11,13 +11,15 @@ use sea_orm_migration::MigratorTrait;
 
 mod ai_config;
 mod card_key_admin;
+mod embedding_config;
 mod labels;
+mod prompts;
 mod user_ops;
 
 use std::{path::PathBuf, sync::Arc};
 
 use crate::entities::AiWalletLedgerEntity;
-use crate::services::{AiProviderService, CardKeyService, WalletService};
+use crate::services::{AiProviderService, CardKeyService, EmbeddingProviderService, SettingsService, WalletService};
 use labels::{apply_field_labels, AI_WALLET_LEDGER_FIELDS};
 
 async fn separate_app_session_table(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
@@ -289,11 +291,21 @@ pub async fn build_router(
         .merge(card_key_admin::routes(card_key_admin::CardKeyAdminState {
             db: sqlx_pool.clone(),
             card_keys: card_key_service,
+            auth: auth_for_admin.clone(),
+        }))
+        .merge(prompts::routes(prompts::PromptsState {
+            settings: SettingsService::new(sqlx_pool.clone()),
+            auth: auth_for_admin.clone(),
+        }))
+        .merge(embedding_config::routes(embedding_config::EmbeddingConfigState {
+            providers: EmbeddingProviderService::new(sqlx_pool.clone()),
             auth: auth_for_admin,
         }));
 
     tracing::info!("Admin user ops: http://127.0.0.1:8080/admin/user-ops");
     tracing::info!("Admin AI config: http://127.0.0.1:8080/admin/ai-config");
+    tracing::info!("Admin embedding config: http://127.0.0.1:8080/admin/embedding-config");
+    tracing::info!("Admin prompts: http://127.0.0.1:8080/admin/prompts");
     tracing::info!("Admin card keys: http://127.0.0.1:8080/admin/card-keys");
 
     Ok(router)

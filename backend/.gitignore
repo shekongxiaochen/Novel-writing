@@ -19,3 +19,7 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 生产密钥文件
+.env.prod
+ssl/

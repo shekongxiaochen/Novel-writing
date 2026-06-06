@@ -47,6 +47,17 @@
                   <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
               </button>
+              <button
+                type="button"
+                class="chapter-hub__search-button"
+                :title="'复制本章正文到剪贴板'"
+                @click="copyCurrentChapterText()"
+              >
+                <svg class="chapter-hub__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </button>
             </div>
 
             <transition name="chapter-hub-search">
@@ -218,6 +229,9 @@
             @pending-tool-adopt-all="applyAiPendingToolActions"
             @pending-tool-adopt-one="applyOneAiPendingToolAction"
             @pending-tool-ignore-all="ignoreAiPendingToolActions"
+            :auto-apply-log="aiAutoApplyLog"
+            @undo-auto="undoAutoApplyEntryById"
+            @undo-auto-all="undoAllAutoApplyForChapter"
           />
         </aside>
       </div>
@@ -386,6 +400,7 @@
       </Transition>
     </Teleport>
     <SaveToast :open="chapterHubSaveToastOpen" title="保存成功" message="修改已保存。" />
+    <SaveToast :open="copyToastOpen" :title="copyToastTitle" :message="copyToastMessage" />
   </div>
 
   <section v-else class="page-block">
@@ -432,6 +447,9 @@ import {
   createForeshadowPlant,
   addForeshadowFulfillment,
   buildNovelWorkspacePayload,
+  collectCharacterNarrativeStates,
+  importCharacterNarrativeStates,
+  getCharactersByNovelId,
   createChapter,
   createCharacter,
   createCharacterFactionMembership,
@@ -456,9 +474,16 @@ import {
   updateForeshadowPlant,
   updateFaction,
   updateItem,
+  updateOutlineItem,
+  getOutlineByNovelId,
   recordCharacterChangeFields,
   recordFactionChangeFields,
 } from '../../lib/storage'
+import { putRemoteCharacterStates, getRemoteCharacterStates, putRemoteAutoApplyLog, getRemoteAutoApplyLog } from '../../lib/cloudSync'
+import { decideAutoAction, foreshadowPolicyOpts, outlinePolicyOpts } from '../../lib/autoApply/policy'
+import { appendAutoApplyLog, getAutoApplyLogByChapter, getAutoApplyLogByNovel, replaceAutoApplyLogForNovel } from '../../lib/autoApply/log'
+import { undoAutoApplyEntry } from '../../lib/autoApply/undo'
+import type { AutoApplyModule, AutoApplyLogEntry } from '../../types'
 import {
   analyzeNovelForeshadowsFromWorkspace,
   askAiAboutWorkspace,
@@ -470,10 +495,12 @@ import {
   summarizeNovelContinuityBriefFromWorkspaceStream,
   summarizeChapterScenesFromWorkspaceStream,
   checkChapterConsistencyFromWorkspaceStream,
+  runCharacterStateExtract,
   type ConsistencyCheckResult,
 } from '../../lib/localAi'
 import { executeToolCall } from '../../lib/aiTools'
 import { formatChapterSummaryText } from '../../lib/chapterSummary'
+import { copyText } from '../../lib/clipboard'
 import { fetchWalletBalance } from '../../lib/backendAi'
 import { normalizeCharacterAliases, replaceCharacterLabelsInText, someCharacterHasLabel } from '../../lib/characterLabels'
 import { useChapterHubChapterMutations } from '../../features/chapter-hub/composables/useChapterHubChapterMutations'
@@ -735,6 +762,11 @@ const hubFactionModalTarget = ref<Faction | null>(null)
 const hubFactionSourceRange = ref<{ start: number; end: number } | null>(null)
 const chapterHubSaveToastOpen = ref(false)
 let chapterHubSaveToastTimer: number | null = null
+
+const copyToastOpen = ref(false)
+const copyToastTitle = ref('已复制')
+const copyToastMessage = ref('本章正文已复制到剪贴板。')
+let copyToastTimer: number | null = null
 
 function openHubFactionModal(f: Faction, textRange: { start: number; end: number } | null = null): void {
   onEntityNameLeave()
@@ -1649,6 +1681,27 @@ function triggerChapterHubSaveToast(): void {
   }, 1200)
 }
 
+async function copyCurrentChapterText(): Promise<void> {
+  const chapter = selectedChapter.value
+  if (!chapter) {
+    copyToastTitle.value = '没有可复制的内容'
+    copyToastMessage.value = '请先选择一个章节。'
+  } else {
+    const title = String(chapter.title ?? '').trim()
+    const body = String(chapter.content ?? '')
+    const text = title ? `${title}\n\n${body}` : body
+    const ok = await copyText(text)
+    copyToastTitle.value = ok ? '已复制' : '复制失败'
+    copyToastMessage.value = ok ? '本章正文已复制到剪贴板。' : '浏览器拒绝了剪贴板访问,请手动选择复制。'
+  }
+  copyToastOpen.value = true
+  if (copyToastTimer != null) window.clearTimeout(copyToastTimer)
+  copyToastTimer = window.setTimeout(() => {
+    copyToastOpen.value = false
+    copyToastTimer = null
+  }, 1600)
+}
+
 function onFactionModalSaved(): void {
   reload()
   triggerChapterHubSaveToast()
@@ -1670,6 +1723,48 @@ const {
   chapterForm,
   reload,
 } = useChapterHubData()
+
+// 本章自动入库日志(横幅 + 撤销用),storage 变化或切章时刷新
+const aiAutoApplyLog = ref<AutoApplyLogEntry[]>([])
+function refreshAutoApplyLog(): void {
+  try {
+    const cid = selectedChapterId.value
+    aiAutoApplyLog.value = cid ? getAutoApplyLogByChapter(cid) : []
+  } catch (e) {
+    console.warn('读取自动入库日志失败:', e)
+    aiAutoApplyLog.value = []
+  }
+}
+watch(selectedChapterId, refreshAutoApplyLog, { immediate: true })
+
+function undoAutoApplyEntryById(logId: string): void {
+  const entry = aiAutoApplyLog.value.find((e) => e.id === logId)
+  if (!entry) return
+  const res = undoAutoApplyEntry(entry)
+  if (res.ok) {
+    reload()
+    refreshAutoApplyLog()
+    pushAutoApplyLogToBackend()
+    triggerChapterHubSaveToast()
+    appendAiSystemNote(`已撤销自动入库：${entry.entityLabel}`)
+  } else {
+    aiExtractError.value = res.reason || '撤销失败'
+  }
+}
+
+function undoAllAutoApplyForChapter(): void {
+  const entries = [...aiAutoApplyLog.value]
+  if (entries.length === 0) return
+  let undone = 0
+  for (const entry of entries) {
+    if (undoAutoApplyEntry(entry).ok) undone += 1
+  }
+  reload()
+  refreshAutoApplyLog()
+  pushAutoApplyLogToBackend()
+  triggerChapterHubSaveToast()
+  appendAiSystemNote(`已撤销本章 ${undone} 项自动入库改动`)
+}
 
 const continueOutlineHint = computed(() =>
   buildChapterContinueOutlineHint(
@@ -1793,6 +1888,275 @@ function autoSkipNegligibleExtractUpdates(): void {
   }
 }
 
+/** 深拷贝一个实体作为撤销快照(优先 structuredClone,回退 JSON) */
+function snapshotEntity<T>(entity: T): T {
+  try {
+    return typeof structuredClone === 'function'
+      ? structuredClone(entity)
+      : (JSON.parse(JSON.stringify(entity)) as T)
+  } catch {
+    return JSON.parse(JSON.stringify(entity)) as T
+  }
+}
+
+/** 记一条自动入库日志(失败不抛,避免影响主流程) */
+function logAutoApply(
+  module: AutoApplyModule,
+  action: 'create' | 'merge',
+  entityId: string,
+  entityLabel: string,
+  matchType: 'new' | 'update' | 'possible_duplicate' | 'conflict',
+  beforeSnapshot: unknown | null,
+  changedFields?: string[],
+): void {
+  if (!entityId) return
+  const chapter = selectedChapter.value
+  try {
+    appendAutoApplyLog({
+      novelId: novelId.value,
+      chapterId: selectedChapterId.value || chapter?.id || '',
+      chapterNo: chapter?.chapterNo ?? null,
+      module,
+      action,
+      entityId,
+      entityLabel,
+      matchType,
+      beforeSnapshot,
+      changedFields,
+    })
+  } catch (e) {
+    console.warn('记录自动入库日志失败:', e)
+  }
+}
+
+/**
+ * 自动入库编排:写完章/整理后,高置信提案自动采用并记可撤销日志。
+ * 复用现有 applyXSuggestion(它们已做 preferExisting 保护与去重),不重写入库。
+ * 保守策略:只有 new 新实体、非 negligible 的 update 字段补全自动;
+ * possible_duplicate/conflict/关系/势力归属一律留 pending 等用户确认。
+ */
+function autoApplyExtractResult(): void {
+  const result = aiExtractResult.value
+  if (!result) return
+
+  // 角色:new→自动建,update(非negligible)→自动合并空字段
+  if (Array.isArray(result.characters)) {
+    for (let i = 0; i < result.characters.length; i++) {
+      const item = result.characters[i]
+      if (item.uiState?.status) continue
+      const targetId = String(item.match?.targetId ?? '').trim()
+      const existing = targetId ? characters.value.find((c) => c.id === targetId) : undefined
+      const negligible =
+        item.match?.type === 'update' && existing ? isNegligibleCharacterUpdate(existing, item) : false
+      const decision = decideAutoAction('characters', item.match?.type ?? null, { negligible })
+      if (decision === 'skip') {
+        setAiSuggestionState('characters', i, 'ignored', 'ignore')
+        continue
+      }
+      if (decision !== 'auto-create' && decision !== 'auto-merge') continue
+      try {
+        const before = decision === 'auto-merge' && existing ? snapshotEntity(existing) : null
+        const action = decision === 'auto-create' ? 'create' : 'merge'
+        const id = applyCharacterSuggestion(i, action)
+        if (id) {
+          setAiSuggestionState('characters', i, 'applied', action, { editorEntityType: 'character', editorTargetId: id, auto: true })
+          logAutoApply('characters', action, id, item.name, item.match?.type ?? 'new', before)
+        }
+      } catch (e) {
+        console.warn('自动入库角色失败:', item.name, e)
+      }
+    }
+  }
+  autoApplyEntitySection('factions', result.factions)
+  autoApplyEntitySection('items', result.items)
+  autoApplyOutlineSection(result.outlineItems)
+  autoApplyForeshadowSection()
+  autoApplyClassificationSection()
+  autoApplyMembershipSection()
+  autoApplyRelationSection()
+  refreshAutoApplyLog()
+  pushAutoApplyLogToBackend()
+}
+
+/** 势力/物品共用:与角色同构,merge 有 preferExisting 保护 */
+function autoApplyEntitySection(
+  section: 'factions' | 'items',
+  list: { name: string; match: { type: string; targetId?: string | null }; uiState?: { status?: string } }[] | undefined,
+): void {
+  if (!Array.isArray(list)) return
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.uiState?.status) continue
+    const targetId = String(item.match?.targetId ?? '').trim()
+    const existing =
+      section === 'factions'
+        ? targetId ? factions.value.find((f) => f.id === targetId) : undefined
+        : targetId ? items.value.find((it) => it.id === targetId) : undefined
+    const negligible =
+      item.match?.type === 'update' && existing && section === 'factions'
+        ? isNegligibleFactionUpdate(existing as any, item as any)
+        : false
+    const decision = decideAutoAction(section, (item.match?.type as any) ?? null, { negligible })
+    if (decision === 'skip') {
+      setAiSuggestionState(section, i, 'ignored', 'ignore')
+      continue
+    }
+    if (decision !== 'auto-create' && decision !== 'auto-merge') continue
+    try {
+      const before = decision === 'auto-merge' && existing ? snapshotEntity(existing) : null
+      const action = decision === 'auto-create' ? 'create' : 'merge'
+      const id = section === 'factions' ? applyFactionSuggestion(i, action) : applyItemSuggestion(i, action)
+      if (id) {
+        const editorType = section === 'factions' ? 'faction' : 'item'
+        setAiSuggestionState(section, i, 'applied', action, { editorEntityType: editorType, editorTargetId: id, auto: true })
+        logAutoApply(section, action, id, item.name, (item.match?.type as any) ?? 'new', before)
+      }
+    } catch (e) {
+      console.warn(`自动入库${section}失败:`, item.name, e)
+    }
+  }
+}
+
+/** 大纲:仅 scene/chapter 且置信达标自动建(无 merge) */
+function autoApplyOutlineSection(list: typeof aiExtractResult.value.outlineItems | undefined): void {
+  if (!Array.isArray(list)) return
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.uiState?.status) continue
+    const decision = decideAutoAction('outlineItems', item.match?.type ?? null, outlinePolicyOpts(item))
+    if (decision !== 'auto-create') continue
+    try {
+      const id = applyOutlineItemSuggestion(i, 'create')
+      if (id) {
+        setAiSuggestionState('outlineItems', i, 'applied', 'create', { auto: true })
+        logAutoApply('outlineItems', 'create', id, item.title, item.match?.type ?? 'new', null)
+      }
+    } catch (e) {
+      console.warn('自动入库大纲失败:', item.title, e)
+    }
+  }
+}
+
+/** 伏笔:按置信度阈值自动建(无 match) */
+function autoApplyForeshadowSection(): void {
+  const list = aiForeshadowResult.value?.newPlants
+  if (!Array.isArray(list)) return
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.uiState?.status) continue
+    const decision = decideAutoAction('foreshadows', null, foreshadowPolicyOpts(item))
+    if (decision !== 'auto-create') continue
+    try {
+      const id = applyForeshadowSuggestion(i, 'create')
+      if (id) {
+        setAiForeshadowSuggestionState(i, 'applied', 'create', true)
+        logAutoApply('foreshadows', 'create', id, item.title, 'new', null)
+      }
+    } catch (e) {
+      console.warn('自动入库伏笔失败:', item.title, e)
+    }
+  }
+}
+
+/** 章节分类:自动写入 annotation,旧总结存快照可还原 */
+function autoApplyClassificationSection(): void {
+  const result = aiClassificationResult.value
+  if (!result || result.uiState?.status) return
+  const chapter = selectedChapter.value
+  if (!chapter) return
+  const next = classificationSummaryText(result)
+  if (!next.trim()) return
+  const decision = decideAutoAction('classification', null)
+  if (decision !== 'auto-merge') return
+  try {
+    const before = { id: chapter.id, annotation: chapter.annotation ?? '' }
+    applyClassificationSuggestion('merge')
+    setAiClassificationState('applied', 'merge', true)
+    logAutoApply('classification', 'merge', chapter.id, `第 ${chapter.chapterNo} 章分类`, 'update', before, ['annotation'])
+  } catch (e) {
+    console.warn('自动写入章节分类失败:', e)
+  }
+}
+
+/** 角色名是否在档案中唯一精确命中(含别名);用于关系/归属自动入库的安全判定 */
+function isCharacterNameUnique(name: string): boolean {
+  const needle = String(name ?? '').trim()
+  if (!needle) return false
+  const hits = characters.value.filter(
+    (c) => c.name.trim() === needle || (c.aliases ?? []).some((a) => a.trim() === needle),
+  )
+  return hits.length === 1
+}
+
+function isFactionNameUnique(name: string): boolean {
+  const needle = String(name ?? '').trim()
+  if (!needle) return false
+  return factions.value.filter((f) => f.name.trim() === needle).length === 1
+}
+
+/** 所属势力:仅当 character+faction 都唯一命中、且尚无同组归属时自动新建 */
+function autoApplyMembershipSection(): void {
+  const list = aiExtractResult.value?.memberships
+  if (!Array.isArray(list)) return
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.uiState?.status) continue
+    // 仅自动处理新建(match.type 不是 new 的留确认)
+    if (item.match?.type !== 'new') continue
+    const safe = isCharacterNameUnique(item.characterName) && isFactionNameUnique(item.factionName)
+    const decision = decideAutoAction('memberships', item.match?.type ?? null, { relationSafe: safe })
+    if (decision !== 'auto-create') continue
+    try {
+      const id = applyMembershipSuggestion(i, 'create')
+      if (id) {
+        setAiSuggestionState('memberships', i, 'applied', 'create', { editorEntityType: 'character', auto: true })
+        logAutoApply('memberships', 'create', id, `${item.characterName} → ${item.factionName}`, 'new', null)
+      }
+    } catch (e) {
+      console.warn('自动入库所属势力失败:', item.characterName, e)
+    }
+  }
+}
+
+/** 角色关系:仅当 from/to 都唯一命中、且为正向新建(无既有正反向关系)时自动建,禁反向新建 */
+function autoApplyRelationSection(): void {
+  const list = aiExtractResult.value?.relations
+  if (!Array.isArray(list)) return
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.uiState?.status) continue
+    if (item.match?.type !== 'new') continue
+    const bothUnique = isCharacterNameUnique(item.fromCharacterName) && isCharacterNameUnique(item.toCharacterName)
+    const fromId = findCharacterIdByName(item.fromCharacterName)
+    const toId = findCharacterIdByName(item.toCharacterName)
+    // 已存在正向或反向关系 → 不自动(避免反向新建/重复)
+    const existing = fromId && toId
+      ? getCharacterRelationsByNovelId(novelId.value).some(
+          (r) =>
+            (r.fromCharacterId === fromId && r.toCharacterId === toId) ||
+            (r.fromCharacterId === toId && r.toCharacterId === fromId),
+        )
+      : true
+    const safe = bothUnique && !existing
+    const decision = decideAutoAction('relations', item.match?.type ?? null, { relationSafe: safe })
+    if (decision !== 'auto-create') continue
+    try {
+      const id = applyRelationSuggestion(i, 'create')
+      if (id) {
+        setAiSuggestionState('relations', i, 'applied', 'create', { editorEntityType: 'character', auto: true })
+        logAutoApply('relations', 'create', id, `${item.fromCharacterName} ↔ ${item.toCharacterName}`, 'new', null)
+      }
+    } catch (e) {
+      console.warn('自动入库角色关系失败:', item.fromCharacterName, e)
+    }
+  }
+}
+
+
+
+
+
+
 function mergeAliases(existing: string[] | undefined, incoming: string[] | undefined): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -1903,7 +2267,7 @@ function setAiSuggestionState(
   index: number,
   status: 'pending' | 'applied' | 'ignored',
   action: 'create' | 'merge' | 'ignore' | null = null,
-  editorMeta: { editorEntityType?: 'character' | 'faction' | 'item' | null; editorTargetId?: string | null } = {},
+  editorMeta: { editorEntityType?: 'character' | 'faction' | 'item' | null; editorTargetId?: string | null; auto?: boolean } = {},
 ): void {
   updateAiSuggestion(section, index, {
     uiState: {
@@ -1911,11 +2275,12 @@ function setAiSuggestionState(
       action,
       editorEntityType: editorMeta.editorEntityType ?? null,
       editorTargetId: editorMeta.editorTargetId ?? null,
+      auto: editorMeta.auto ?? false,
     },
   })
 }
 
-function setAiForeshadowSuggestionState(index: number, status: 'pending' | 'applied' | 'ignored', action: 'create' | 'ignore' | null = null): void {
+function setAiForeshadowSuggestionState(index: number, status: 'pending' | 'applied' | 'ignored', action: 'create' | 'ignore' | null = null, auto = false): void {
   const next = { ...aiForeshadowResult.value }
   const list = [...next.newPlants]
   const item = list[index]
@@ -1927,6 +2292,7 @@ function setAiForeshadowSuggestionState(index: number, status: 'pending' | 'appl
       action,
       editorEntityType: null,
       editorTargetId: null,
+      auto,
     },
   }
   aiForeshadowResult.value = { ...next, newPlants: list }
@@ -1934,7 +2300,7 @@ function setAiForeshadowSuggestionState(index: number, status: 'pending' | 'appl
   persistActiveAiSessionState()
 }
 
-function setAiClassificationState(status: 'pending' | 'applied' | 'ignored', action: 'merge' | 'ignore' | null = null): void {
+function setAiClassificationState(status: 'pending' | 'applied' | 'ignored', action: 'merge' | 'ignore' | null = null, auto = false): void {
   aiClassificationResult.value = {
     ...aiClassificationResult.value,
     uiState: {
@@ -1942,6 +2308,7 @@ function setAiClassificationState(status: 'pending' | 'applied' | 'ignored', act
       action,
       editorEntityType: null,
       editorTargetId: selectedChapterId.value || null,
+      auto,
     },
   }
   syncLatestAiExtractRun()
@@ -1976,7 +2343,7 @@ function finishAiSuggestionApply(
   section: 'characters' | 'factions' | 'items' | 'memberships' | 'relations' | 'outlineItems',
   index: number,
   action: 'create' | 'merge',
-  editorMeta: { editorEntityType?: 'character' | 'faction' | 'item' | null; editorTargetId?: string | null } = {},
+  editorMeta: { editorEntityType?: 'character' | 'faction' | 'item' | null; editorTargetId?: string | null; auto?: boolean } = {},
 ): void {
   reload()
   triggerChapterHubSaveToast()
@@ -2004,13 +2371,13 @@ function resolveQuoteAnchor(content: string, quote: string): { start: number; en
   return { start: idx, end: idx + q.length }
 }
 
-function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): void {
+function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): string {
   const item = aiExtractResult.value.characters[index]
-  if (!item || item.uiState?.status === 'applied') return
+  if (!item || item.uiState?.status === 'applied') return ''
   if (action === 'ignore') {
     appendAiSystemNote(`已忽略角色建议：${item.name}`)
     setAiSuggestionState('characters', index, 'ignored', 'ignore')
-    return
+    return ''
   }
   let nextCharacterId = ''
   if (action === 'create') {
@@ -2041,9 +2408,9 @@ function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'i
     appendAiSystemNote(`已确认添加角色：${item.name}`)
   } else {
     const targetId = String(item.match.targetId ?? '').trim()
-    if (!targetId) return
+    if (!targetId) return ''
     const current = characters.value.find((row) => row.id === targetId)
-    if (!current) return
+    if (!current) return ''
     nextCharacterId = current.id
     const rewritten = rewriteCurrentChapterCharacterLabels(normalizeCharacterAliases([item.name, ...item.aliases]), current.name)
     aiPendingAppliedDetail.value = rewritten ? '，并已回写当前章正文' : ''
@@ -2071,15 +2438,16 @@ function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'i
     appendAiSystemNote(`已确认合并角色：${item.name} -> ${current.name}`)
   }
   finishAiSuggestionApply('characters', index, action, { editorEntityType: 'character', editorTargetId: nextCharacterId })
+  return nextCharacterId
 }
 
-function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): void {
+function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): string {
   const item = aiExtractResult.value.factions[index]
-  if (!item || item.uiState?.status === 'applied') return
+  if (!item || item.uiState?.status === 'applied') return ''
   if (action === 'ignore') {
     appendAiSystemNote(`已忽略势力建议：${item.name}`)
     setAiSuggestionState('factions', index, 'ignored', 'ignore')
-    return
+    return ''
   }
   let nextFactionId = ''
   if (action === 'create') {
@@ -2104,9 +2472,9 @@ function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ign
     appendAiSystemNote(`已确认添加势力：${item.name}`)
   } else {
     const targetId = String(item.match.targetId ?? '').trim()
-    if (!targetId) return
+    if (!targetId) return ''
     const current = factions.value.find((row) => row.id === targetId)
-    if (!current) return
+    if (!current) return ''
     nextFactionId = current.id
     updateFaction({
       id: targetId,
@@ -2126,15 +2494,16 @@ function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ign
     appendAiSystemNote(`已确认合并势力：${item.name} -> ${current.name}`)
   }
   finishAiSuggestionApply('factions', index, action, { editorEntityType: 'faction', editorTargetId: nextFactionId })
+  return nextFactionId
 }
 
-function applyItemSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): void {
+function applyItemSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): string {
   const item = aiExtractResult.value.items[index]
-  if (!item || item.uiState?.status === 'applied') return
+  if (!item || item.uiState?.status === 'applied') return ''
   if (action === 'ignore') {
     appendAiSystemNote(`已忽略物品建议：${item.name}`)
     setAiSuggestionState('items', index, 'ignored', 'ignore')
-    return
+    return ''
   }
   const owner = resolveItemOwner(item)
   let nextItemId = ''
@@ -2150,9 +2519,9 @@ function applyItemSuggestion(index: number, action: 'create' | 'merge' | 'ignore
     appendAiSystemNote(`已确认添加物品：${item.name}`)
   } else {
     const targetId = String(item.match.targetId ?? '').trim()
-    if (!targetId) return
+    if (!targetId) return ''
     const current = items.value.find((row) => row.id === targetId)
-    if (!current) return
+    if (!current) return ''
     nextItemId = current.id
     updateItem({
       id: targetId,
@@ -2163,29 +2532,32 @@ function applyItemSuggestion(index: number, action: 'create' | 'merge' | 'ignore
     appendAiSystemNote(`已确认合并物品：${item.name} -> ${current.name}`)
   }
   finishAiSuggestionApply('items', index, action, { editorEntityType: 'item', editorTargetId: nextItemId })
+  return nextItemId
 }
 
-function applyMembershipSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): void {
+function applyMembershipSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): string {
   const item = aiExtractResult.value.memberships[index]
-  if (!item || item.uiState?.status === 'applied') return
+  if (!item || item.uiState?.status === 'applied') return ''
   if (action === 'ignore') {
     appendAiSystemNote(`已忽略所属势力建议：${item.characterName} -> ${item.factionName}`)
     setAiSuggestionState('memberships', index, 'ignored', 'ignore')
-    return
+    return ''
   }
   const characterId = findCharacterIdByName(item.characterName)
   const factionId = findFactionIdByName(item.factionName)
   if (!characterId || !factionId) {
     aiExtractError.value = '角色所属势力建议缺少可匹配的角色或势力，请先确认实体档案'
-    return
+    return ''
   }
+  let membershipId = ''
   if (action === 'create') {
-    createCharacterFactionMembership({
+    const createdM = createCharacterFactionMembership({
       novelId: novelId.value,
       characterId,
       factionId,
       description: item.description,
     })
+    membershipId = createdM.id
     const _mc = selectedChapter.value?.content ?? ''
     const _mev = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
     const _ma = resolveQuoteAnchor(_mc, _mev[0]?.quote ?? '')
@@ -2198,9 +2570,10 @@ function applyMembershipSuggestion(index: number, action: 'create' | 'merge' | '
     appendAiSystemNote(`已确认添加所属势力：${item.characterName} -> ${item.factionName}`)
   } else {
     const targetId = String(item.match.targetId ?? '').trim()
-    if (!targetId) return
+    if (!targetId) return ''
     const current = characterFactionMemberships.value.find((row) => row.id === targetId)
-    if (!current) return
+    if (!current) return ''
+    membershipId = current.id
     updateCharacterFactionMembership({
       id: targetId,
       description: preferExisting(current.description, item.description),
@@ -2217,21 +2590,22 @@ function applyMembershipSuggestion(index: number, action: 'create' | 'merge' | '
     appendAiSystemNote(`已确认合并所属势力：${item.characterName} -> ${item.factionName}`)
   }
   finishAiSuggestionApply('memberships', index, action, { editorEntityType: 'character', editorTargetId: characterId })
+  return membershipId
 }
 
-function applyRelationSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): void {
+function applyRelationSuggestion(index: number, action: 'create' | 'merge' | 'ignore'): string {
   const item = aiExtractResult.value.relations[index]
-  if (!item || item.uiState?.status === 'applied') return
+  if (!item || item.uiState?.status === 'applied') return ''
   if (action === 'ignore') {
     appendAiSystemNote(`已忽略角色关系建议：${item.fromCharacterName} ↔ ${item.toCharacterName}`)
     setAiSuggestionState('relations', index, 'ignored', 'ignore')
-    return
+    return ''
   }
   const fromCharacterId = findCharacterIdByName(item.fromCharacterName)
   const toCharacterId = findCharacterIdByName(item.toCharacterName)
   if (!fromCharacterId || !toCharacterId) {
     aiExtractError.value = '角色关系建议缺少可匹配的角色，请先确认角色档案'
-    return
+    return ''
   }
   const exactRelation = getCharacterRelationsByNovelId(novelId.value).find(
     (row) => row.fromCharacterId === fromCharacterId && row.toCharacterId === toCharacterId,
@@ -2239,17 +2613,20 @@ function applyRelationSuggestion(index: number, action: 'create' | 'merge' | 'ig
   const reverseRelation = getCharacterRelationsByNovelId(novelId.value).find(
     (row) => row.fromCharacterId === toCharacterId && row.toCharacterId === fromCharacterId,
   )
+  let relationId = ''
   if (action === 'create') {
-    createCharacterRelation({
+    const createdR = createCharacterRelation({
       novelId: novelId.value,
       fromCharacterId,
       toCharacterId,
       relationType: item.relationType || '关系',
       note: item.note,
     })
+    relationId = createdR.id
     appendAiSystemNote(`已确认添加角色关系：${item.fromCharacterName} ↔ ${item.toCharacterName}`)
   } else {
     if (exactRelation) {
+      relationId = exactRelation.id
       updateCharacterRelation({
         id: exactRelation.id,
         relationType: preferExisting(exactRelation.relationType, item.relationType),
@@ -2257,26 +2634,28 @@ function applyRelationSuggestion(index: number, action: 'create' | 'merge' | 'ig
       })
       appendAiSystemNote(`已确认合并角色关系：${item.fromCharacterName} ↔ ${item.toCharacterName}`)
     } else {
-      createCharacterRelation({
+      const createdRev = createCharacterRelation({
         novelId: novelId.value,
         fromCharacterId,
         toCharacterId,
         relationType: item.relationType || reverseRelation?.relationType || '关系',
         note: item.note,
       })
+      relationId = createdRev.id
       appendAiSystemNote(`已按识别方向补充角色关系：${item.fromCharacterName} ↔ ${item.toCharacterName}`)
     }
   }
   finishAiSuggestionApply('relations', index, action, { editorEntityType: 'character', editorTargetId: fromCharacterId })
+  return relationId
 }
 
-function applyOutlineItemSuggestion(index: number, action: 'create' | 'ignore'): void {
+function applyOutlineItemSuggestion(index: number, action: 'create' | 'ignore'): string {
   const item = aiExtractResult.value.outlineItems[index]
-  if (!item || item.uiState?.status === 'applied') return
+  if (!item || item.uiState?.status === 'applied') return ''
   if (action === 'ignore') {
     appendAiSystemNote(`已忽略大纲建议：${item.title}`)
     setAiSuggestionState('outlineItems', index, 'ignored', 'ignore')
-    return
+    return ''
   }
   const allowedLevels = ['volume', 'act', 'chapter', 'scene']
   const level = allowedLevels.includes(item.level) ? (item.level as 'volume' | 'act' | 'chapter' | 'scene') : 'scene'
@@ -2302,18 +2681,19 @@ function applyOutlineItemSuggestion(index: number, action: 'create' | 'ignore'):
   }
   appendAiSystemNote(`已确认添加大纲节点：${item.title}${boundNote}`)
   finishAiSuggestionApply('outlineItems', index, 'create')
+  return created.id
 }
 
-function applyForeshadowSuggestion(index: number, action: 'create' | 'ignore'): void {
+function applyForeshadowSuggestion(index: number, action: 'create' | 'ignore'): string {
   const item = aiForeshadowResult.value.newPlants[index]
-  if (!item || item.uiState?.status === 'applied') return
+  if (!item || item.uiState?.status === 'applied') return ''
   if (action === 'ignore') {
     appendAiSystemNote(`已忽略伏笔建议：${item.title}`)
     setAiForeshadowSuggestionState(index, 'ignored', 'ignore')
-    return
+    return ''
   }
   const chapter = selectedChapter.value
-  if (!chapter || !novelId.value) return
+  if (!chapter || !novelId.value) return ''
   const evidence = item.evidences.find((ev) => String(ev.chapterId ?? '').trim() === chapter.id) ?? item.evidences[0]
   const plantText = String(evidence?.quote ?? item.summary ?? item.title).trim()
 
@@ -2323,7 +2703,7 @@ function applyForeshadowSuggestion(index: number, action: 'create' | 'ignore'): 
   const plantStart = plantTextIndex >= 0 ? plantTextIndex : undefined
   const plantEnd = plantTextIndex >= 0 ? plantTextIndex + plantText.length : undefined
 
-  createForeshadowPlant({
+  const createdPlant = createForeshadowPlant({
     novelId: novelId.value,
     title: item.title,
     plantText,
@@ -2339,6 +2719,7 @@ function applyForeshadowSuggestion(index: number, action: 'create' | 'ignore'): 
   triggerChapterHubSaveToast()
   appendAiSystemNote(`已确认添加伏笔：${item.title}`)
   setAiForeshadowSuggestionState(index, 'applied', 'create')
+  return createdPlant.id
 }
 
 function classificationSummaryText(result: NovelChapterClassificationResult): string {
@@ -2397,13 +2778,13 @@ function applyAiSuggestion(payload: { section: 'characters' | 'factions' | 'item
     reopenAiSuggestion(payload.section, payload.index)
     return
   }
-  if (payload.section === 'characters') return applyCharacterSuggestion(payload.index, payload.action)
-  if (payload.section === 'factions') return applyFactionSuggestion(payload.index, payload.action)
-  if (payload.section === 'items') return applyItemSuggestion(payload.index, payload.action)
-  if (payload.section === 'memberships') return applyMembershipSuggestion(payload.index, payload.action)
-  if (payload.section === 'outlineItems') return applyOutlineItemSuggestion(payload.index, payload.action === 'ignore' ? 'ignore' : 'create')
-  if (payload.section === 'foreshadows') return applyForeshadowSuggestion(payload.index, payload.action === 'ignore' ? 'ignore' : 'create')
-  if (payload.section === 'classification') return applyClassificationSuggestion(payload.action === 'ignore' ? 'ignore' : 'merge')
+  if (payload.section === 'characters') { applyCharacterSuggestion(payload.index, payload.action); return }
+  if (payload.section === 'factions') { applyFactionSuggestion(payload.index, payload.action); return }
+  if (payload.section === 'items') { applyItemSuggestion(payload.index, payload.action); return }
+  if (payload.section === 'memberships') { applyMembershipSuggestion(payload.index, payload.action); return }
+  if (payload.section === 'outlineItems') { applyOutlineItemSuggestion(payload.index, payload.action === 'ignore' ? 'ignore' : 'create'); return }
+  if (payload.section === 'foreshadows') { applyForeshadowSuggestion(payload.index, payload.action === 'ignore' ? 'ignore' : 'create'); return }
+  if (payload.section === 'classification') { applyClassificationSuggestion(payload.action === 'ignore' ? 'ignore' : 'merge'); return }
   applyRelationSuggestion(payload.index, payload.action)
 }
 
@@ -2593,6 +2974,7 @@ async function runAiExtract(mode: AiExtractMode): Promise<void> {
     autoSkipNegligibleExtractUpdates()
     aiForeshadowResult.value = foreshadowResult
     aiClassificationResult.value = classificationResult
+    autoApplyExtractResult()
     pushAiExtractRun('entities', mode, {
       entityResult: aiExtractResult.value,
       foreshadowResult: aiForeshadowResult.value,
@@ -2860,6 +3242,100 @@ async function applyContinueDraft(): Promise<void> {
   switchToAiDeskMode('ask')
   void runAiExtract('current')
   void runSceneSummaryAfterContinue(chapter.id)
+  void runCharacterStateAfterContinue(chapter.id)
+  autoAlignOutlineAfterContinue(chapter.id)
+}
+
+/**
+ * 大纲自动对齐(低风险):写完章后,把本章已绑定的大纲节点标记为 done。
+ * 只改 status,不改层级/结构;每条记 merge 日志,可撤销还原原状态。
+ * 高风险动作(扩展后续节点、改结构、新建 volume/act)仍走人工提案。
+ */
+function autoAlignOutlineAfterContinue(chapterId: string): void {
+  const id = novelId.value
+  if (!id) return
+  const chapter = chapters.value.find((c) => c.id === chapterId)
+  const boundIds = Array.isArray(chapter?.outlineItemIds) ? chapter!.outlineItemIds : []
+  if (boundIds.length === 0) return
+  const allOutline = getOutlineByNovelId(id)
+  let aligned = 0
+  for (const oid of boundIds) {
+    const node = allOutline.find((o) => o.id === oid)
+    if (!node || node.status === 'done') continue
+    try {
+      const before = snapshotEntity(node)
+      updateOutlineItem({ id: node.id, status: 'done' })
+      logAutoApply('outlineItems', 'merge', node.id, node.title, 'update', before, ['status'])
+      aligned += 1
+    } catch (e) {
+      console.warn('大纲自动对齐失败:', node.title, e)
+    }
+  }
+  if (aligned > 0) {
+    reload()
+    refreshAutoApplyLog()
+    pushAutoApplyLogToBackend()
+    appendAiSystemNote(`已将本章绑定的 ${aligned} 个大纲节点标记为已写`)
+  }
+}
+
+async function runCharacterStateAfterContinue(chapterId: string): Promise<void> {
+  const id = novelId.value
+  if (!id || !requestAiAccess()) return
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const result = await runCharacterStateExtract(snapshot, chapterId)
+    if (result.updated.length > 0) {
+      reload()
+      appendAiSystemNote(`已更新 ${result.updated.length} 名角色的逐章状态：${result.updated.map((u) => u.name).join('、')}`)
+      void putRemoteCharacterStates(id, collectCharacterNarrativeStates(id)).catch((e) =>
+        console.warn('角色状态同步后端失败:', e),
+      )
+    }
+    for (const w of result.warnings) console.warn('角色状态抽取:', w)
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name !== 'AbortError') {
+      console.warn('角色状态抽取失败:', e.message)
+    }
+  }
+}
+
+/** 冷启动/换设备:从后端拉取角色逐章状态并灌回本地(按章去重,不覆盖本地已有) */
+async function hydrateCharacterStatesFromBackend(): Promise<void> {
+  const id = novelId.value
+  if (!id) return
+  try {
+    const rows = await getRemoteCharacterStates(id)
+    if (rows.length > 0) importCharacterNarrativeStates(rows)
+  } catch (e: unknown) {
+    if (e instanceof Error) console.warn('拉取角色状态失败:', e.message)
+  }
+}
+
+/** 把本地自动入库日志整本推到后端(fire-and-forget,失败不影响主流程) */
+function pushAutoApplyLogToBackend(): void {
+  const id = novelId.value
+  if (!id) return
+  void putRemoteAutoApplyLog(id, getAutoApplyLogByNovel(id, { includeUndone: true })).catch((e) =>
+    console.warn('自动入库日志同步后端失败:', e),
+  )
+}
+
+/** 冷启动/换设备:从后端拉取自动入库日志灌回本地(整本替换),再刷新当前章横幅 */
+async function hydrateAutoApplyLogFromBackend(): Promise<void> {
+  const id = novelId.value
+  if (!id) return
+  try {
+    const remote = await getRemoteAutoApplyLog(id)
+    const local = getAutoApplyLogByNovel(id, { includeUndone: true })
+    // 本地已有日志(可能含未同步的撤销)优先,仅在本地为空时用远端灌入
+    if (local.length === 0 && remote.length > 0) {
+      replaceAutoApplyLogForNovel(id, remote)
+      refreshAutoApplyLog()
+    }
+  } catch (e: unknown) {
+    if (e instanceof Error) console.warn('拉取自动入库日志失败:', e.message)
+  }
 }
 
 function ignoreContinueDraft(): void {
@@ -4383,6 +4859,8 @@ onMounted(() => {
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('keydown', onWindowKeydown)
   document.addEventListener('pointerdown', onDocumentPointerDownOutsideChapterHub, true)
+  void hydrateCharacterStatesFromBackend()
+  void hydrateAutoApplyLogFromBackend()
 })
 
 onUnmounted(() => {

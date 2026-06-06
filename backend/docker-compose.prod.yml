@@ -1,0 +1,108 @@
+# 生产环境编排 —— 与开发用 docker-compose.yml 区分
+# 用法：在服务器上 `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d`
+#
+# 安全要点：
+# - MySQL / Redis 不对宿主机暴露端口（去掉 ports），只在内网 novel-network 互通
+# - 所有密钥从 .env.prod 注入，绝不写死在文件里
+# - nginx 常驻，负责 TLS 终止 + 反向代理
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: novel-backend
+    expose:
+      - "8080"          # 仅暴露给内网（nginx），不映射到宿主机公网
+    environment:
+      - DATABASE_URL=mysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/novel_db?charset=utf8mb4
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRATION_HOURS=720
+      - PASSWORD_HASH_ITERATIONS=120000
+      - RUST_LOG=info,novel_backend_rust=info,sqlx=warn
+      - HOST=0.0.0.0
+      - PORT=8080
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - ADMIN_ENABLED=${ADMIN_ENABLED:-true}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ADMIN_SYNC_PASSWORD=${ADMIN_SYNC_PASSWORD:-false}
+      - MAIL_ENABLED=false
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - novel-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  mysql:
+    image: mysql:8.0
+    container_name: novel-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=novel_db
+      - MYSQL_CHARACTER_SET_SERVER=utf8mb4
+      - MYSQL_COLLATION_SERVER=utf8mb4_unicode_ci
+    # 不映射端口到宿主机：数据库只在内网可达
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    networks:
+      - novel-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: novel-redis
+    # 不映射端口到宿主机
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - novel-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  nginx:
+    image: nginx:alpine
+    container_name: novel-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - novel-network
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  novel-network:
+    driver: bridge

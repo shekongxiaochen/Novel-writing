@@ -228,6 +228,47 @@
         </article>
 
         <article
+          v-if="autoApplyEntries.length > 0"
+          class="chapter-hub-ai-autobanner"
+          :class="{ 'has-merge': autoMergeCount > 0 }"
+        >
+          <div class="chapter-hub-ai-autobanner__head" @click="autoApplyBannerOpen = !autoApplyBannerOpen">
+            <span class="chapter-hub-ai-autobanner__title">本章 AI 自动录入</span>
+            <span class="chapter-hub-ai-autobanner__counts">
+              <span class="chapter-hub-ai-autobanner__count">新建 {{ autoCreateCount }}</span>
+              <span
+                v-if="autoMergeCount > 0"
+                class="chapter-hub-ai-autobanner__count chapter-hub-ai-autobanner__count--merge"
+              >更新已有 {{ autoMergeCount }}</span>
+            </span>
+            <span class="chapter-hub-ai-autobanner__toggle">{{ autoApplyBannerOpen ? '收起' : '展开' }}</span>
+          </div>
+          <div v-if="autoApplyBannerOpen" class="chapter-hub-ai-autobanner__body">
+            <p class="chapter-hub-ai-autobanner__hint">
+              以下内容已自动写入资料库，如有误可逐条撤销。带“更新”的条目改动了已有档案。
+            </p>
+            <div
+              v-for="entry in autoApplyEntries"
+              :key="entry.id"
+              class="chapter-hub-ai-autobanner__item"
+              :data-action="entry.action"
+            >
+              <span class="chapter-hub-ai-autobanner__item-text">{{ autoEntryLabel(entry) }}</span>
+              <button
+                type="button"
+                class="chapter-hub-ai-action chapter-hub-ai-action--ghost"
+                @click="$emit('undo-auto', entry.id)"
+              >撤销</button>
+            </div>
+            <button
+              type="button"
+              class="chapter-hub-ai-action chapter-hub-ai-autobanner__undo-all"
+              @click="$emit('undo-auto-all')"
+            >全部撤销本章自动改动</button>
+          </div>
+        </article>
+
+        <article
           v-for="(run, runIdx) in inlineExtractRuns"
           :key="run.id"
           class="chapter-hub-ai-message chapter-hub-ai-message--assistant"
@@ -407,7 +448,7 @@
                         {{ matchLabel(item.match.type, item.identityStatus) }} · {{ confidenceLabel(item.confidence) }}
                       </p>
                     </div>
-                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}<span v-if="item.uiState?.auto" class="chapter-hub-ai-card__autobadge">AI 自动</span></span>
                   </header>
 
                   <dl v-if="characterFieldRows(item).length" class="chapter-hub-ai-card__fields">
@@ -532,7 +573,7 @@
                         {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
                       </p>
                     </div>
-                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}<span v-if="item.uiState?.auto" class="chapter-hub-ai-card__autobadge">AI 自动</span></span>
                   </header>
 
                   <dl v-if="itemFieldRows(item).length" class="chapter-hub-ai-card__fields">
@@ -594,7 +635,7 @@
                         {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
                       </p>
                     </div>
-                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}<span v-if="item.uiState?.auto" class="chapter-hub-ai-card__autobadge">AI 自动</span></span>
                   </header>
 
                   <div class="chapter-hub-ai-relation__flow">
@@ -644,7 +685,7 @@
                         {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
                       </p>
                     </div>
-                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}<span v-if="item.uiState?.auto" class="chapter-hub-ai-card__autobadge">AI 自动</span></span>
                   </header>
 
                   <div class="chapter-hub-ai-relation__flow">
@@ -703,7 +744,7 @@
                         {{ matchLabel(item.match.type) }} · {{ confidenceLabel(item.confidence) }}
                       </p>
                     </div>
-                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}</span>
+                    <span v-if="isSuggestionLocked(item.uiState?.status)" class="chapter-hub-ai-card__state">{{ suggestionStateLabel(item.uiState?.status) }}<span v-if="item.uiState?.auto" class="chapter-hub-ai-card__autobadge">AI 自动</span></span>
                   </header>
 
                   <p v-if="item.summary" class="chapter-hub-ai-card__line">{{ item.summary }}</p>
@@ -1097,6 +1138,7 @@ import type {
   AiAskContextMeta,
   AiChapterSummaryDraft,
   AiContinueDraft,
+  AutoApplyLogEntry,
   ContinueRagSnippetHit,
   AiDeskMode,
   Chapter,
@@ -1151,6 +1193,7 @@ const props = defineProps<{
     previewText?: string
     status: 'pending' | 'applied' | 'ignored'
   }>
+  autoApplyLog?: AutoApplyLogEntry[]
 }>()
 
 const emit = defineEmits<{
@@ -1176,6 +1219,8 @@ const emit = defineEmits<{
   'pending-tool-adopt-all': []
   'pending-tool-adopt-one': [actionId: string]
   'pending-tool-ignore-all': []
+  'undo-auto': [logId: string]
+  'undo-auto-all': []
 }>()
 
 const { balance, refresh: refreshAuth } = useAuth()
@@ -1183,6 +1228,28 @@ const redeemOpen = ref(false)
 const balanceRefreshing = ref(false)
 
 const balanceLabel = computed(() => formatBalanceYuan(balance.value))
+
+const autoApplyEntries = computed<AutoApplyLogEntry[]>(() =>
+  (props.autoApplyLog ?? []).filter((e) => !e.undone),
+)
+const autoCreateCount = computed(() => autoApplyEntries.value.filter((e) => e.action === 'create').length)
+const autoMergeCount = computed(() => autoApplyEntries.value.filter((e) => e.action === 'merge').length)
+const autoApplyBannerOpen = ref(false)
+const moduleLabelMap: Record<string, string> = {
+  characters: '角色',
+  factions: '势力',
+  items: '物品',
+  memberships: '所属势力',
+  relations: '关系',
+  outlineItems: '大纲',
+  foreshadows: '伏笔',
+  classification: '分类',
+}
+function autoEntryLabel(e: AutoApplyLogEntry): string {
+  const mod = moduleLabelMap[e.module] ?? e.module
+  const act = e.action === 'create' ? '新建' : '更新'
+  return `${act}${mod}：${e.entityLabel}`
+}
 
 async function refreshBalance(): Promise<void> {
   if (!requestAiAccess()) return
@@ -3346,4 +3413,92 @@ function relationSummary(item: ExtractedRelation): string {
     justify-content: flex-start;
   }
 }
+
+/* 自动入库横幅 */
+.chapter-hub-ai-autobanner {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary-soft) 22%, transparent);
+  overflow: hidden;
+}
+.chapter-hub-ai-autobanner.has-merge {
+  border-color: color-mix(in srgb, #e8833a 52%, transparent);
+  background: color-mix(in srgb, #e8833a 12%, transparent);
+}
+.chapter-hub-ai-autobanner__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.chapter-hub-ai-autobanner__title {
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+.chapter-hub-ai-autobanner__counts {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.chapter-hub-ai-autobanner__count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  color: var(--color-primary);
+}
+.chapter-hub-ai-autobanner__count--merge {
+  background: color-mix(in srgb, #e8833a 22%, transparent);
+  color: #c25a16;
+}
+.chapter-hub-ai-autobanner__toggle {
+  font-size: 0.6rem;
+  opacity: 0.7;
+}
+.chapter-hub-ai-autobanner__body {
+  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chapter-hub-ai-autobanner__hint {
+  font-size: 0.62rem;
+  opacity: 0.75;
+  margin: 0 0 2px;
+}
+.chapter-hub-ai-autobanner__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.66rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 60%, transparent);
+}
+.chapter-hub-ai-autobanner__item[data-action='merge'] {
+  border-left: 3px solid #e8833a;
+}
+.chapter-hub-ai-autobanner__item[data-action='create'] {
+  border-left: 3px solid var(--color-primary);
+}
+.chapter-hub-ai-autobanner__item-text {
+  flex: 1 1 auto;
+}
+.chapter-hub-ai-autobanner__undo-all {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.chapter-hub-ai-card__autobadge {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.52rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  color: var(--color-primary);
+}
 </style>
+
