@@ -1,0 +1,86 @@
+{% extends "shell.html" %}
+{% block title %}{{ username }} — {{ admin_title }}{% endblock %}
+{% block content %}
+<div class="max-w-5xl space-y-6">
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div class="lg:col-span-2 bg-white rounded-lg border border-zinc-200 shadow-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold">{{ display_name or username }}
+          {% if is_active %}<span class="ml-2 align-middle inline-flex items-center px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700">正常</span>
+          {% else %}<span class="ml-2 align-middle inline-flex items-center px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-600">已停用</span>{% endif %}
+        </h2>
+        <form method="post" action="/admin/users/{{ id }}/toggle-active"
+              onsubmit="return confirm('{% if is_active %}确定停用该用户？停用后将无法登录使用。{% else %}确定恢复启用该用户？{% endif %}');">
+          {% if is_active %}
+          <button class="px-3 py-1.5 rounded-md border border-red-200 text-red-600 text-sm hover:bg-red-50"><i class="fa-solid fa-ban mr-1"></i>停用账号</button>
+          {% else %}
+          <button class="px-3 py-1.5 rounded-md border border-emerald-200 text-emerald-700 text-sm hover:bg-emerald-50"><i class="fa-solid fa-circle-check mr-1"></i>恢复启用</button>
+          {% endif %}
+        </form>
+      </div>
+      <dl class="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
+        <div><dt class="text-zinc-400 text-xs">用户名</dt><dd class="font-medium">{{ username }}</dd></div>
+        <div><dt class="text-zinc-400 text-xs">邮箱</dt><dd>{{ email or '—' }}</dd></div>
+        <div><dt class="text-zinc-400 text-xs">注册 IP</dt><dd class="font-mono text-xs">{{ registration_ip or '—' }}</dd></div>
+        <div><dt class="text-zinc-400 text-xs">设备绑定</dt><dd>{% if device_bound %}已绑定{% else %}未绑定{% endif %}</dd></div>
+        <div><dt class="text-zinc-400 text-xs">注册时间</dt><dd>{{ created_at }}</dd></div>
+        <div><dt class="text-zinc-400 text-xs">用户 ID</dt><dd class="font-mono text-xs text-zinc-400">{{ id }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-6">
+      <p class="text-xs text-zinc-500 mb-1">当前余额</p>
+      <p class="text-2xl font-bold text-zinc-900 tabular-nums mb-4">{{ balance_fmt }}</p>
+      <form method="post" action="/admin/user-ops" class="space-y-2">
+        <input type="hidden" name="user_id" value="{{ id }}" />
+        <input name="amount" type="number" min="1" required placeholder="充值金额（元）"
+               class="w-full rounded-md border-zinc-200 text-sm" />
+        <input name="note" type="text" placeholder="备注（可选）" class="w-full rounded-md border-zinc-200 text-sm" />
+        <button class="w-full px-3 py-2 rounded-md bg-sky-600 text-white text-sm font-medium hover:bg-sky-700">
+          <i class="fa-solid fa-coins mr-1"></i>充值
+        </button>
+      </form>
+    </div>
+  </div>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm">
+      <div class="px-5 py-3 border-b border-zinc-100">
+        <h2 class="text-sm font-semibold">作品（{{ novels | length }}）</h2>
+      </div>
+      <table class="w-full text-sm">
+        <tbody>
+          {% for n in novels %}
+          <tr class="border-b border-zinc-50">
+            <td class="px-5 py-2.5 font-medium">{{ n.title }}</td>
+            <td class="px-5 py-2.5 text-zinc-400 text-xs">{{ n.genre }}</td>
+            <td class="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">{{ n.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td class="px-5 py-8 text-center text-zinc-400">该用户暂无作品</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm">
+      <div class="px-5 py-3 border-b border-zinc-100">
+        <h2 class="text-sm font-semibold">余额流水（近 50 条）</h2>
+      </div>
+      <table class="w-full text-sm">
+        <tbody>
+          {% for l in ledger %}
+          <tr class="border-b border-zinc-50">
+            <td class="px-5 py-2.5">{{ l.reason }}<span class="text-xs text-zinc-400 ml-1">{{ l.note }}</span></td>
+            <td class="px-5 py-2.5 text-right tabular-nums">{{ l.delta_fmt }}</td>
+            <td class="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">{{ l.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td class="px-5 py-8 text-center text-zinc-400">暂无流水</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,52 @@
+<aside class="w-64 shrink-0 bg-white border-r border-zinc-200 flex flex-col py-6 px-4 h-screen overflow-y-auto">
+  <a href="/admin/" class="flex items-center gap-3 px-2 mb-8 group">
+    <div class="w-8 h-8 bg-zinc-900 rounded-md flex items-center justify-center group-hover:bg-zinc-700 transition-colors">
+      <i class="fa-solid fa-feather-pointed text-white text-xs"></i>
+    </div>
+    <span class="text-sm font-bold tracking-tight text-zinc-900">{{ admin_title }}</span>
+  </a>
+
+  <nav class="flex-1 space-y-1">
+    <a href="/admin/dashboard"
+       class="admin-nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+              {% if current_entity == 'dashboard' %}bg-zinc-100 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50{% endif %}">
+      <i class="fa-solid fa-gauge-high text-xs w-4"></i> 数据概览
+    </a>
+    <a href="/admin/card-keys"
+       class="admin-nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+              {% if current_entity == 'card-keys' %}bg-zinc-100 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50{% endif %}">
+      <i class="fa-solid fa-key text-xs w-4"></i> 卡密管理
+    </a>
+    <a href="/admin/user-ops"
+       class="admin-nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+              {% if current_entity == 'user-ops' %}bg-zinc-100 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50{% endif %}">
+      <i class="fa-solid fa-users text-xs w-4"></i> 用户与余额
+    </a>
+    <a href="/admin/ai-config"
+       class="admin-nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+              {% if current_entity == 'ai-config' %}bg-zinc-100 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50{% endif %}">
+      <i class="fa-solid fa-sliders text-xs w-4"></i> AI 服务配置
+    </a>
+    <a href="/admin/prompts"
+       class="admin-nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+              {% if current_entity == 'prompts' %}bg-zinc-100 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50{% endif %}">
+      <i class="fa-solid fa-comment-dots text-xs w-4"></i> AI 提示词
+    </a>
+    <a href="/admin/embedding-config"
+       class="admin-nav-link flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+              {% if current_entity == 'embedding-config' %}bg-zinc-100 text-zinc-900 font-semibold{% else %}text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50{% endif %}">
+      <i class="fa-solid fa-vector-square text-xs w-4"></i> 向量配置
+    </a>
+  </nav>
+
+  <div class="pt-4 border-t border-zinc-200 space-y-1">
+    <a href="/admin/change-password"
+       class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
+      <i class="fa-solid fa-lock text-xs w-4"></i> 修改密码
+    </a>
+    <a href="/admin/logout"
+       class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors">
+      <i class="fa-solid fa-right-from-bracket text-xs w-4"></i> 退出登录
+    </a>
+  </div>
+</aside>

@@ -28,7 +28,7 @@
               @mousedown="onOverlayTextMouseDown"
             >
               <div ref="overlayInnerRef" class="chapter-hub__entity-overlay-inner">
-                <template v-for="(line, lineIdx) in entityPreviewLines" :key="`line-${lineIdx}`">
+                <template v-for="(line, lineIdx) in displayLines" :key="`line-${lineIdx}`">
                   <template v-for="(token, tokenIdx) in line" :key="`tok-${lineIdx}-${tokenIdx}`">
                     <span
                       v-if="token.character"
@@ -129,7 +129,7 @@
                       :data-range-end="token.range?.end ?? ''"
                     >{{ token.text }}</span>
                   </template>
-                  <br v-if="lineIdx < entityPreviewLines.length - 1" />
+                  <br v-if="lineIdx < displayLines.length - 1" />
                 </template>
               </div>
             </div>
@@ -195,6 +195,52 @@ const showQuoteSelectionOverlay = computed(() => !!props.pinnedQuoteRange)
 function isQuoteToken(token: EntityToken): boolean {
   return tokenOverlapsQuoteSelection(token, props.pinnedQuoteRange)
 }
+
+/**
+ * 选区高亮按"重叠即整段标记"会让下划线超出实际选区(纯文本 token 常被合并成大段)。
+ * 这里在有选区时,把与选区部分相交的纯文本 token 按选区边界切成多段,
+ * 使下划线精确贴合选区。实体 token(角色/势力/物品/伏笔)保持整段,不切分,避免破坏点击/hover。
+ */
+const displayLines = computed<EntityToken[][]>(() => {
+  const lines = props.entityPreviewLines ?? []
+  const quote = props.pinnedQuoteRange
+  if (!quote) return lines
+  return lines.map((line) => {
+    const out: EntityToken[] = []
+    for (const token of line) {
+      const isPlain = !token.character && !token.faction && !token.item && !token.foreshadow
+      const range = token.range
+      if (!isPlain || !range) {
+        out.push(token)
+        continue
+      }
+      const { start, end } = range
+      // 完全在选区外或完全在选区内,无需切分
+      if (end <= quote.start || start >= quote.end || (start >= quote.start && end <= quote.end)) {
+        out.push(token)
+        continue
+      }
+      // 部分相交:按 [选区前, 选区内, 选区后] 切开
+      const cut1 = Math.max(start, Math.min(end, quote.start))
+      const cut2 = Math.max(start, Math.min(end, quote.end))
+      const slice = (from: number, to: number): EntityToken | null => {
+        if (to <= from) return null
+        return {
+          text: token.text.slice(from - start, to - start),
+          range: { start: from, end: to },
+          character: null,
+          faction: null,
+          item: null,
+          foreshadow: null,
+        }
+      }
+      for (const seg of [slice(start, cut1), slice(cut1, cut2), slice(cut2, end)]) {
+        if (seg) out.push(seg)
+      }
+    }
+    return out
+  })
+})
 
 const searchQuery = computed(() => String(props.searchQuery ?? '').trim())
 const searchActiveMatchIndex = computed(() => Math.max(-1, Math.trunc(Number(props.searchActiveMatchIndex ?? -1))))

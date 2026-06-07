@@ -1,17 +1,40 @@
-{% extends "layout.html" %}
+{% extends "shell.html" %}
 {% block title %}控制台 — {{ admin_title }}{% endblock %}
+{% block page_title %}控制台{% endblock %}
 {% block content %}
 <div class="mb-8">
-  <h1 class="text-3xl font-bold tracking-tight text-zinc-900">控制台</h1>
+  <h1 class="text-2xl font-bold tracking-tight text-zinc-900">控制台</h1>
   <p class="text-sm text-zinc-500 mt-1">欢迎使用 {{ admin_title }}。</p>
 </div>
 
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-  <a href="/admin/user-ops"
+  <a href="/admin/dashboard"
+     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-gauge-high text-zinc-600"></i>
+      </div>
+      <p class="font-semibold text-zinc-900">数据概览</p>
+    </div>
+    <p class="text-sm text-zinc-500">用户、AI 消费、充值、卡密、作品的整体经营状况一览</p>
+  </a>
+
+  <a href="/admin/card-keys"
      class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
     <div class="flex items-center gap-3 mb-2">
       <div class="w-10 h-10 rounded-md bg-zinc-900 text-white flex items-center justify-center shrink-0">
-        <i class="fa-solid fa-users"></i>
+        <i class="fa-solid fa-key"></i>
+      </div>
+      <p class="font-semibold text-zinc-900">卡密管理</p>
+    </div>
+    <p class="text-sm text-zinc-500">批量生成卡密、查看使用状态、筛选导出</p>
+  </a>
+
+  <a href="/admin/user-ops"
+     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-users text-zinc-600"></i>
       </div>
       <p class="font-semibold text-zinc-900">用户与余额</p>
     </div>
@@ -29,6 +52,17 @@
     <p class="text-sm text-zinc-500">DeepSeek 密钥、模型、消耗倍率、测试连接</p>
   </a>
 
+  <a href="/admin/prompts"
+     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-comment-dots text-zinc-600"></i>
+      </div>
+      <p class="font-semibold text-zinc-900">AI 提示词</p>
+    </div>
+    <p class="text-sm text-zinc-500">编辑续写、大纲、伏笔等各功能的系统提示词，保存即生效</p>
+  </a>
+
   <a href="/admin/embedding-config"
      class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
     <div class="flex items-center gap-3 mb-2">
@@ -38,28 +72,6 @@
       <p class="font-semibold text-zinc-900">向量服务</p>
     </div>
     <p class="text-sm text-zinc-500">语义检索的向量模型（如阿里 text-embedding-v4）密钥、维度、单价、测试连接</p>
-  </a>
-
-  <a href="/admin/prompts"
-     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
-    <div class="flex items-center gap-3 mb-2">
-      <div class="w-10 h-10 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
-        <i class="fa-solid fa-wand-magic-sparkles text-zinc-600"></i>
-      </div>
-      <p class="font-semibold text-zinc-900">AI 提示词</p>
-    </div>
-    <p class="text-sm text-zinc-500">编辑续写、大纲、伏笔等各功能的系统提示词，保存即生效</p>
-  </a>
-
-  <a href="/admin/card-keys"
-     class="bg-white border border-zinc-200 rounded-lg p-5 shadow-sm hover:border-zinc-300 hover:shadow-md transition-all group">
-    <div class="flex items-center gap-3 mb-2">
-      <div class="w-10 h-10 rounded-md bg-zinc-100 flex items-center justify-center shrink-0">
-        <i class="fa-solid fa-key text-zinc-600"></i>
-      </div>
-      <p class="font-semibold text-zinc-900">卡密管理</p>
-    </div>
-    <p class="text-sm text-zinc-500">批量生成卡密、查看使用状态、筛选导出</p>
   </a>
 </div>
 

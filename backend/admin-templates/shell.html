@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}{{ admin_title }}{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="/admin/_static/admin.css" />
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased flex h-screen overflow-hidden font-sans">
+  {% include "shell_nav.html" %}
+
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+    <header class="sticky top-0 z-40 h-14 border-b border-zinc-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0">
+      {% block page_title %}
+      <nav class="flex items-center gap-2 text-sm font-semibold text-zinc-800 min-w-0">
+        {% if sub_title %}
+          <a href="/admin/{{ current_entity }}" class="text-zinc-500 hover:text-zinc-900 transition-colors flex items-center gap-1.5 shrink-0">
+            <i class="fa-solid fa-arrow-left text-xs"></i>{{ nav_title }}
+          </a>
+          <i class="fa-solid fa-chevron-right text-[10px] text-zinc-300 shrink-0"></i>
+          <span class="text-zinc-900 truncate">{{ sub_title }}</span>
+        {% else %}
+          <span class="text-zinc-800">{{ nav_title }}</span>
+        {% endif %}
+      </nav>
+      {% endblock %}
+      <div class="w-7 h-7 rounded-full bg-zinc-900 flex items-center justify-center text-white text-xs font-bold shrink-0">A</div>
+    </header>
+
+    <main id="admin-content" class="flex-1 overflow-y-auto p-8">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

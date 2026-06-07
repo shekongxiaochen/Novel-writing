@@ -10,7 +10,7 @@ use axum::{
     Form, Json, Router,
 };
 use axum_admin::auth::AdminAuth;
-use minijinja::{context, Environment};
+use minijinja::context;
 use serde::Deserialize;
 use tower_cookies::CookieManagerLayer;
 use tower_cookies::Cookies;
@@ -18,7 +18,6 @@ use tower_cookies::Cookies;
 use crate::services::{ai_provider_service::AiProviderService, deepseek_client};
 
 const SESSION_COOKIE: &str = "axum_admin_session";
-const ADMIN_TITLE: &str = "Novel 管理后台";
 
 #[derive(Clone)]
 pub struct AiConfigState {
@@ -117,20 +116,16 @@ async fn list_providers(
 
     let rows_json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
 
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/ai_config_page.html"))
-        .expect("ai_config template");
-
-    let html = tpl
-        .render(context!(
-            admin_title => ADMIN_TITLE,
+    Ok(super::shell::render_shell_page(
+        "ai_config_page.html",
+        include_str!("../../admin-templates/ai_config_page.html"),
+        "ai-config",
+        "AI 服务配置",
+        context!(
             page => "list",
             rows_json => rows_json,
-        ))
-        .expect("render ai_config list");
-
-    Ok(Html(html))
+        ),
+    ))
 }
 
 // ── Add form ──
@@ -367,11 +362,6 @@ fn render_form(
     test_ok: Option<&str>,
     error: Option<&str>,
 ) -> Result<Html<String>, StatusCode> {
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/ai_config_page.html"))
-        .expect("ai_config template");
-
     let (id, name, base_url, model, multiplier, price_in_miss, price_in_hit, price_out, api_key_set) =
         if let Some(p) = provider {
             (
@@ -420,9 +410,13 @@ fn render_form(
     let is_edit = !id.is_empty();
     let page_title = if is_edit { "编辑提供商" } else { "添加提供商" };
 
-    let html = tpl
-        .render(context!(
-            admin_title => ADMIN_TITLE,
+    Ok(super::shell::render_shell_page_sub(
+        "ai_config_page.html",
+        include_str!("../../admin-templates/ai_config_page.html"),
+        "ai-config",
+        "AI 服务配置",
+        Some(page_title),
+        context!(
             page => "form",
             page_title => page_title,
             is_edit => is_edit,
@@ -438,10 +432,8 @@ fn render_form(
             api_key_placeholder => api_key_placeholder,
             error => error,
             test_ok => test_ok,
-        ))
-        .expect("render ai_config form");
-
-    Ok(Html(html))
+        ),
+    ))
 }
 
 fn render_form_error(

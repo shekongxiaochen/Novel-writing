@@ -30,7 +30,7 @@
         v-for="(novel, i) in sortedNovels"
         :key="novel.id"
         class="home-library__card"
-        :style="{ '--spine': spineColor(i) }"
+        :style="{ '--spine': spineColor(i), '--i': i }"
         @click="goNovel(novel.id)"
       >
         <span class="home-library__spine" aria-hidden="true" />
@@ -65,6 +65,17 @@
       @close="createDialogOpen = false"
       @created="handleCreated"
     />
+
+    <ConfirmDialog
+      v-model="deleteConfirmOpen"
+      danger
+      title="删除书籍"
+      :message="deleteConfirmMessage"
+      confirm-label="删除"
+      cancel-label="取消"
+      @confirm="confirmDeleteNovel"
+      @cancel="pendingDeleteNovel = null"
+    />
   </section>
 </template>
 
@@ -72,6 +83,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import CreateNovelDialog from '../../components/CreateNovelDialog.vue'
+import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { useAuth } from '../../composables/useAuth'
 import { useCloudSync } from '../../composables/useCloudSync'
 import { deleteNovel, getChaptersByNovelId, getNovels } from '../../lib/storage'
@@ -83,6 +95,17 @@ const { syncNow } = useCloudSync()
 
 const createDialogOpen = ref(false)
 const novels = ref<Novel[]>(getNovels())
+const pendingDeleteNovel = ref<Novel | null>(null)
+const deleteConfirmOpen = computed({
+  get: () => pendingDeleteNovel.value !== null,
+  set: (open: boolean) => {
+    if (!open) pendingDeleteNovel.value = null
+  },
+})
+const deleteConfirmMessage = computed(() => {
+  const label = pendingDeleteNovel.value?.title || '未命名书籍'
+  return `确认删除《${label}》？相关章节、大纲、角色与伏笔数据都会一起删除。`
+})
 
 const sortedNovels = computed(() =>
   [...novels.value].sort((a, b) => {
@@ -108,10 +131,14 @@ function handleCreated(novelId: string): void {
   goNovel(novelId)
 }
 
-async function handleDeleteNovel(novel: Novel): Promise<void> {
-  const label = novel.title || '未命名书籍'
-  const confirmed = window.confirm(`确认删除《${label}》？相关章节、大纲、角色与伏笔数据都会一起删除。`)
-  if (!confirmed) return
+function handleDeleteNovel(novel: Novel): void {
+  pendingDeleteNovel.value = novel
+}
+
+async function confirmDeleteNovel(): Promise<void> {
+  const novel = pendingDeleteNovel.value
+  pendingDeleteNovel.value = null
+  if (!novel) return
 
   const deleted = deleteNovel(novel.id)
   if (!deleted) return
@@ -175,6 +202,18 @@ onUnmounted(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
+  animation: home-head-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes home-head-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .home-library__titles {
@@ -197,6 +236,10 @@ onUnmounted(() => {
   line-height: 1.05;
   letter-spacing: -0.01em;
   color: var(--color-text);
+  background: linear-gradient(135deg, var(--color-text) 0%, var(--color-primary) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .home-library__subtitle {
@@ -262,6 +305,18 @@ onUnmounted(() => {
   color: var(--color-primary);
   font-size: 1.6rem;
   line-height: 1;
+  animation: home-empty-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes home-empty-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary) 22%, transparent);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--color-primary) 0%, transparent);
+  }
 }
 
 .home-library__empty-title {
@@ -296,6 +351,19 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px color-mix(in srgb, #120f0b 5%, transparent);
   cursor: pointer;
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  animation: home-card-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+@keyframes home-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .home-library__card:hover {
@@ -445,6 +513,24 @@ onUnmounted(() => {
   .home-library__del,
   .home-library__card-enter {
     opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-library__head,
+  .home-library__card {
+    animation: none;
+  }
+
+  .home-library__empty-icon {
+    animation: none;
+  }
+
+  .home-library__card:hover {
+    transform: none;
+  }
+
+  .home-library__create:hover {
+    transform: none;
   }
 }
 </style>
