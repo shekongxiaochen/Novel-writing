@@ -73,7 +73,7 @@
       </div>
     </header>
 
-    <section class="ws-overview" v-if="activeTab === 'write'">
+    <section class="ws-overview ws-tab-panel" v-if="activeTab === 'write'">
       <!-- ① 故事核心 hero -->
       <header class="ws-ov-hero">
         <div class="ws-ov-hero__main">
@@ -163,7 +163,7 @@
       </div>
     </section>
 
-    <section class="card outline-console-card outline-console-card--map-only" v-if="activeTab === 'outline'">
+    <section class="card outline-console-card outline-console-card--map-only ws-tab-panel" v-if="activeTab === 'outline'">
       <header class="outline-map-hero">
         <div class="outline-map-hero__copy">
           <h2>大纲</h2>
@@ -1034,7 +1034,7 @@
       />
     </section>
 
-    <section class="card" v-if="activeTab === 'characters'">
+    <section class="card ws-tab-panel" v-if="activeTab === 'characters'">
       <div class="faction-filter-block">
         <label class="faction-filter-label">
           <span>关键字筛选</span>
@@ -1086,109 +1086,19 @@
             </div>
 
             <div class="characters-graph-ui__box-right">
-              <article class="characters-graph-ui__section character-panel">
-              <header class="character-panel__head">
-                <h3 class="character-panel__title">档案</h3>
-              </header>
-
-              <div v-if="selectedGraphCharacter" class="character-panel__main">
-                <div class="character-panel__body character-panel__body--scroll scrollbar-paper">
-                  <div class="character-panel__hero">
-                    <p class="character-panel__name">{{ charDisplay(selectedGraphCharacter) }}</p>
-                    <div class="character-panel__hero-chips">
-                      <span class="character-panel__chip">
-                        {{
-                          selectedGraphCharacter.firstAppearanceChapterNo != null
-                            ? `首见 · 第 ${selectedGraphCharacter.firstAppearanceChapterNo} 章`
-                            : '首见 · 暂未出场'
-                        }}
-                      </span>
-                    </div>
-                  </div>
-
-                  <dl class="character-panel__spec">
-                    <div class="character-panel__spec-item">
-                      <dt>年龄</dt>
-                      <dd>{{ selectedGraphCharacter.age || '—' }}</dd>
-                    </div>
-                    <div class="character-panel__spec-item">
-                      <dt>性别</dt>
-                      <dd>{{ selectedGraphCharacter.gender || '—' }}</dd>
-                    </div>
-                    <div class="character-panel__spec-item character-panel__spec-item--block">
-                      <dt>所属势力</dt>
-                      <dd>
-                        <ul v-if="graphCharacterMemberships.length > 0" class="character-panel__faction-list">
-                          <li v-for="m in graphCharacterMemberships" :key="m.factionId">
-                            <strong>{{ factionNameById(m.factionId) }}</strong>
-                            <span v-if="(m.description ?? '').trim()" class="muted">— {{ m.description }}</span>
-                          </li>
-                        </ul>
-                        <template v-else>—</template>
-                      </dd>
-                    </div>
-                    <div class="character-panel__spec-item character-panel__spec-item--block">
-                      <dt>分类</dt>
-                      <dd>
-                        <ul
-                          v-if="categoryNamesByIds(selectedGraphCharacter.categoryIds).length"
-                          class="character-panel__faction-list"
-                        >
-                          <li v-for="name in categoryNamesByIds(selectedGraphCharacter.categoryIds)" :key="`cc-${name}`">
-                            <strong>{{ name }}</strong>
-                          </li>
-                        </ul>
-                        <template v-else>—</template>
-                      </dd>
-                    </div>
-                    <div class="character-panel__spec-item character-panel__spec-item--block">
-                      <dt>持有物品</dt>
-                      <dd>
-                        <ul v-if="graphCharacterHeldItems.length" class="character-panel__faction-list">
-                          <li v-for="item in graphCharacterHeldItems" :key="`wch-${item.id}`">
-                            <strong>{{ item.name }}</strong>
-                          </li>
-                        </ul>
-                        <template v-else>—</template>
-                      </dd>
-                    </div>
-                  </dl>
-
-                  <section class="character-panel__block">
-                    <h4 class="character-panel__block-title">扩展条目</h4>
-                    <ul v-if="(selectedGraphCharacter.attributes?.length ?? 0) > 0" class="character-panel__extra-list">
-                      <li v-for="a in selectedGraphCharacter.attributes" :key="a.id" class="character-panel__extra">
-                        <span class="character-panel__extra-key">{{ a.key }}</span>
-                        <p class="character-panel__extra-val">{{ a.value }}</p>
-                      </li>
-                    </ul>
-                    <p v-else class="character-panel__empty">无扩展条目</p>
-                  </section>
-                </div>
-
-                <footer class="character-panel__foot">
-                  <button
-                    type="button"
-                    class="character-panel__btn character-panel__btn--ghost"
-                    @click="openWorkspaceCharacterAllChangesModal"
-                  >
-                    显示角色所有更改
-                  </button>
-                  <button type="button" class="character-panel__btn character-panel__btn--primary" @click="startCharacterEdit">
-                    编辑
-                  </button>
-                  <button
-                    type="button"
-                    class="character-panel__btn character-panel__btn--danger"
-                    @click="openCharacterDelete(selectedGraphCharacter.id)"
-                  >
-                    删除角色
-                  </button>
-                </footer>
-              </div>
-
-              <p v-else class="character-panel__placeholder">在上方关系导航中选择角色以查看档案</p>
-              </article>
+              <CharacterProfilePanel
+                :character="selectedGraphCharacter"
+                :memberships="graphCharacterMemberships"
+                :held-items="graphCharacterHeldItems"
+                :category-names="selectedGraphCharacter ? categoryNamesByIds(selectedGraphCharacter.categoryIds) : []"
+                :faction-name-by-id="factionNameById"
+                :display-name="selectedGraphCharacter ? charDisplay(selectedGraphCharacter) : ''"
+                show-delete
+                placeholder="在上方关系导航中选择角色以查看档案"
+                @open-all-changes="openWorkspaceCharacterAllChangesModal"
+                @edit="startCharacterEdit"
+                @delete="selectedGraphCharacter && openCharacterDelete(selectedGraphCharacter.id)"
+              />
             </div>
           </div>
 
@@ -1250,86 +1160,13 @@
                 <div class="confirm-dialog__accent" aria-hidden="true" />
                 <div class="confirm-dialog__body chapter-hub__relation-edit-dialog-body">
                   <h2 class="confirm-dialog__title">角色全部更改 · {{ selectedGraphCharacter.name }}</h2>
-                  <div class="chapter-hub__relation-edit-top">
-                    <label class="chapter-hub__relation-edit-field">
-                      <span>查看字段</span>
-                      <div class="workspace-dd">
-                        <button
-                          type="button"
-                          class="workspace-dd__btn workspace-dd__btn--compact"
-                          :class="{ 'workspace-dd__btn--open': characterAllChangesFieldDropdownOpen }"
-                          data-dd-key="workspace-character-all-changes-field"
-                          @click="toggleWorkspaceCharacterAllChangesFieldDropdown"
-                        >
-                          <span class="workspace-dd__btn-text">{{ characterAllChangesFieldDropdownLabel }}</span>
-                          <span class="workspace-dd__btn-caret" aria-hidden="true">▾</span>
-                        </button>
-                        <div
-                          v-if="characterAllChangesFieldDropdownOpen"
-                          class="workspace-dd__panel scrollbar-paper"
-                          :class="dropdownPanelDirectionClass('workspace-character-all-changes-field')"
-                          data-dd-panel-key="workspace-character-all-changes-field"
-                          role="listbox"
-                        >
-                          <button
-                            type="button"
-                            class="workspace-dd__item"
-                            :class="{ 'workspace-dd__item--active': characterAllChangesFieldFilter === '__all__' }"
-                            @click="selectWorkspaceCharacterAllChangesField('__all__')"
-                          >
-                            全部字段
-                          </button>
-                          <button
-                            v-for="opt in characterAllChangeFieldOptions"
-                            :key="`wchg-field-${opt.value}`"
-                            type="button"
-                            class="workspace-dd__item"
-                            :class="{ 'workspace-dd__item--active': characterAllChangesFieldFilter === opt.value }"
-                            @click="selectWorkspaceCharacterAllChangesField(opt.value)"
-                          >
-                            {{ opt.label }}
-                          </button>
-                        </div>
-                      </div>
-                    </label>
-                  </div>
-                  <div class="chapter-hub__relation-edit-scroll scrollbar-paper">
-                    <template v-if="filteredCharacterAllChangeRows.length > 0">
-                      <div
-                        v-for="(row, idx) in filteredCharacterAllChangeRows"
-                        :key="`wchg-all-${idx}-${row.updatedAt}`"
-                        class="chapter-hub__relation-edit-row"
-                      >
-                        <div class="chapter-hub__relation-edit-row-head">
-                          <p class="chapter-hub__relation-edit-target">
-                            {{ row.when }}<span v-if="row.chapterLabel"> · {{ row.chapterLabel }}</span>
-                          </p>
-                          <button
-                            v-if="row.chapterId"
-                            type="button"
-                            class="character-panel__icon-btn chapter-hub__relation-edit-remove"
-                            @click="jumpToWorkspaceCharacterChange(row)"
-                          >
-                            跳转
-                          </button>
-                        </div>
-                        <template v-if="row.details.length > 0">
-                          <p
-                            v-for="(d, i) in row.details"
-                            :key="`wchg-all-d-${idx}-${i}`"
-                            class="muted"
-                            style="margin: 0 0 4px;"
-                          >
-                            {{ d.location }}：{{ d.before || '空' }} -> {{ d.after || '空' }}
-                          </p>
-                        </template>
-                        <p v-else-if="row.fields.length > 0" class="muted" style="margin: 0 0 4px;">
-                          字段：{{ row.fields.map(workspaceCharacterFieldLabel).join('、') }}
-                        </p>
-                      </div>
-                    </template>
-                    <p v-else class="muted">暂无更改记录。</p>
-                  </div>
+                  <CharacterChangeTimeline
+                    :character-id="selectedGraphCharacter.id"
+                    :novel-id="novelId"
+                    :attributes="selectedGraphCharacter.attributes ?? []"
+                    dd-key="workspace-character-all-changes-field"
+                    @jump="jumpToWorkspaceCharacterChange"
+                  />
                   <div class="confirm-dialog__actions chapter-hub__relation-edit-actions">
                     <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeWorkspaceCharacterAllChangesModal">
                       关闭
@@ -1344,7 +1181,7 @@
         <Teleport to="body">
           <Transition name="confirm">
             <div
-              v-if="characterEditMode && selectedGraphCharacter"
+              v-if="characterEditor.characterEditModalOpen.value && selectedGraphCharacter"
               class="confirm-overlay"
               role="presentation"
             >
@@ -1353,238 +1190,49 @@
                 <div class="confirm-dialog__body workspace-character-edit-dialog__body">
                   <h2 class="confirm-dialog__title">修改角色</h2>
                   <p class="muted workspace-character-edit-dialog__sub">基础信息、分类、势力关联与扩展条目</p>
-                  <p v-if="characterEditSavedNotice" class="faction-edit-saved-note" style="margin-top: 8px">已保存</p>
-                  <p v-if="characterEditError" class="character-panel__alert" style="margin-top: 10px">{{ characterEditError }}</p>
-
-                      <div class="character-panel__body character-panel__body--edit workspace-character-edit-dialog__scroll scrollbar-paper" style="padding: 0; margin-top: 12px">
-                        <div class="character-panel__form-grid">
-                          <label class="character-panel__field workspace-character-edit-dialog__left-col">
-                            <span class="character-panel__field-label">姓名</span>
-                            <input v-model="characterDraft.name" class="character-panel__input" maxlength="40" />
-                          </label>
-                          <label class="character-panel__field workspace-character-edit-dialog__left-col">
-                            <span class="character-panel__field-label">年龄</span>
-                            <input v-model="characterDraft.age" class="character-panel__input" maxlength="20" />
-                          </label>
-                          <div class="character-panel__field">
-                            <span class="character-panel__field-label">性别</span>
-                            <div class="character-gender-toggle" role="radiogroup" aria-label="性别">
-                              <button
-                                v-for="option in genderOptions"
-                                :key="`draft-gender-${option.value || 'unset'}`"
-                                type="button"
-                                class="character-gender-toggle__option"
-                                :class="{ 'character-gender-toggle__option--active': characterDraft.gender === option.value }"
-                                role="radio"
-                                :aria-checked="characterDraft.gender === option.value"
-                                @click="characterDraft.gender = option.value"
-                              >
-                                <span class="character-gender-toggle__dot" aria-hidden="true">{{ option.mark }}</span>
-                                <span>{{ option.label }}</span>
-                              </button>
-                            </div>
-                          </div>
-                          <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
-                            <div class="character-panel__block-head">
-                              <h4 class="character-panel__block-title">别名</h4>
-                            </div>
-                            <div
-                              v-for="row in characterDraft.aliasRows"
-                              :key="row.id"
-                              class="character-panel__custom-card"
-                            >
-                              <label class="character-panel__field character-panel__field--tight">
-                                <span class="character-panel__field-label">别称</span>
-                                <input v-model="row.value" class="character-panel__input" maxlength="40" />
-                              </label>
-                              <button
-                                type="button"
-                                class="character-panel__icon-btn"
-                                title="移除此别名"
-                                @click="removeCharacterDraftAliasRow(row.id)"
-                              >
-                                移除
-                              </button>
-                            </div>
-                            <button type="button" class="character-panel__btn character-panel__btn--dashed" @click="addCharacterDraftAliasRow">
-                              ＋ 添加别名
-                            </button>
-                          </section>
-                          <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
-                            <div class="character-panel__block-head">
-                              <h4 class="character-panel__block-title">持有物品</h4>
-                            </div>
-                            <p v-if="items.length === 0" class="muted" style="margin: 0 0 8px">暂无物品，请先到「物品」页创建。</p>
-                            <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterItemPickerOpen }">
-                              <div class="workspace-item-owner-picker__head"><span>持有物品</span></div>
-                              <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleCharacterItemPicker">
-                                <span class="workspace-item-owner-picker__trigger-main">{{ characterDraft.itemIds.length ? `已持有 ${characterDraft.itemIds.length} 件物品` : '选择持有物品…' }}</span>
-                                <span class="workspace-item-owner-picker__chevron">⌄</span>
-                              </button>
-                              <div v-if="characterItemPickerOpen" class="workspace-item-owner-picker__popover workspace-character-picker__popover">
-                                <input v-model="characterDraft.itemQuery" maxlength="40" placeholder="搜索物品…" autocomplete="off" />
-                                <div class="workspace-item-owner-picker__list scrollbar-paper">
-                                  <button
-                                    v-for="row in characterItemPickerRows"
-                                    :key="`char-item-dd-${row.id}`"
-                                    type="button"
-                                    class="workspace-item-owner-picker__option"
-                                    :class="{ active: row.bound, 'workspace-item-owner-picker__option--disabled': row.disabled }"
-                                    :disabled="row.disabled"
-                                    @click="selectCharacterDraftItem(row.id)"
-                                  >
-                                    <span class="workspace-item-owner-picker__mark">物</span>
-                                    <span class="workspace-item-owner-picker__label">{{ row.label }}</span>
-                                    <em>{{ row.meta }}</em>
-                                  </button>
-                                  <p v-if="characterItemPickerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的物品</p>
-                                </div>
-                              </div>
-                            </div>
-                            <div v-if="characterDraft.itemIds.length > 0" class="workspace-character-picker__bound-list">
-                              <span v-for="itemId in characterDraft.itemIds" :key="`char-bound-item-${itemId}`" class="category-bind-chip category-bind-chip--bound workspace-character-picker__bound-chip">
-                                {{ itemNameById(itemId) }}
-                                <button type="button" @click="removeCharacterDraftItem(itemId)">×</button>
-                              </span>
-                            </div>
-                          </section>
-
-                          <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
-                            <div class="character-panel__block-head">
-                              <h4 class="character-panel__block-title">分类</h4>
-                            </div>
-                            <p v-if="sortedCategories.length === 0" class="muted" style="margin: 0 0 8px">暂无分类，请在本页下方「分类」中新建。</p>
-                            <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterCategoryPickerOpen }">
-                              <div class="workspace-item-owner-picker__head"><span>角色分类</span></div>
-                              <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleCharacterCategoryPicker">
-                                <span class="workspace-item-owner-picker__trigger-main">{{ characterDraft.categoryIds.length ? `已绑定 ${characterDraft.categoryIds.length} 个分类` : '选择分类…' }}</span>
-                                <span class="workspace-item-owner-picker__chevron">⌄</span>
-                              </button>
-                              <div v-if="characterCategoryPickerOpen" class="workspace-item-owner-picker__popover workspace-character-picker__popover">
-                                <input v-model="characterDraft.categoryQuery" maxlength="40" placeholder="搜索分类…" autocomplete="off" />
-                                <div class="workspace-item-owner-picker__list scrollbar-paper">
-                                  <button
-                                    v-for="row in characterCategoryPickerRows"
-                                    :key="`char-cat-dd-${row.id}`"
-                                    type="button"
-                                    class="workspace-item-owner-picker__option"
-                                    :class="{ active: row.bound, 'workspace-item-owner-picker__option--disabled': row.disabled }"
-                                    :disabled="row.disabled"
-                                    @click="selectCharacterDraftCategory(row.id)"
-                                  >
-                                    <span class="workspace-item-owner-picker__mark">类</span>
-                                    <span class="workspace-item-owner-picker__label">{{ row.label }}</span>
-                                    <em>{{ row.meta }}</em>
-                                  </button>
-                                  <p v-if="characterCategoryPickerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的分类</p>
-                                </div>
-                              </div>
-                            </div>
-                            <div v-if="characterDraft.categoryIds.length > 0" class="workspace-character-picker__bound-list">
-                              <span v-for="catId in characterDraft.categoryIds" :key="`char-bound-cat-${catId}`" class="category-bind-chip category-bind-chip--bound workspace-character-picker__bound-chip">
-                                {{ categoryNameById(catId) }}
-                                <button type="button" @click="removeCharacterDraftCategory(catId)">×</button>
-                              </span>
-                            </div>
-                          </section>
-                          <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
-                            <div class="character-panel__block-head">
-                              <h4 class="character-panel__block-title">所属势力</h4>
-                            </div>
-                            <p v-if="factions.length === 0" class="muted" style="margin: 0 0 8px">暂无势力，请先到「势力」页创建。</p>
-                            <div v-else class="workspace-item-owner-picker" :class="{ 'workspace-item-owner-picker--open': characterMembershipPickerOpen }">
-                              <div class="workspace-item-owner-picker__head"><span>势力关联</span></div>
-                              <button type="button" class="workspace-item-owner-picker__trigger" @click="toggleCharacterMembershipPicker">
-                                <span class="workspace-item-owner-picker__trigger-main">{{ characterDraft.membershipRows.length ? `已加入 ${characterDraft.membershipRows.length} 个势力` : '选择势力…' }}</span>
-                                <span class="workspace-item-owner-picker__chevron">⌄</span>
-                              </button>
-                              <div v-if="characterMembershipPickerOpen" class="workspace-item-owner-picker__popover workspace-character-picker__popover">
-                                <input v-model="characterDraft.membershipQuery" maxlength="40" placeholder="搜索势力…" autocomplete="off" />
-                                <div class="workspace-item-owner-picker__list scrollbar-paper">
-                                  <button
-                                    v-for="row in characterMembershipPickerRows"
-                                    :key="`char-faction-dd-${row.id}`"
-                                    type="button"
-                                    class="workspace-item-owner-picker__option workspace-item-owner-picker__option--faction"
-                                    :class="{ active: row.bound, 'workspace-item-owner-picker__option--disabled': row.disabled }"
-                                    :disabled="row.disabled"
-                                    @click="selectCharacterDraftMembership(row.id)"
-                                  >
-                                    <span class="workspace-item-owner-picker__mark">势</span>
-                                    <span class="workspace-item-owner-picker__label">{{ row.label }}</span>
-                                    <em>{{ row.meta }}</em>
-                                  </button>
-                                  <p v-if="characterMembershipPickerRows.length === 0" class="workspace-item-owner-picker__empty">没有匹配的势力</p>
-                                </div>
-                              </div>
-                            </div>
-                            <div
-                              v-for="(row, idx) in characterDraft.membershipRows"
-                              :key="`mem-${idx}-${row.factionId}`"
-                              class="character-panel__custom-card"
-                            >
-                              <label class="character-panel__field character-panel__field--tight">
-                                <span class="character-panel__field-label">势力</span>
-                                <input :value="characterMembershipFactionLabel(row.factionId)" class="character-panel__input" readonly />
-                              </label>
-                              <label class="character-panel__field">
-                                <span class="character-panel__field-label">在该势力中的描述（最多 120 字）</span>
-                                <input v-model="row.description" type="text" class="character-panel__input" maxlength="120" />
-                              </label>
-                              <button type="button" class="character-panel__icon-btn" title="移除此条" @click="removeCharacterDraftMembershipRow(idx)">
-                                移除
-                              </button>
-                            </div>
-                          </section>
-                        </div>
-
-                        <section class="character-panel__block character-panel__block--edit workspace-character-edit-dialog__full-row">
-                          <div class="character-panel__block-head">
-                            <h4 class="character-panel__block-title">扩展条目</h4>
-                          </div>
-                          <div v-for="a in characterDraft.attributes" :key="a.id" class="character-panel__custom-card">
-                            <label class="character-panel__field character-panel__field--tight">
-                              <span class="character-panel__field-label">名称</span>
-                              <input v-model="a.key" class="character-panel__input" maxlength="40" />
-                            </label>
-                            <label class="character-panel__field">
-                              <span class="character-panel__field-label">说明</span>
-                              <input v-model="a.value" class="character-panel__input" maxlength="80" />
-                            </label>
-                            <button type="button" class="character-panel__icon-btn" title="移除此条" @click="removeCharacterDraftRow(a.id)">
-                              移除
-                            </button>
-                          </div>
-                          <button type="button" class="character-panel__btn character-panel__btn--dashed" @click="addCharacterDraftRow">
-                            ＋ 新建条目
-                          </button>
-                        </section>
-                      </div>
-
-                      <div class="confirm-dialog__actions workspace-character-edit-dialog__actions">
-                        <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="requestCloseCharacterEdit">
-                          取消
-                        </button>
-                        <button type="button" class="confirm-dialog__btn confirm-dialog__btn--danger" @click="saveCharacterEdit">
-                          保存
-                        </button>
-                      </div>
-                    </div>
+                  <CharacterEditForm
+                    :editor="characterEditor"
+                    :categories="categories"
+                    :faction-options="factions"
+                    :items="items"
+                  />
+                  <div class="confirm-dialog__actions workspace-character-edit-dialog__actions">
+                    <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="requestCloseCharacterEdit">
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      class="confirm-dialog__btn confirm-dialog__btn--danger"
+                      :disabled="!characterEditor.canSaveDraft.value"
+                      @click="characterEditor.saveCharacterEdit"
+                    >
+                      保存
+                    </button>
                   </div>
                 </div>
-              </Transition>
-            </Teleport>
+              </div>
+            </div>
+          </Transition>
+        </Teleport>
 
-            <ConfirmDialog
-              v-model="characterEditCancelConfirmOpen"
-              title="确认取消"
-              message="取消将不保存更改，确定取消吗？"
-              confirm-label="确定取消"
-              cancel-label="继续编辑"
-              danger
-              @confirm="forceCancelCharacterEdit"
-              @cancel="onCharacterEditCancelDialogCancel"
-            />
+        <ConfirmDialog
+          v-model="characterEditCancelConfirmOpen"
+          title="确认取消"
+          message="取消将不保存更改，确定取消吗？"
+          confirm-label="确定取消"
+          cancel-label="继续编辑"
+          danger
+          @confirm="forceCancelCharacterEdit"
+          @cancel="onCharacterEditCancelDialogCancel"
+        />
+        <ConfirmDialog
+          v-model="characterEditor.renameConfirmOpen.value"
+          title="应用新角色名到全文"
+          message="你更改了角色名或别名。保存后将把正文中该角色的旧名字/旧别名统一替换为新角色名。是否继续？"
+          confirm-label="继续保存"
+          cancel-label="取消"
+          @confirm="characterEditor.confirmRenameAndSave"
+        />
       </section>
 
       <!-- 新增角色弹框 -->
@@ -1768,7 +1416,7 @@
       </Teleport>
     </section>
 
-    <section class="card workspace-items-card" v-if="activeTab === 'items'">
+    <section class="card workspace-items-card ws-tab-panel" v-if="activeTab === 'items'">
       <div class="workspace-items-hero">
         <h2>物品</h2>
         <button type="button" class="btn-primary workspace-items-hero__btn" @click="openItemCreate">新增物品</button>
@@ -2038,7 +1686,7 @@
       @cancel="itemEditCancelConfirmOpen = false"
     />
 
-    <section class="card" v-if="activeTab === 'factions'">
+    <section class="card ws-tab-panel" v-if="activeTab === 'factions'">
       <h2>势力</h2>
 
       <h3 class="workspace-subsection-title">新建势力</h3>
@@ -2343,7 +1991,7 @@
       </Transition>
     </Teleport>
 
-    <section class="card workspace-items-card" v-if="activeTab === 'categories'">
+    <section class="card workspace-items-card ws-tab-panel" v-if="activeTab === 'categories'">
       <div class="workspace-items-hero">
         <h2>分类</h2>
         <button type="button" class="btn-primary workspace-items-hero__btn" @click="openCategoryCreate">添加分类</button>
@@ -2634,7 +2282,7 @@
       </Transition>
     </Teleport>
 
-    <section class="card" v-if="activeTab === 'issues'">
+    <section class="card ws-tab-panel" v-if="activeTab === 'issues'">
 
       <!-- ══════════ 伏笔追踪 ══════════ -->
       <div class="section-header">
@@ -2833,7 +2481,7 @@
     </Teleport>
     </section>
 
-    <section class="card workspace-items-card" v-if="activeTab === 'worldsettings'">
+    <section class="card workspace-items-card ws-tab-panel" v-if="activeTab === 'worldsettings'">
       <div class="workspace-items-hero">
         <h2>世界观设定</h2>
         <div class="workspace-items-hero__actions">
@@ -3466,7 +3114,6 @@ import {
   deleteItem,
   deleteOutlineItem,
   deleteForeshadowPlant,
-  getCharacterChangeHistory,
   replaceItemOwnersForEntity,
   replaceMembershipsForCharacter,
   replaceMembershipsForFaction,
@@ -3488,9 +3135,7 @@ import {
   moveTimelineEvent,
   normalizeCategoryIds,
   upsertNovelRecord,
-  recordCharacterChangeWithContext,
   recordFactionChangeFields,
-  type CharacterChangeEvent,
   type CharacterChangeDetail,
   updateCharacter,
   updateFaction,
@@ -3503,7 +3148,7 @@ import {
   updateWorldSetting,
   deleteWorldSetting,
 } from '../../lib/storage'
-import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText, buildDisplayNameMap } from '../../lib/characterLabels'
+import { characterMatchLabels, normalizeCharacterAliases, buildDisplayNameMap } from '../../lib/characterLabels'
 import {
   designOutlineInterviewTurnByAi,
   designOutlineOptionsByAi,
@@ -3548,6 +3193,10 @@ import type {
 import CharacterGraphRelationToolbar from '../../components/CharacterGraphRelationToolbar.vue'
 import CharacterRelationSphere from '../../components/CharacterRelationSphere.vue'
 import CharacterRelationFocusSphere from '../../components/CharacterRelationFocusSphere.vue'
+import CharacterProfilePanel from '../../components/character/CharacterProfilePanel.vue'
+import CharacterChangeTimeline from '../../components/character/CharacterChangeTimeline.vue'
+import CharacterEditForm from '../../components/character/CharacterEditForm.vue'
+import { useCharacterEditor } from '../../composables/useCharacterEditor'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import OutlineMindMapCanvas from './components/outline-map/OutlineMindMapCanvas.vue'
 import OutlineBoardView from './components/outline-map/OutlineBoardView.vue'
@@ -4342,33 +3991,7 @@ const pendingDeleteFactionId = ref<string | null>(null)
 const graphFocusCharacterId = ref<string>('')
 const graphFocusCharacterDropdownOpen = ref(false)
 /** 右侧「角色信息」：须先点「修改」，再点「保存」 */
-const characterEditMode = ref(false)
-const characterEditError = ref('')
-const characterEditSavedNotice = ref(false)
 const characterEditCancelConfirmOpen = ref(false)
-const characterEditInitial = ref({
-  name: '',
-  age: '',
-  gender: '',
-  aliases: [] as string[],
-  categoryIds: [] as string[],
-  attrs: [] as Array<{ key: string; value: string }>,
-  memberships: [] as Array<{ factionId: string; description: string }>,
-  itemIds: [] as string[],
-})
-const characterDraft = reactive({
-  name: '',
-  age: '',
-  gender: '',
-  attributes: [] as CharacterAttribute[],
-  aliasRows: [] as { id: string; value: string }[],
-  categoryIds: [] as string[],
-  membershipRows: [] as { factionId: string; description: string }[],
-  itemIds: [] as string[],
-  itemQuery: '',
-  categoryQuery: '',
-  membershipQuery: '',
-})
 const timelineChapterDropdownOpen = ref(false)
 const timelineChapterEndDropdownOpen = ref(false)
 const timelineOutlineDropdownOpen = ref(false)
@@ -4379,11 +4002,7 @@ function closeCharacterChapterPickers(): void {
 const timelineEventChapterStartDropdownOpenId = ref('')
 const timelineEventChapterEndDropdownOpenId = ref('')
 const timelineEventOutlineDropdownOpenId = ref('')
-const characterMembershipFactionDropdownOpenId = ref('')
 const characterCreateMembershipFactionDropdownOpenId = ref('')
-const characterCategoryPickerOpen = ref(false)
-const characterItemPickerOpen = ref(false)
-const characterMembershipPickerOpen = ref(false)
 const dropdownDirectionByKey = reactive<Record<string, 'up' | 'down'>>({})
 const outlineAssocStartDropdownOpenId = ref('')
 const outlineAssocEndDropdownOpenId = ref('')
@@ -4579,36 +4198,11 @@ function characterMembershipFactionLabel(factionId: string): string {
   return factions.value.find((f) => f.id === factionId)?.name ?? '选择势力'
 }
 
-function selectCharacterMembershipFaction(index: number, factionId: string): void {
-  const row = characterDraft.membershipRows[index]
-  if (!row) return
-  row.factionId = factionId
-  characterMembershipFactionDropdownOpenId.value = ''
-}
-
 function selectCharacterCreateMembershipFaction(index: number, factionId: string): void {
   const row = characterForm.membershipRows[index]
   if (!row) return
   row.factionId = factionId
   characterCreateMembershipFactionDropdownOpenId.value = ''
-}
-
-function toggleCharacterMembershipFactionDropdown(index: number): void {
-  const id = String(index)
-  characterMembershipFactionDropdownOpenId.value =
-    characterMembershipFactionDropdownOpenId.value === id ? '' : id
-  if (characterMembershipFactionDropdownOpenId.value) {
-    resolveDropdownDirection(`character-membership-${id}`)
-    timelineChapterDropdownOpen.value = false
-    timelineChapterEndDropdownOpen.value = false
-    timelineOutlineDropdownOpen.value = false
-    closeCharacterChapterPickers()
-    timelineEventChapterStartDropdownOpenId.value = ''
-    timelineEventChapterEndDropdownOpenId.value = ''
-    timelineEventOutlineDropdownOpenId.value = ''
-    outlineAssocStartDropdownOpenId.value = ''
-    outlineAssocEndDropdownOpenId.value = ''
-  }
 }
 
 function toggleCharacterCreateMembershipFactionDropdown(index: number): void {
@@ -4624,7 +4218,6 @@ function toggleCharacterCreateMembershipFactionDropdown(index: number): void {
     timelineEventChapterStartDropdownOpenId.value = ''
     timelineEventChapterEndDropdownOpenId.value = ''
     timelineEventOutlineDropdownOpenId.value = ''
-    characterMembershipFactionDropdownOpenId.value = ''
     outlineAssocStartDropdownOpenId.value = ''
     outlineAssocEndDropdownOpenId.value = ''
   }
@@ -4801,7 +4394,6 @@ function closeWorkspaceDropdowns(): void {
   timelineEventChapterStartDropdownOpenId.value = ''
   timelineEventChapterEndDropdownOpenId.value = ''
   timelineEventOutlineDropdownOpenId.value = ''
-  characterMembershipFactionDropdownOpenId.value = ''
   characterCreateMembershipFactionDropdownOpenId.value = ''
   outlineAssocStartDropdownOpenId.value = ''
   outlineAssocEndDropdownOpenId.value = ''
@@ -5018,7 +4610,6 @@ function onWorkspaceClickOutside(e: MouseEvent): void {
     !!timelineEventChapterStartDropdownOpenId.value ||
     !!timelineEventChapterEndDropdownOpenId.value ||
     !!timelineEventOutlineDropdownOpenId.value ||
-    !!characterMembershipFactionDropdownOpenId.value ||
     !!outlineAssocStartDropdownOpenId.value ||
     !!outlineAssocEndDropdownOpenId.value
   if (!anyDdOpen) return
@@ -6219,15 +5810,6 @@ function itemOwnerLabel(item: Pick<Item, 'ownerType' | 'ownerId'>): string {
   return '未绑定'
 }
 
-type CharacterEditPickerRow = {
-  id: string
-  label: string
-  meta: string
-  bound: boolean
-  disabled: boolean
-  type: 'category' | 'item' | 'faction'
-}
-
 type ItemOwnerPickerRow = {
   key: string
   type: 'character' | 'faction'
@@ -6483,214 +6065,6 @@ function removeItemEditRow(id: string): void {
   if (i >= 0) itemEditDraft.attributes.splice(i, 1)
 }
 
-function startCharacterEdit(): void {
-  const c = selectedGraphCharacter.value
-  if (!c) return
-  characterEditError.value = ''
-  characterEditSavedNotice.value = false
-  characterEditCancelConfirmOpen.value = false
-  characterDraft.name = c.name
-  characterDraft.membershipRows = characterFactionMemberships.value
-    .filter((m) => m.characterId === c.id)
-    .map((m) => ({ factionId: m.factionId, description: m.description ?? '' }))
-  characterDraft.age = c.age ?? ''
-  characterDraft.gender = c.gender ?? ''
-  characterDraft.aliasRows = normalizeCharacterAliases(c.aliases).map((a) => ({ id: uid(), value: a }))
-  characterDraft.categoryIds = [...normalizeCategoryIds(c.categoryIds)]
-  characterDraft.categoryQuery = ''
-  characterDraft.membershipQuery = ''
-  characterDraft.attributes = (c.attributes ?? []).map((a) => ({
-    id: a.id,
-    key: a.key,
-    value: a.value,
-  }))
-  characterDraft.itemIds = normalizeItemIds(
-    items.value
-      .filter((item) => item.ownerType === 'character' && item.ownerId === c.id)
-      .map((item) => item.id),
-  )
-  characterDraft.itemQuery = ''
-  characterEditInitial.value = {
-    name: characterDraft.name.trim(),
-    age: characterDraft.age.trim(),
-    gender: characterDraft.gender.trim(),
-    aliases: normalizeCharacterAliases(characterDraft.aliasRows.map((r) => r.value)),
-    attrs: characterDraft.attributes.map((a) => ({ key: a.key.trim(), value: a.value.trim() })),
-    memberships: characterDraft.membershipRows
-      .map((m) => ({ factionId: m.factionId.trim(), description: (m.description ?? '').trim() }))
-      .sort((a, b) => a.factionId.localeCompare(b.factionId, 'zh-Hans')),
-    itemIds: normalizeItemIds(characterDraft.itemIds),
-    categoryIds: [...normalizeCategoryIds(characterDraft.categoryIds)].sort(),
-  }
-  characterMembershipFactionDropdownOpenId.value = ''
-  characterCategoryPickerOpen.value = false
-  characterItemPickerOpen.value = false
-  characterMembershipPickerOpen.value = false
-  characterEditMode.value = true
-}
-
-function characterEditDirty(): boolean {
-  if (characterDraft.name.trim() !== characterEditInitial.value.name) return true
-  if (characterDraft.age.trim() !== characterEditInitial.value.age) return true
-  if (characterDraft.gender.trim() !== characterEditInitial.value.gender) return true
-
-  const curAliases = normalizeCharacterAliases(characterDraft.aliasRows.map((r) => r.value))
-  const initAliases = characterEditInitial.value.aliases
-  if (curAliases.length !== initAliases.length) return true
-  for (let i = 0; i < curAliases.length; i++) {
-    if (curAliases[i] !== initAliases[i]) return true
-  }
-
-  const curAttrs = characterDraft.attributes.map((a) => ({ key: a.key.trim(), value: a.value.trim() }))
-  if (curAttrs.length !== characterEditInitial.value.attrs.length) return true
-  for (let i = 0; i < curAttrs.length; i++) {
-    if (curAttrs[i].key !== characterEditInitial.value.attrs[i].key) return true
-    if (curAttrs[i].value !== characterEditInitial.value.attrs[i].value) return true
-  }
-
-  const curMemberships = characterDraft.membershipRows
-    .map((m) => ({ factionId: m.factionId.trim(), description: (m.description ?? '').trim() }))
-    .filter((m) => m.factionId)
-    .sort((a, b) => a.factionId.localeCompare(b.factionId, 'zh-Hans'))
-  if (curMemberships.length !== characterEditInitial.value.memberships.length) return true
-  for (let i = 0; i < curMemberships.length; i++) {
-    if (curMemberships[i].factionId !== characterEditInitial.value.memberships[i].factionId) return true
-    if (curMemberships[i].description !== characterEditInitial.value.memberships[i].description) return true
-  }
-
-  const curCat = [...normalizeCategoryIds(characterDraft.categoryIds)].sort().join('|')
-  const initCat = [...characterEditInitial.value.categoryIds].sort().join('|')
-  if (curCat !== initCat) return true
-  const curItemIds = normalizeItemIds(characterDraft.itemIds).join('|')
-  const initItemIds = normalizeItemIds(characterEditInitial.value.itemIds).join('|')
-  if (curItemIds !== initItemIds) return true
-  return false
-}
-
-function requestCloseCharacterEdit(): void {
-  if (characterEditDirty()) {
-    characterEditCancelConfirmOpen.value = true
-    return
-  }
-  forceCancelCharacterEdit()
-}
-
-function forceCancelCharacterEdit(): void {
-  characterEditMode.value = false
-  characterEditError.value = ''
-  characterEditSavedNotice.value = false
-  characterEditCancelConfirmOpen.value = false
-  characterMembershipFactionDropdownOpenId.value = ''
-  characterCategoryPickerOpen.value = false
-  characterItemPickerOpen.value = false
-  characterMembershipPickerOpen.value = false
-}
-
-function onCharacterEditCancelDialogCancel(): void {
-  characterEditCancelConfirmOpen.value = false
-}
-
-function saveCharacterEdit(): void {
-  const c = selectedGraphCharacter.value
-  if (!c || !novel.value) return
-  const name = characterDraft.name.trim()
-  if (!name) {
-    characterEditError.value = '请填写角色名。'
-    return
-  }
-  characterEditError.value = ''
-  const parsedAttrs = parseAttributesInput(characterDraft.attributes)
-  if (!parsedAttrs.ok) {
-    characterEditError.value = parsedAttrs.message
-    return
-  }
-
-  // 保存前 diff 变更字段（工作台无 chapterId，传 null）
-  const changedFields: string[] = []
-  if (characterDraft.age !== (c.age ?? '')) changedFields.push('age')
-  if (characterDraft.gender !== (c.gender ?? '')) changedFields.push('gender')
-  const currentAliases = normalizeCharacterAliases(characterDraft.aliasRows.map((r) => r.value))
-  const prevAliases = normalizeCharacterAliases(c.aliases)
-  const renameChanged =
-    name !== (c.name ?? '') ||
-    currentAliases.length !== prevAliases.length ||
-    currentAliases.some((v, i) => v !== prevAliases[i])
-  const attrsA = parsedAttrs.value.map((a) => ({ key: a.key.trim(), value: a.value.trim() }))
-  const attrsB = (c.attributes ?? []).map((a) => ({ key: a.key.trim(), value: a.value.trim() }))
-  if (
-    attrsA.length !== attrsB.length ||
-    attrsA.some((a, i) => a.key !== attrsB[i]?.key || a.value !== attrsB[i]?.value)
-  ) changedFields.push('attributes')
-
-  const nextCatKey = normalizeCategoryIds(characterDraft.categoryIds).slice().sort().join('|')
-  const prevCatKey = normalizeCategoryIds(c.categoryIds).slice().sort().join('|')
-  if (nextCatKey !== prevCatKey) changedFields.push('categoryIds')
-  const nextItemIds = normalizeItemIds(characterDraft.itemIds)
-  const prevItemIds = normalizeItemIds(
-    items.value.filter((item) => item.ownerType === 'character' && item.ownerId === c.id).map((item) => item.id),
-  )
-  if (nextItemIds.join('|') !== prevItemIds.join('|')) changedFields.push('items')
-
-  if (renameChanged) {
-    const oldLabels = characterMatchLabels(c)
-    for (const ch of chapters.value) {
-      const content = ch.content ?? ''
-      const nextContent = replaceCharacterLabelsInText(content, oldLabels, name)
-      if (nextContent === content) continue
-      updateChapter({ id: ch.id, content: nextContent })
-      ch.content = nextContent
-    }
-  }
-
-  updateCharacter({
-    id: c.id,
-    name,
-    age: characterDraft.age,
-    gender: characterDraft.gender,
-    goal: '',
-    secret: '',
-    arc: '',
-    notes: '',
-    attributes: parsedAttrs.value,
-    aliases: normalizeCharacterAliases(characterDraft.aliasRows.map((r) => r.value)),
-    categoryIds: normalizeCategoryIds(characterDraft.categoryIds),
-  })
-  const memRows = characterDraft.membershipRows.filter((r) => r.factionId.trim())
-  const seenF = new Set<string>()
-  const uniq = memRows.filter((row) => {
-    const id = row.factionId.trim()
-    if (seenF.has(id)) return false
-    seenF.add(id)
-    return true
-  })
-  replaceMembershipsForCharacter(novelId.value, c.id, uniq)
-  replaceItemOwnersForEntity(novelId.value, 'character', c.id, nextItemIds)
-  // 记录工作台修改（chapterId=null，不关联章节，fieldValues 保存修改后的值）
-  if (changedFields.length > 0) {
-    recordCharacterChangeWithContext(c.id, changedFields, null, {
-      name,
-      age: characterDraft.age,
-      gender: characterDraft.gender,
-    })
-  }
-  characters.value = getCharactersByNovelId(novelId.value)
-  characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(novelId.value)
-  refreshItems()
-  characterEditInitial.value = {
-    name: characterDraft.name.trim(),
-    age: characterDraft.age.trim(),
-    gender: characterDraft.gender.trim(),
-    aliases: normalizeCharacterAliases(characterDraft.aliasRows.map((r) => r.value)),
-    attrs: characterDraft.attributes.map((a) => ({ key: a.key.trim(), value: a.value.trim() })),
-    memberships: uniq
-      .map((m) => ({ factionId: m.factionId.trim(), description: (m.description ?? '').trim() }))
-      .sort((a, b) => a.factionId.localeCompare(b.factionId, 'zh-Hans')),
-    itemIds: nextItemIds,
-    categoryIds: [...normalizeCategoryIds(characterDraft.categoryIds)].sort(),
-  }
-  forceCancelCharacterEdit()
-}
-
 function parseAttributesInput(
   attrs: CharacterAttribute[]
 ): { ok: true; value: CharacterAttribute[] } | { ok: false; message: string } {
@@ -6704,15 +6078,6 @@ function parseAttributesInput(
     out.push({ id: a.id || uid(), key: k, value: v })
   }
   return { ok: true, value: out }
-}
-
-function addCharacterDraftRow(): void {
-  characterDraft.attributes.push({ id: uid(), key: '', value: '' })
-}
-
-function removeCharacterDraftRow(id: string): void {
-  const i = characterDraft.attributes.findIndex((x) => x.id === id)
-  if (i >= 0) characterDraft.attributes.splice(i, 1)
 }
 
 function addCharacterFormRow(): void {
@@ -6733,15 +6098,6 @@ function removeCharacterFormAliasRow(id: string): void {
   if (i >= 0) characterForm.aliasRows.splice(i, 1)
 }
 
-function addCharacterDraftAliasRow(): void {
-  characterDraft.aliasRows.push({ id: uid(), value: '' })
-}
-
-function removeCharacterDraftAliasRow(id: string): void {
-  const i = characterDraft.aliasRows.findIndex((x) => x.id === id)
-  if (i >= 0) characterDraft.aliasRows.splice(i, 1)
-}
-
 function addCharacterFormMembershipRow(): void {
   characterForm.membershipRows.push({ factionId: '', description: '' })
 }
@@ -6756,139 +6112,6 @@ function removeCharacterFormMembershipRow(index: number): void {
       characterCreateMembershipFactionDropdownOpenId.value = String(openIndex - 1)
     }
   }
-}
-
-function addCharacterDraftMembershipRow(): void {
-  const firstFactionId = factions.value.find((f) => !characterDraft.membershipRows.some((row) => row.factionId === f.id))?.id ?? ''
-  if (firstFactionId) characterDraft.membershipRows.push({ factionId: firstFactionId, description: '' })
-}
-
-function makeCharacterPickerRows<T extends { id: string; name?: string | null }>(
-  list: T[],
-  boundIds: string[],
-  query: string,
-  type: CharacterEditPickerRow['type'],
-  metaFor: (row: T, bound: boolean) => string,
-): CharacterEditPickerRow[] {
-  const q = query.trim().toLowerCase()
-  const rows = list
-    .filter((row) => !q || `${row.name ?? ''}`.toLowerCase().includes(q))
-    .map((row) => {
-      const bound = boundIds.includes(row.id)
-      return {
-        id: row.id,
-        label: row.name ?? '未命名',
-        meta: metaFor(row, bound),
-        bound,
-        disabled: bound,
-        type,
-      }
-    })
-  return rows.sort((a, b) => {
-    if (a.bound !== b.bound) return a.bound ? 1 : -1
-    return a.label.localeCompare(b.label, 'zh-Hans')
-  })
-}
-
-const characterCategoryPickerRows = computed(() =>
-  makeCharacterPickerRows(
-    sortedCategories.value,
-    characterDraft.categoryIds,
-    characterDraft.categoryQuery,
-    'category',
-    (_cat, bound) => (bound ? '已绑定' : '可添加'),
-  ),
-)
-
-const characterItemPickerRows = computed(() => {
-  const q = characterDraft.itemQuery.trim().toLowerCase()
-  const rows = items.value
-    .filter((item) => !q || `${item.name ?? ''} ${item.summary ?? ''}`.toLowerCase().includes(q))
-    .map((item) => {
-      const bound = characterDraft.itemIds.includes(item.id)
-      return {
-        id: item.id,
-        label: item.name ?? '未命名物品',
-        meta: bound ? '已持有' : itemOwnerLabelForDraft(item, 'character', selectedGraphCharacter.value?.id ?? ''),
-        bound,
-        disabled: bound,
-        type: 'item' as const,
-      }
-    })
-  return rows.sort((a, b) => {
-    if (a.bound !== b.bound) return a.bound ? 1 : -1
-    return a.label.localeCompare(b.label, 'zh-Hans')
-  })
-})
-
-const characterMembershipPickerRows = computed(() =>
-  makeCharacterPickerRows(
-    factions.value,
-    characterDraft.membershipRows.map((row) => row.factionId),
-    characterDraft.membershipQuery,
-    'faction',
-    (_faction, bound) => (bound ? '已加入' : '可添加'),
-  ),
-)
-
-function toggleCharacterCategoryPicker(): void {
-  characterCategoryPickerOpen.value = !characterCategoryPickerOpen.value
-  if (characterCategoryPickerOpen.value) {
-    characterItemPickerOpen.value = false
-    characterMembershipPickerOpen.value = false
-  }
-}
-
-function toggleCharacterItemPicker(): void {
-  characterItemPickerOpen.value = !characterItemPickerOpen.value
-  if (characterItemPickerOpen.value) {
-    characterCategoryPickerOpen.value = false
-    characterMembershipPickerOpen.value = false
-  }
-}
-
-function toggleCharacterMembershipPicker(): void {
-  characterMembershipPickerOpen.value = !characterMembershipPickerOpen.value
-  if (characterMembershipPickerOpen.value) {
-    characterCategoryPickerOpen.value = false
-    characterItemPickerOpen.value = false
-  }
-}
-
-function selectCharacterDraftCategory(categoryId: string): void {
-  if (characterDraft.categoryIds.includes(categoryId)) return
-  characterDraft.categoryIds.push(categoryId)
-  characterDraft.categoryQuery = ''
-}
-
-function removeCharacterDraftCategory(categoryId: string): void {
-  const idx = characterDraft.categoryIds.indexOf(categoryId)
-  if (idx >= 0) characterDraft.categoryIds.splice(idx, 1)
-}
-
-function selectCharacterDraftItem(itemId: string): void {
-  if (characterDraft.itemIds.includes(itemId)) return
-  characterDraft.itemIds.push(itemId)
-  characterDraft.itemQuery = ''
-}
-
-function removeCharacterDraftItem(itemId: string): void {
-  const idx = characterDraft.itemIds.indexOf(itemId)
-  if (idx >= 0) characterDraft.itemIds.splice(idx, 1)
-}
-
-function selectCharacterDraftMembership(factionId: string): void {
-  if (characterDraft.membershipRows.some((row) => row.factionId === factionId)) return
-  characterDraft.membershipRows.push({ factionId, description: '' })
-  characterDraft.membershipQuery = ''
-}
-
-function toggleCharacterDraftCategory(categoryId: string): void {
-  const id = String(categoryId ?? '').trim()
-  if (!id) return
-  const i = characterDraft.categoryIds.indexOf(id)
-  if (i >= 0) characterDraft.categoryIds.splice(i, 1)
-  else characterDraft.categoryIds.push(id)
 }
 
 function toggleFactionCreateCategory(categoryId: string): void {
@@ -6929,18 +6152,6 @@ function toggleWorldSettingAiDraftCategory(categoryId: string): void {
   const i = worldSettingAiDraftCategoryIds.value.indexOf(id)
   if (i >= 0) worldSettingAiDraftCategoryIds.value.splice(i, 1)
   else worldSettingAiDraftCategoryIds.value.push(id)
-}
-
-function removeCharacterDraftMembershipRow(index: number): void {
-  characterDraft.membershipRows.splice(index, 1)
-  if (characterMembershipFactionDropdownOpenId.value === String(index)) {
-    characterMembershipFactionDropdownOpenId.value = ''
-  } else if (characterMembershipFactionDropdownOpenId.value) {
-    const openIndex = Number(characterMembershipFactionDropdownOpenId.value)
-    if (!Number.isNaN(openIndex) && openIndex > index) {
-      characterMembershipFactionDropdownOpenId.value = String(openIndex - 1)
-    }
-  }
 }
 
 function uid(): string {
@@ -7481,225 +6692,63 @@ const selectedGraphCharacter = computed(() => {
   return characters.value.find((c) => c.id === graphFocusCharacterId.value) ?? null
 })
 
-// ── 角色：全部更改弹窗（复用写作区“显示角色所有更改”样式） ────────────────
+function reloadCharacterEditorSources(): void {
+  characters.value = getCharactersByNovelId(novelId.value)
+  characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(novelId.value)
+  factions.value = getFactionsByNovelId(novelId.value)
+  refreshItems()
+}
+
+const characterEditor = useCharacterEditor({
+  novelId,
+  chapterId: computed(() => undefined),
+  sourceTextRange: computed(() => null),
+  categories: computed(() => categories.value),
+  characters: computed(() => characters.value),
+  items: computed(() => items.value),
+  editingCharacter: selectedGraphCharacter,
+  membershipSource: characterFactionMemberships,
+  factionOptions: factions,
+  reloadModalSources: reloadCharacterEditorSources,
+  onSaved: () => {},
+})
+
+let pendingCharacterEditDiscard: null | (() => void) = null
+
+function startCharacterEdit(): void {
+  if (!selectedGraphCharacter.value) return
+  characterEditor.openCharacterEditModal()
+}
+
+function requestCloseCharacterEdit(): void {
+  if (characterEditor.closeCharacterEditModal()) return
+  pendingCharacterEditDiscard = () => characterEditor.closeCharacterEditModal(true)
+  characterEditCancelConfirmOpen.value = true
+}
+
+function forceCancelCharacterEdit(): void {
+  const action = pendingCharacterEditDiscard
+  pendingCharacterEditDiscard = null
+  characterEditCancelConfirmOpen.value = false
+  if (action) action()
+  else characterEditor.closeCharacterEditModal(true)
+}
+
+function onCharacterEditCancelDialogCancel(): void {
+  pendingCharacterEditDiscard = null
+  characterEditCancelConfirmOpen.value = false
+}
+
+// ── 角色：全部更改弹窗（复用 CharacterChangeTimeline 组件） ────────────────
 const characterAllChangesModalOpen = ref(false)
-const characterAllChangesFieldFilter = ref('__all__')
-const characterAllChangesFieldDropdownOpen = ref(false)
-
-type WorkspaceCharacterAllChangesRow = {
-  updatedAt: string
-  when: string
-  chapterId: string
-  chapterLabel: string
-  anchorStart: number | null
-  anchorEnd: number | null
-  fields: string[]
-  details: Array<{ field: string; location: string; before: string; after: string }>
-}
-
-const chapterLabelByIdForCharacterAllChanges = computed(() => {
-  const map = new Map<string, string>()
-  for (const ch of getChaptersByNovelId(novelId.value)) {
-    map.set(ch.id, `第 ${ch.chapterNo} 章${(ch.title ?? '').trim() ? ` · ${ch.title}` : ''}`)
-  }
-  return map
-})
-
-function workspaceCharacterFieldLabel(field: string): string {
-  const key = String(field ?? '').trim()
-  if (key === 'age') return '年龄'
-  if (key === 'gender') return '性别'
-  if (key === 'name') return '姓名'
-  if (key === 'notes') return '备注'
-  if (key === 'aliases') return '别名'
-  if (key === 'memberships') return '所属势力'
-  if (key === 'items') return '绑定物品'
-  if (key === 'categoryIds') return '分类'
-  if (key === 'attributes') return '扩展条目'
-  return key || '未知字段'
-}
-
-function extractWorkspaceAttributeKeys(raw: string): string[] {
-  const text = String(raw ?? '').trim()
-  if (!text) return []
-  return text
-    .split(/[；;]/)
-    .map((part) => {
-      const i = part.indexOf(':')
-      if (i < 0) return ''
-      return part.slice(0, i).trim()
-    })
-    .filter(Boolean)
-}
-
-function normalizeWorkspaceAnchorSpan(ev: CharacterChangeEvent): { start: number; end: number } | null {
-  const s = typeof ev.anchorStart === 'number' ? Math.max(0, Math.floor(ev.anchorStart)) : NaN
-  const e = typeof ev.anchorEnd === 'number' ? Math.max(0, Math.floor(ev.anchorEnd)) : NaN
-  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return null
-  return { start: s, end: e }
-}
-
-function groupWorkspaceAllChangesByAnchor(history: CharacterChangeEvent[]): WorkspaceCharacterAllChangesRow[] {
-  const groups = new Map<string, CharacterChangeEvent[]>()
-  const order: string[] = []
-
-  history.forEach((ev, idx) => {
-    const chapterId = String(ev.chapterId ?? '').trim()
-    const span = normalizeWorkspaceAnchorSpan(ev)
-    const key = chapterId && span ? `ch:${chapterId}|a:${span.start}-${span.end}` : `free:${idx}:${ev.updatedAt ?? ''}`
-    if (!groups.has(key)) {
-      groups.set(key, [])
-      order.push(key)
-    }
-    groups.get(key)!.push(ev)
-  })
-
-  const out: WorkspaceCharacterAllChangesRow[] = []
-  for (const key of order) {
-    const list = (groups.get(key) ?? []).slice()
-    list.sort((a, b) => String(a.updatedAt ?? '').localeCompare(String(b.updatedAt ?? '')))
-    const first = list[0]
-    const last = list[list.length - 1]
-    if (!first || !last) continue
-
-    const chapterId = String(last.chapterId ?? first.chapterId ?? '').trim()
-    const span = normalizeWorkspaceAnchorSpan(last) ?? normalizeWorkspaceAnchorSpan(first)
-    const fieldSet = new Set<string>()
-    const detailMap = new Map<string, { field: string; location: string; before: string; after: string }>()
-
-    for (const ev of list) {
-      for (const f of ev.fields ?? []) {
-        const x = String(f ?? '').trim()
-        if (x) fieldSet.add(x)
-      }
-      for (const d of ev.details ?? []) {
-        const field = String(d.field ?? '').trim()
-        const location = String(d.location ?? '').trim()
-        if (!field && !location) continue
-        const k = `${field}@@${location}`
-        const hit = detailMap.get(k)
-        if (!hit) detailMap.set(k, { field, location, before: String(d.before ?? ''), after: String(d.after ?? '') })
-        else hit.after = String(d.after ?? '')
-      }
-    }
-
-    const updatedAt = String(last.updatedAt ?? '')
-    const when = updatedAt ? new Date(updatedAt).toLocaleString() : '未知时间'
-    out.push({
-      updatedAt,
-      when,
-      chapterId,
-      chapterLabel: chapterLabelByIdForCharacterAllChanges.value.get(chapterId) ?? '',
-      anchorStart: span?.start ?? null,
-      anchorEnd: span?.end ?? null,
-      fields: Array.from(fieldSet),
-      details: Array.from(detailMap.values()),
-    })
-  }
-
-  return out
-}
-
-const workspaceCharacterAllChangeRows = computed(() => {
-  const c = selectedGraphCharacter.value
-  if (!c) return [] as WorkspaceCharacterAllChangesRow[]
-  return groupWorkspaceAllChangesByAnchor(getCharacterChangeHistory(c.id))
-    .filter((row) => (row.fields?.length ?? 0) > 0 || (row.details?.length ?? 0) > 0)
-    .slice()
-    .reverse()
-})
-
-const characterAllChangeFieldOptions = computed(() => {
-  const fieldSet = new Set<string>()
-  const attrKeySet = new Set<string>()
-  for (const row of workspaceCharacterAllChangeRows.value) {
-    for (const f of row.fields) fieldSet.add(f)
-    for (const d of row.details) {
-      if (d.field !== 'attributes') continue
-      for (const k of extractWorkspaceAttributeKeys(d.before)) attrKeySet.add(k)
-      for (const k of extractWorkspaceAttributeKeys(d.after)) attrKeySet.add(k)
-    }
-  }
-  for (const a of selectedGraphCharacter.value?.attributes ?? []) {
-    const k = String(a.key ?? '').trim()
-    if (k) attrKeySet.add(k)
-  }
-  const out: Array<{ value: string; label: string }> = Array.from(fieldSet)
-    .filter((f) => f !== 'attributes')
-    .sort((a, b) => workspaceCharacterFieldLabel(a).localeCompare(workspaceCharacterFieldLabel(b), 'zh-Hans'))
-    .map((f) => ({ value: `field:${f}`, label: workspaceCharacterFieldLabel(f) }))
-  const attrItems = Array.from(attrKeySet)
-    .sort((a, b) => a.localeCompare(b, 'zh-Hans'))
-    .map((k) => ({ value: `attr:${k}`, label: k }))
-  return [...out, ...attrItems]
-})
-
-const characterAllChangesFieldDropdownLabel = computed(() => {
-  const sel = String(characterAllChangesFieldFilter.value ?? '__all__').trim()
-  if (!sel || sel === '__all__') return '全部字段'
-  const hit = characterAllChangeFieldOptions.value.find((x) => x.value === sel)
-  return hit?.label ?? '全部字段'
-})
-
-const filteredCharacterAllChangeRows = computed(() => {
-  const sel = String(characterAllChangesFieldFilter.value ?? '__all__').trim()
-  if (!sel || sel === '__all__') return workspaceCharacterAllChangeRows.value
-  if (sel.startsWith('field:')) {
-    const field = sel.slice('field:'.length)
-    return workspaceCharacterAllChangeRows.value
-      .map((row) => ({ ...row, details: row.details.filter((d) => d.field === field) }))
-      .filter((row) => row.fields.includes(field) || row.details.length > 0)
-  }
-  if (sel.startsWith('attr:')) {
-    const key = sel.slice('attr:'.length).trim()
-    if (!key) return workspaceCharacterAllChangeRows.value
-    return workspaceCharacterAllChangeRows.value
-      .map((row) => ({
-        ...row,
-        details: row.details.filter((d) => d.field === 'attributes' && `${d.before} ${d.after}`.includes(`${key}:`)),
-      }))
-      .filter((row) => row.details.length > 0)
-  }
-  return workspaceCharacterAllChangeRows.value
-})
-
-function selectWorkspaceCharacterAllChangesField(v: string): void {
-  characterAllChangesFieldFilter.value = v
-  characterAllChangesFieldDropdownOpen.value = false
-}
-
-function toggleWorkspaceCharacterAllChangesFieldDropdown(): void {
-  characterAllChangesFieldDropdownOpen.value = !characterAllChangesFieldDropdownOpen.value
-  if (characterAllChangesFieldDropdownOpen.value) resolveDropdownDirection('workspace-character-all-changes-field')
-}
-
-function onDocPointerDownForWorkspaceAllChangesField(e: MouseEvent): void {
-  if (!characterAllChangesFieldDropdownOpen.value) return
-  const t = e.target
-  if (!(t instanceof Node)) return
-  const btn = document.querySelector<HTMLElement>('[data-dd-key="workspace-character-all-changes-field"]')
-  const panel = document.querySelector<HTMLElement>('[data-dd-panel-key="workspace-character-all-changes-field"]')
-  if (btn?.contains(t)) return
-  if (panel?.contains(t)) return
-  characterAllChangesFieldDropdownOpen.value = false
-}
-
-watch(characterAllChangesFieldDropdownOpen, (open) => {
-  if (typeof document === 'undefined') return
-  document.removeEventListener('pointerdown', onDocPointerDownForWorkspaceAllChangesField, true)
-  if (open) document.addEventListener('pointerdown', onDocPointerDownForWorkspaceAllChangesField, true)
-})
 
 function openWorkspaceCharacterAllChangesModal(): void {
   if (!selectedGraphCharacter.value) return
-  characterAllChangesFieldFilter.value = '__all__'
-  characterAllChangesFieldDropdownOpen.value = false
   characterAllChangesModalOpen.value = true
 }
 
 function closeWorkspaceCharacterAllChangesModal(): void {
   characterAllChangesModalOpen.value = false
-  characterAllChangesFieldDropdownOpen.value = false
 }
 
 function jumpToWorkspaceCharacterChange(row: { chapterId: string; anchorStart: number | null; anchorEnd: number | null }): void {
@@ -8942,6 +7991,77 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.ws-tab-panel {
+  animation: ws-tab-panel-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes ws-tab-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-tab-panel {
+    animation: none;
+  }
+}
+
+.workspace-item-grid > .workspace-item-card,
+.list > .list-item,
+.fsw-plant-list > .fsw-plant-card {
+  animation: ws-card-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: 0.18s;
+}
+
+.workspace-item-grid > .workspace-item-card:nth-child(1),
+.list > .list-item:nth-child(1),
+.fsw-plant-list > .fsw-plant-card:nth-child(1) { animation-delay: 0.04s; }
+
+.workspace-item-grid > .workspace-item-card:nth-child(2),
+.list > .list-item:nth-child(2),
+.fsw-plant-list > .fsw-plant-card:nth-child(2) { animation-delay: 0.08s; }
+
+.workspace-item-grid > .workspace-item-card:nth-child(3),
+.list > .list-item:nth-child(3),
+.fsw-plant-list > .fsw-plant-card:nth-child(3) { animation-delay: 0.11s; }
+
+.workspace-item-grid > .workspace-item-card:nth-child(4),
+.list > .list-item:nth-child(4),
+.fsw-plant-list > .fsw-plant-card:nth-child(4) { animation-delay: 0.135s; }
+
+.workspace-item-grid > .workspace-item-card:nth-child(5),
+.list > .list-item:nth-child(5),
+.fsw-plant-list > .fsw-plant-card:nth-child(5) { animation-delay: 0.155s; }
+
+.workspace-item-grid > .workspace-item-card:nth-child(6),
+.list > .list-item:nth-child(6),
+.fsw-plant-list > .fsw-plant-card:nth-child(6) { animation-delay: 0.17s; }
+
+@keyframes ws-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-item-grid > .workspace-item-card,
+  .list > .list-item,
+  .fsw-plant-list > .fsw-plant-card {
+    animation: none;
+  }
+}
+
 /* === 总览落地页 === */
 .ws-overview {
   display: flex;

@@ -11,9 +11,11 @@ use sea_orm_migration::MigratorTrait;
 
 mod ai_config;
 mod card_key_admin;
+mod dashboard;
 mod embedding_config;
 mod labels;
 mod prompts;
+mod shell;
 mod user_ops;
 
 use std::{path::PathBuf, sync::Arc};
@@ -230,6 +232,10 @@ pub async fn build_router(
     let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("admin-templates");
     let home_template = std::fs::read_to_string(template_dir.join("home.html"))
         .unwrap_or_else(|_| include_str!("../../admin-templates/home.html").to_string());
+    let shell_template = std::fs::read_to_string(template_dir.join("shell.html"))
+        .unwrap_or_else(|_| include_str!("../../admin-templates/shell.html").to_string());
+    let shell_nav_template = std::fs::read_to_string(template_dir.join("shell_nav.html"))
+        .unwrap_or_else(|_| include_str!("../../admin-templates/shell_nav.html").to_string());
 
     let sqlx_pool = sqlx::mysql::MySqlPoolOptions::new()
         .max_connections(5)
@@ -269,6 +275,8 @@ pub async fn build_router(
         .icon("fa-solid fa-pen-nib")
         .prefix("/admin")
         .template_dir(&template_dir)
+        .template("shell.html", &shell_template)
+        .template("shell_nav.html", &shell_nav_template)
         .template("home.html", &home_template)
         .seaorm_auth(auth)
         .register(
@@ -277,6 +285,10 @@ pub async fn build_router(
         )
         .into_router()
         .await
+        .merge(dashboard::routes(dashboard::DashboardState {
+            db: sqlx_pool.clone(),
+            auth: auth_for_admin.clone(),
+        }))
         .merge(user_ops::routes(user_ops::UserOpsState {
             db: sqlx_pool.clone(),
             wallet: wallet_service,
@@ -302,8 +314,8 @@ pub async fn build_router(
             auth: auth_for_admin,
         }));
 
-    tracing::info!("Admin user ops: http://127.0.0.1:8080/admin/user-ops");
-    tracing::info!("Admin AI config: http://127.0.0.1:8080/admin/ai-config");
+    tracing::info!("Admin dashboard: http://127.0.0.1:8080/admin/dashboard");
+    tracing::info!("Admin user ops: http://127.0.0.1:8080/admin/user-ops");    tracing::info!("Admin AI config: http://127.0.0.1:8080/admin/ai-config");
     tracing::info!("Admin embedding config: http://127.0.0.1:8080/admin/embedding-config");
     tracing::info!("Admin prompts: http://127.0.0.1:8080/admin/prompts");
     tracing::info!("Admin card keys: http://127.0.0.1:8080/admin/card-keys");

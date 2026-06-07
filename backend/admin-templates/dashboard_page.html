@@ -1,0 +1,93 @@
+{% extends "shell.html" %}
+{% block title %}数据概览 — {{ admin_title }}{% endblock %}
+{% block content %}
+<div class="max-w-6xl space-y-6">
+
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1"><i class="fa-solid fa-users mr-1 text-zinc-400"></i>总用户数</p>
+      <p class="text-2xl font-bold text-zinc-900 tabular-nums">{{ users_total }}</p>
+      <p class="text-xs text-zinc-400 mt-2">今日 +{{ users_today }} · 本月 +{{ users_month }}</p>
+    </div>
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1"><i class="fa-solid fa-fire mr-1 text-orange-400"></i>今日 AI 消费</p>
+      <p class="text-2xl font-bold text-zinc-900 tabular-nums">{{ spend_today }}</p>
+      <p class="text-xs text-zinc-400 mt-2">本月 {{ spend_month }} · 累计 {{ spend_total }}</p>
+    </div>
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1"><i class="fa-solid fa-coins mr-1 text-emerald-400"></i>累计充值</p>
+      <p class="text-2xl font-bold text-zinc-900 tabular-nums">{{ recharge_total }}</p>
+      <p class="text-xs text-zinc-400 mt-2">今日 +{{ recharge_today }}</p>
+    </div>
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1"><i class="fa-solid fa-book mr-1 text-sky-400"></i>作品总数</p>
+      <p class="text-2xl font-bold text-zinc-900 tabular-nums">{{ novels_total }}</p>
+      <p class="text-xs text-zinc-400 mt-2">今日 +{{ novels_today }}</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1">停用用户</p>
+      <p class="text-xl font-semibold text-zinc-700 tabular-nums">{{ users_inactive }}</p>
+    </div>
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1">未使用卡密</p>
+      <p class="text-xl font-semibold text-zinc-700 tabular-nums">{{ cards_unused }}</p>
+    </div>
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1">已使用卡密</p>
+      <p class="text-xl font-semibold text-zinc-700 tabular-nums">{{ cards_used }}</p>
+    </div>
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm p-5">
+      <p class="text-xs text-zinc-500 mb-1">本月新增用户</p>
+      <p class="text-xl font-semibold text-zinc-700 tabular-nums">{{ users_month }}</p>
+    </div>
+  </div>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm">
+      <div class="px-5 py-3 border-b border-zinc-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold">最近注册用户</h2>
+        <a href="/admin/user-ops" class="text-xs text-sky-600 hover:text-sky-800">全部</a>
+      </div>
+      <table class="w-full text-sm">
+        <tbody>
+          {% for u in recent_users %}
+          <tr class="border-b border-zinc-50 hover:bg-zinc-50">
+            <td class="px-5 py-2.5">
+              <a href="/admin/users/{{ u.id }}" class="font-medium text-sky-600 hover:text-sky-800">{{ u.username }}</a>
+            </td>
+            <td class="px-5 py-2.5 text-right text-zinc-400 text-xs">{{ u.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td class="px-5 py-8 text-center text-zinc-400">暂无用户</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="bg-white rounded-lg border border-zinc-200 shadow-sm">
+      <div class="px-5 py-3 border-b border-zinc-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold">最近 AI 消费</h2>
+        <a href="/admin/user-ops" class="text-xs text-sky-600 hover:text-sky-800">全部流水</a>
+      </div>
+      <table class="w-full text-sm">
+        <tbody>
+          {% for r in recent_ledger %}
+          <tr class="border-b border-zinc-50 hover:bg-zinc-50">
+            <td class="px-5 py-2.5">
+              <a href="/admin/users/{{ r.user_id }}" class="font-medium text-zinc-700 hover:text-sky-700">{{ r.username }}</a>
+              <span class="text-xs text-zinc-400 ml-1">{{ r.reason }}</span>
+            </td>
+            <td class="px-5 py-2.5 text-right tabular-nums text-zinc-600">{{ r.amount_fmt }}</td>
+            <td class="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">{{ r.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td class="px-5 py-8 text-center text-zinc-400">暂无消费</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

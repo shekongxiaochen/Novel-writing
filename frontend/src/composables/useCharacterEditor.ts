@@ -10,8 +10,8 @@ import {
   type CharacterStateSnapshot,
   updateChapter,
   updateCharacter,
-} from '../../../lib/storage'
-import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../../../lib/characterLabels'
+} from '../lib/storage'
+import { characterMatchLabels, normalizeCharacterAliases, replaceCharacterLabelsInText } from '../lib/characterLabels'
 import type {
   Category,
   Character,
@@ -19,11 +19,24 @@ import type {
   CharacterFactionMembership,
   Faction,
   Item,
-} from '../../../types'
+} from '../types'
 
 type MembershipDraftRow = { factionId: string; description: string }
 
-type ItemPickerRow = Item & { bound: boolean }
+export type ItemPickerRow = Item & { bound: boolean }
+
+export type CharacterEditorDraft = {
+  id: string
+  name: string
+  age: string
+  gender: string
+  aliasRows: Array<{ id: string; value: string }>
+  categoryIds: string[]
+  membershipRows: Array<{ factionId: string; description: string }>
+  itemIds: string[]
+  attributes: CharacterAttribute[]
+  notes: string
+}
 
 function normalizeItemIds(ids: string[]): string[] {
   return Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-Hans'))
@@ -106,7 +119,7 @@ function buildCharacterEditSnapshot(input: {
   })
 }
 
-export function useCharacterGraphCharacterEditor(params: UseCharacterGraphCharacterEditorParams) {
+export function useCharacterEditor(params: UseCharacterGraphCharacterEditorParams) {
   const characterEditModalOpen = ref(false)
   const characterEditMembershipFactionDropdownOpenId = ref('')
   const renameConfirmOpen = ref(false)
@@ -494,3 +507,5 @@ export function useCharacterGraphCharacterEditor(params: UseCharacterGraphCharac
     toggleItemBinding,
   }
 }
+
+export type CharacterEditor = ReturnType<typeof useCharacterEditor>

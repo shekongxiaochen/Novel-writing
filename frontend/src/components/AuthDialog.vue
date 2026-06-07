@@ -1,5 +1,6 @@
 <template>
-  <div v-if="open" class="confirm-overlay auth-dialog-overlay" @pointerdown.self="emitClose">
+  <Transition name="confirm">
+    <div v-if="open" class="confirm-overlay auth-dialog-overlay" @pointerdown.self="emitClose">
     <div class="confirm-dialog auth-dialog" role="dialog" aria-modal="true" @pointerdown.stop>
       <div class="confirm-dialog__accent auth-dialog__accent" aria-hidden="true" />
       <div class="confirm-dialog__body auth-dialog__body">
@@ -65,7 +66,8 @@
         </form>
       </div>
     </div>
-  </div>
+    </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">
