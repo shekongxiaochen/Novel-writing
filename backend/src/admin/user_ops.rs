@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     middleware::{from_fn_with_state, Next},
     response::{Html, IntoResponse, Redirect, Response},
@@ -10,7 +10,7 @@ use axum::{
 };
 use axum_admin::auth::AdminAuth;
 use chrono::{DateTime, Utc};
-use minijinja::{context, Environment};
+use minijinja::context;
 use serde::Deserialize;
 use sqlx::{MySql, Pool};
 use tower_cookies::CookieManagerLayer;
@@ -22,7 +22,6 @@ use crate::services::{
 };
 
 const SESSION_COOKIE: &str = "axum_admin_session";
-const ADMIN_TITLE: &str = "Novel 管理后台";
 
 #[derive(Clone)]
 pub struct UserOpsState {
@@ -78,6 +77,8 @@ pub fn routes(state: UserOpsState) -> Router {
     let arc = Arc::new(state);
     Router::new()
         .route("/admin/user-ops", get(show_page).post(recharge))
+        .route("/admin/users/:id", get(show_user_detail))
+        .route("/admin/users/:id/toggle-active", post(toggle_active))
         .route_layer(from_fn_with_state(arc.clone(), require_admin))
         .layer(CookieManagerLayer::new())
         .with_state(arc)
@@ -225,12 +226,156 @@ fn reason_label(reason: &str) -> &'static str {
     }
 }
 
-fn render_page(view: UserOpsView) -> String {
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/user_ops_page.html"))
-        .expect("user_ops template");
+#[derive(Debug, sqlx::FromRow)]
+struct UserDetailRow {
+    id: String,
+    username: String,
+    display_name: String,
+    email: Option<String>,
+    registration_ip: String,
+    device_id_hash: Option<String>,
+    is_active: bool,
+    created_at: DateTime<Utc>,
+    balance: i64,
+}
 
+#[derive(Debug, sqlx::FromRow)]
+struct NovelRow {
+    title: String,
+    genre: String,
+    created_at: DateTime<Utc>,
+}
+
+async fn show_user_detail(
+    State(state): State<Arc<UserOpsState>>,
+    Path(uid): Path<String>,
+) -> Result<Html<String>, StatusCode> {
+    let fail = |e: sqlx::Error| {
+        tracing::error!("user detail load: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+
+    let user = sqlx::query_as::<_, UserDetailRow>(
+        r#"
+        SELECT u.id, u.username, u.display_name, u.email, u.registration_ip,
+               u.device_id_hash, u.is_active, u.created_at,
+               COALESCE(w.balance_tokens, 0) AS balance
+        FROM users u
+        LEFT JOIN ai_wallets w ON w.user_id = u.id
+        WHERE u.id = ?
+        "#,
+    )
+    .bind(&uid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(fail)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let novels = sqlx::query_as::<_, NovelRow>(
+        "SELECT title, genre, created_at FROM novels WHERE user_id = ? ORDER BY created_at DESC LIMIT 100",
+    )
+    .bind(&uid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(fail)?;
+
+    let ledger = sqlx::query_as::<_, LedgerRow>(
+        r#"
+        SELECT l.id, l.user_id, u.username, l.delta, l.reason, l.ref_id, l.created_at
+        FROM ai_wallet_ledger l
+        LEFT JOIN users u ON u.id = l.user_id
+        WHERE l.user_id = ?
+        ORDER BY l.created_at DESC
+        LIMIT 50
+        "#,
+    )
+    .bind(&uid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(fail)?;
+
+    Ok(render_user_detail(user, novels, ledger))
+}
+
+async fn toggle_active(
+    State(state): State<Arc<UserOpsState>>,
+    Path(uid): Path<String>,
+) -> Result<Redirect, StatusCode> {
+    sqlx::query("UPDATE users SET is_active = NOT is_active WHERE id = ?")
+        .bind(&uid)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("toggle active: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Redirect::to(&format!("/admin/users/{}", uid)))
+}
+
+fn render_user_detail(
+    user: UserDetailRow,
+    novels: Vec<NovelRow>,
+    ledger: Vec<LedgerRow>,
+) -> Html<String> {
+    let novels_ctx: Vec<_> = novels
+        .iter()
+        .map(|n| {
+            context! {
+                title => n.title,
+                genre => n.genre,
+                created_at => n.created_at.format("%Y-%m-%d %H:%M").to_string(),
+            }
+        })
+        .collect();
+
+    let ledger_ctx: Vec<_> = ledger
+        .iter()
+        .map(|row| {
+            let note = row
+                .ref_id
+                .as_ref()
+                .and_then(|r| r.split_once('|'))
+                .map(|(_, n)| n.to_string())
+                .unwrap_or_default();
+            context! {
+                delta_fmt => {
+                    let y = units_to_yuan(row.delta);
+                    if y >= 0.0 { format!("+{:.4} 元", y) } else { format!("{:.4} 元", y) }
+                },
+                reason => reason_label(&row.reason),
+                note => note,
+                created_at => row.created_at.format("%Y-%m-%d %H:%M").to_string(),
+            }
+        })
+        .collect();
+
+    let username = user.username.clone();
+    Html(
+        super::shell::render_shell_page_sub(
+            "user_detail_page.html",
+            include_str!("../../admin-templates/user_detail_page.html"),
+            "user-ops",
+            "用户与余额",
+            Some(&username),
+            context!(
+                id => user.id,
+                username => user.username,
+                display_name => user.display_name,
+                email => user.email.unwrap_or_default(),
+                registration_ip => user.registration_ip,
+                device_bound => user.device_id_hash.map(|h| !h.is_empty()).unwrap_or(false),
+                is_active => user.is_active,
+                created_at => user.created_at.format("%Y-%m-%d %H:%M").to_string(),
+                balance_fmt => format!("{:.4} 元", units_to_yuan(user.balance)),
+                novels => novels_ctx,
+                ledger => ledger_ctx,
+            ),
+        )
+        .0,
+    )
+}
+
+fn render_page(view: UserOpsView) -> String {
     let users: Vec<_> = view
         .users
         .iter()
@@ -273,13 +418,18 @@ fn render_page(view: UserOpsView) -> String {
         })
         .collect();
 
-    tpl.render(context!(
-        admin_title => ADMIN_TITLE,
-        users => users,
-        ledger => ledger,
-        recharge_user_id => view.recharge_user_id,
-        ok => view.ok,
-        error => view.error,
-    ))
-    .expect("render user_ops")
+    super::shell::render_shell_page(
+        "user_ops_page.html",
+        include_str!("../../admin-templates/user_ops_page.html"),
+        "user-ops",
+        "用户与余额",
+        context!(
+            users => users,
+            ledger => ledger,
+            recharge_user_id => view.recharge_user_id,
+            ok => view.ok,
+            error => view.error,
+        ),
+    )
+    .0
 }

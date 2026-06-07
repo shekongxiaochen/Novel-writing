@@ -10,7 +10,7 @@ use axum::{
 };
 use axum_admin::auth::AdminAuth;
 use chrono::{DateTime, Utc};
-use minijinja::{context, Environment};
+use minijinja::context;
 use serde::Deserialize;
 use sqlx::{MySql, Pool};
 use tower_cookies::CookieManagerLayer;
@@ -19,7 +19,6 @@ use tower_cookies::Cookies;
 use crate::services::card_key_service::CardKeyService;
 
 const SESSION_COOKIE: &str = "axum_admin_session";
-const ADMIN_TITLE: &str = "Novel 管理后台";
 const PAGE_SIZE: i64 = 50;
 
 #[derive(Clone)]
@@ -336,11 +335,6 @@ fn render_page(
     new_codes_count: i32,
     new_codes_amount: i32,
 ) -> String {
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/card_key_page.html"))
-        .expect("card_key template");
-
     let card_rows: Vec<_> = cards
         .iter()
         .map(|c| {
@@ -358,25 +352,30 @@ fn render_page(
         })
         .collect();
 
-    tpl.render(context!(
-        admin_title => ADMIN_TITLE,
-        stats => context! {
-            total => stats.total,
-            unused => stats.unused,
-            used => stats.used,
-            unused_value => stats.unused_value,
-        },
-        cards => card_rows,
-        total_count => total_count,
-        total_pages => total_pages,
-        page => page,
-        filter_status => filter_status,
-        filter_amount => filter_amount,
-        ok_msg => ok.clone().unwrap_or_default(),
-        error => error.clone().unwrap_or_default(),
-        new_codes => new_codes.unwrap_or(""),
-        new_codes_count => new_codes_count,
-        new_codes_amount => new_codes_amount,
-    ))
-    .expect("render card_key")
+    super::shell::render_shell_page(
+        "card_key_page.html",
+        include_str!("../../admin-templates/card_key_page.html"),
+        "card-keys",
+        "卡密管理",
+        context!(
+            stats => context! {
+                total => stats.total,
+                unused => stats.unused,
+                used => stats.used,
+                unused_value => stats.unused_value,
+            },
+            cards => card_rows,
+            total_count => total_count,
+            total_pages => total_pages,
+            page => page,
+            filter_status => filter_status,
+            filter_amount => filter_amount,
+            ok_msg => ok.clone().unwrap_or_default(),
+            error => error.clone().unwrap_or_default(),
+            new_codes => new_codes.unwrap_or(""),
+            new_codes_count => new_codes_count,
+            new_codes_amount => new_codes_amount,
+        ),
+    )
+    .0
 }

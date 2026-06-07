@@ -440,18 +440,45 @@ function onComposerKeydown(e: KeyboardEvent): void {
 <style scoped>
 .wai__toggle {
   position: fixed;
-  right: 14px;
-  bottom: 22px;
+  right: 18px;
+  bottom: 24px;
   z-index: 40;
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 50%, transparent);
   background: var(--cta-gradient, var(--color-primary));
   color: var(--btn-on-primary, #fff);
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
   cursor: pointer;
-  box-shadow: var(--shadow-md);
+  box-shadow:
+    0 10px 26px color-mix(in srgb, var(--color-primary) 38%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 36%, transparent);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
+}
+.wai__toggle::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.wai__toggle:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--color-primary) 46%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent);
+}
+.wai__toggle:hover::after {
+  opacity: 1;
+  transform: scale(1.06);
+}
+.wai__toggle:active {
+  transform: translateY(0) scale(0.97);
 }
 .wai__panel {
   position: fixed;
@@ -462,9 +489,35 @@ function onComposerKeydown(e: KeyboardEvent): void {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--color-surface);
-  border-left: 1px solid var(--color-border-strong);
-  box-shadow: var(--shadow-lg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, rgba(255,255,255,0.7)), color-mix(in srgb, var(--color-surface-muted) 92%, transparent)),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-primary-soft) 26%, transparent), transparent 42%);
+  border-left: 1px solid color-mix(in srgb, var(--color-border-strong) 64%, transparent);
+  border-top-left-radius: 18px;
+  border-bottom-left-radius: 18px;
+  box-shadow:
+    -18px 0 48px color-mix(in srgb, #120f0b 16%, transparent),
+    inset 1px 0 0 color-mix(in srgb, #fff 40%, transparent);
+  overflow: hidden;
+  animation: wai-panel-in 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes wai-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wai__panel {
+    animation: none;
+  }
+  .wai__toggle {
+    transition: none;
+  }
 }
 .wai__resizer {
   position: absolute;
@@ -482,11 +535,27 @@ function onComposerKeydown(e: KeyboardEvent): void {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 13px 15px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 56%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  backdrop-filter: blur(6px);
 }
 .wai__title {
-  font-weight: 750;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--color-text) 84%, var(--color-primary) 16%);
+}
+.wai__title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 .wai__head-actions {
   display: flex;
@@ -501,7 +570,7 @@ function onComposerKeydown(e: KeyboardEvent): void {
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
   background: color-mix(in srgb, var(--color-primary-soft) 40%, var(--color-surface));
-  font-size: 0.74rem;
+  font-size: 0.6rem;
 }
 .wai__wallet-icon {
   color: var(--color-primary);
@@ -532,62 +601,108 @@ function onComposerKeydown(e: KeyboardEvent): void {
   to { transform: rotate(360deg); }
 }
 .wai__icon-btn {
-  border: 1px solid var(--color-border);
-  background: transparent;
-  border-radius: 8px;
-  padding: 3px 9px;
-  font-size: 0.78rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 60%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  border-radius: 9px;
+  padding: 4px 10px;
+  font-size: 0.64rem;
   cursor: pointer;
   color: var(--color-text-muted);
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
 .wai__icon-btn:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-soft) 30%, var(--color-surface));
 }
 .wai__focus {
-  padding: 8px 14px;
-  font-size: 0.8rem;
+  margin: 10px 14px 0;
+  padding: 7px 12px;
+  font-size: 0.64rem;
   color: var(--color-text-muted);
-  background: color-mix(in srgb, var(--color-primary-soft) 40%, transparent);
-  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-primary-soft) 38%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  border-radius: 10px;
+}
+.wai__focus strong {
+  color: color-mix(in srgb, var(--color-primary) 72%, var(--color-text) 28%);
+  font-weight: 750;
 }
 .wai__scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 14px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-border-strong) 60%, transparent) transparent;
+}
+.wai__scroll::-webkit-scrollbar {
+  width: 7px;
+}
+.wai__scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border-strong) 58%, transparent);
+}
+.wai__scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-primary) 30%, var(--color-border-strong));
 }
 .wai__empty {
-  margin: 0;
-  font-size: 0.84rem;
+  margin: auto 4px;
+  padding: 16px 14px;
+  font-size: 0.68rem;
   color: var(--color-text-muted);
-  line-height: 1.6;
+  line-height: 1.7;
+  text-align: center;
+  border: 1px dashed color-mix(in srgb, var(--color-border-strong) 56%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
 }
 .wai__msg {
   display: flex;
   flex-direction: column;
+  animation: wai-msg-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@keyframes wai-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wai__msg {
+    animation: none;
+  }
 }
 .wai__msg--user {
   align-items: flex-end;
 }
 .wai__msg-body {
   max-width: 92%;
-  padding: 8px 11px;
-  border-radius: 10px;
-  font-size: 0.86rem;
-  line-height: 1.6;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 0.68rem;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
 .wai__msg--user .wai__msg-body {
-  background: color-mix(in srgb, var(--color-primary-soft) 50%, var(--color-surface));
-  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-surface)), color-mix(in srgb, var(--color-primary-soft) 40%, var(--color-surface)));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  border-bottom-right-radius: 5px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 .wai__msg--assistant .wai__msg-body {
-  background: color-mix(in srgb, var(--color-surface-muted) 50%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 50%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--color-primary) 42%, transparent);
+  border-bottom-left-radius: 5px;
+  box-shadow: 0 2px 10px color-mix(in srgb, #120f0b 6%, transparent);
 }
 .wai__msg-body--md {
   white-space: normal;
@@ -603,7 +718,7 @@ function onComposerKeydown(e: KeyboardEvent): void {
 .wai__msg-body--md :deep(h3),
 .wai__msg-body--md :deep(h4) {
   margin: 10px 0 6px;
-  font-size: 0.9rem;
+  font-size: 0.72rem;
   font-weight: 700;
 }
 .wai__msg-body--md :deep(ul) {
@@ -620,7 +735,7 @@ function onComposerKeydown(e: KeyboardEvent): void {
   padding: 1px 5px;
   border-radius: 5px;
   background: color-mix(in srgb, var(--color-surface-muted) 70%, transparent);
-  font-size: 0.8rem;
+  font-size: 0.64rem;
 }
 .wai__pending {
   border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
@@ -630,7 +745,7 @@ function onComposerKeydown(e: KeyboardEvent): void {
 }
 .wai__pending-title {
   margin: 0 0 8px;
-  font-size: 0.78rem;
+  font-size: 0.62rem;
   font-weight: 700;
 }
 .wai__pending-list {
@@ -646,7 +761,7 @@ function onComposerKeydown(e: KeyboardEvent): void {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 0.8rem;
+  font-size: 0.64rem;
 }
 .wai__pending-label {
   min-width: 0;
@@ -660,59 +775,102 @@ function onComposerKeydown(e: KeyboardEvent): void {
   gap: 6px;
 }
 .wai__mini-btn {
-  border: 1px solid var(--color-border);
-  background: transparent;
-  border-radius: 7px;
-  padding: 3px 10px;
-  font-size: 0.76rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 60%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 86%, transparent);
+  border-radius: 8px;
+  padding: 4px 12px;
+  font-size: 0.62rem;
+  font-weight: 600;
   cursor: pointer;
   color: var(--color-text);
+  transition: transform 0.14s ease, border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+.wai__mini-btn:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 50%, var(--color-border-strong));
+  transform: translateY(-1px);
 }
 .wai__mini-btn--primary {
-  background: var(--color-primary);
+  background: var(--cta-gradient, var(--color-primary));
   color: var(--btn-on-primary, #fff);
   border-color: transparent;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+.wai__mini-btn--primary:hover {
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--color-primary) 38%, transparent);
 }
 .wai__error {
-  margin: 0;
-  padding: 6px 14px;
-  font-size: 0.8rem;
+  margin: 0 14px 4px;
+  padding: 8px 12px;
+  font-size: 0.64rem;
+  line-height: 1.5;
   color: var(--danger-text, #c0392b);
+  background: color-mix(in srgb, var(--danger-bg, #c0392b) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger-bg, #c0392b) 28%, transparent);
+  border-radius: 10px;
 }
 .wai__composer {
-  border-top: 1px solid var(--color-border);
-  padding: 10px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-strong) 56%, transparent);
+  padding: 12px 14px 14px;
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  backdrop-filter: blur(6px);
 }
 .wai__input {
   width: 100%;
   resize: none;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 0.86rem;
-  background: var(--color-surface);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 56%, transparent);
+  border-radius: 13px;
+  padding: 10px 12px;
+  font-size: 0.68rem;
+  line-height: 1.6;
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
   color: var(--color-text);
   box-sizing: border-box;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+.wai__input::placeholder {
+  color: color-mix(in srgb, var(--color-text-muted) 78%, transparent);
+}
+.wai__input:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border-strong));
+}
+.wai__input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
 }
 .wai__composer-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 8px;
+  margin-top: 9px;
 }
 .wai__send {
   border: 0;
-  border-radius: 8px;
-  padding: 6px 18px;
-  font-weight: 600;
+  border-radius: 10px;
+  padding: 7px 22px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  background: var(--color-primary);
+  background: var(--cta-gradient, var(--color-primary));
   color: var(--btn-on-primary, #fff);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--color-primary) 30%, transparent);
+  transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.wai__send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--color-primary) 40%, transparent);
+}
+.wai__send:active:not(:disabled) {
+  transform: translateY(0);
 }
 .wai__send:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .wai__send--stop {
   background: var(--danger-bg, #c0392b);
+  box-shadow: 0 3px 10px color-mix(in srgb, #c0392b 30%, transparent);
 }
 </style>

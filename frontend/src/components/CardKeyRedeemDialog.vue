@@ -1,5 +1,6 @@
 <template>
-  <div v-if="open" class="confirm-overlay card-redeem-overlay" @pointerdown.self="emitClose">
+  <Transition name="confirm">
+    <div v-if="open" class="confirm-overlay card-redeem-overlay" @pointerdown.self="emitClose">
     <div class="confirm-dialog card-redeem-dialog" role="dialog" aria-modal="true" aria-labelledby="card-redeem-title" @pointerdown.stop>
       <div class="confirm-dialog__accent card-redeem-dialog__accent" aria-hidden="true" />
       <div class="confirm-dialog__body card-redeem-dialog__body">
@@ -46,7 +47,8 @@
         </form>
       </div>
     </div>
-  </div>
+    </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">

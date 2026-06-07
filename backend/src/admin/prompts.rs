@@ -9,7 +9,7 @@ use axum::{
     Form, Router,
 };
 use axum_admin::auth::AdminAuth;
-use minijinja::{context, Environment};
+use minijinja::context;
 use serde::Deserialize;
 use tower_cookies::CookieManagerLayer;
 use tower_cookies::Cookies;
@@ -17,7 +17,6 @@ use tower_cookies::Cookies;
 use crate::services::{prompt_registry, SettingsService};
 
 const SESSION_COOKIE: &str = "axum_admin_session";
-const ADMIN_TITLE: &str = "Novel 管理后台";
 
 #[derive(Clone)]
 pub struct PromptsState {
@@ -83,18 +82,16 @@ async fn list_prompts(
     }
     let rows_json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
 
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/prompts_page.html"))
-        .expect("prompts template");
-    let html = tpl
-        .render(context!(
-            admin_title => ADMIN_TITLE,
+    Ok(super::shell::render_shell_page(
+        "prompts_page.html",
+        include_str!("../../admin-templates/prompts_page.html"),
+        "prompts",
+        "AI 提示词",
+        context!(
             page => "list",
             rows_json => rows_json,
-        ))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Html(html))
+        ),
+    ))
 }
 
 // ── 编辑页 ──
@@ -116,22 +113,21 @@ async fn show_edit_form(
     // 文本框展示当前生效内容：自定义优先，否则默认
     let current = stored.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| default.to_string());
 
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/prompts_page.html"))
-        .expect("prompts template");
-    let html = tpl
-        .render(context!(
-            admin_title => ADMIN_TITLE,
+    Ok(super::shell::render_shell_page_sub(
+        "prompts_page.html",
+        include_str!("../../admin-templates/prompts_page.html"),
+        "prompts",
+        "AI 提示词",
+        Some(label),
+        context!(
             page => "edit",
             prompt_type => ptype,
             label => label,
             current => current,
             default_text => default,
             customized => customized,
-        ))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Html(html))
+        ),
+    ))
 }
 
 // ── 保存 / 恢复默认 ──

@@ -538,6 +538,18 @@
     @select="openNovelFromShelf"
     @delete="handleDeleteNovelFromShelf"
   />
+
+  <ConfirmDialog
+    v-model="deleteNovelConfirmOpen"
+    danger
+    title="删除书籍"
+    :message="deleteNovelConfirmMessage"
+    confirm-label="删除"
+    cancel-label="取消"
+    overlay-class="novel-delete-confirm-overlay"
+    @confirm="confirmDeleteNovelFromShelf"
+    @cancel="pendingDeleteNovel = null"
+  />
 </template>
 
 <script setup lang="ts">
@@ -596,6 +608,17 @@ const authDialogMode = ref<'login' | 'register'>('login')
 const createNovelDialogOpen = ref(false)
 const novelShelfDialogOpen = ref(false)
 const novelRecords = ref(getNovels())
+const pendingDeleteNovel = ref<Novel | null>(null)
+const deleteNovelConfirmOpen = computed({
+  get: () => pendingDeleteNovel.value !== null,
+  set: (open: boolean) => {
+    if (!open) pendingDeleteNovel.value = null
+  },
+})
+const deleteNovelConfirmMessage = computed(() => {
+  const label = pendingDeleteNovel.value?.title || '未命名书籍'
+  return `确认删除《${label}》？相关章节、大纲、角色与伏笔数据都会一起删除。`
+})
 
 function handleThemePickerClick(event: MouseEvent): void {
   openThemePicker(event.currentTarget instanceof HTMLElement ? event.currentTarget : null)
@@ -653,9 +676,14 @@ function openNovelFromShelf(novelId: string): void {
 async function handleDeleteNovelFromShelf(novelId: string): Promise<void> {
   const novel = novelRecords.value.find((item) => item.id === novelId)
   if (!novel) return
-  const label = novel.title || '未命名书籍'
-  const confirmed = window.confirm(`确认删除《${label}》？相关章节、大纲、角色与伏笔数据都会一起删除。`)
-  if (!confirmed) return
+  pendingDeleteNovel.value = novel
+}
+
+async function confirmDeleteNovelFromShelf(): Promise<void> {
+  const novel = pendingDeleteNovel.value
+  pendingDeleteNovel.value = null
+  if (!novel) return
+  const novelId = novel.id
 
   const deleted = deleteNovel(novelId)
   if (!deleted) return
@@ -1845,6 +1873,21 @@ function onEscapeCloseChapterModal(e: KeyboardEvent): void {
 
 <style scoped>
 
+.cursor-shell--novel {
+  animation: novel-shell-enter 0.42s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes novel-shell-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .cursor-shell__right-panel-overlay {
   position: fixed;
   inset: 0;
@@ -2382,5 +2425,11 @@ body.is-resizing-summary-studio .cursor-shell__summary-studio-resizer::before {
   align-items: baseline;
   font-size: 12px;
   word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor-shell--novel {
+    animation: none;
+  }
 }
 </style>

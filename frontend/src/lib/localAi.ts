@@ -25,7 +25,7 @@ import { buildPendingToolActions } from '../features/chapter-hub/lib/aiPendingTo
 import { AI_WRITE_TOOLS, executeToolCall } from './aiTools'
 import type { WorkspaceSnapshotPayload } from './storage'
 import { getCharacterStateAtPosition, recordCharacterChangeFields } from './storage'
-import type { CharacterNarrativeState } from './storage'
+import type { CharacterNarrativeState, CharacterChangeDetail } from './storage'
 import {
   buildAskFollowUpPrompt,
   buildAskUserPrompt,
@@ -1434,14 +1434,17 @@ export async function runCharacterStateExtract(
   if (scoped.length === 0) return { updated, warnings: ['本章未匹配到出场角色，跳过。'] }
 
   // 每个出场角色附上"截至上一章"的已知状态，让 AI 做差分而非全量重述
+  const prevById = new Map<string, { location: string; condition: string; knownInfo: string[]; possessions: string[] }>()
   const roster = scoped.map((row) => {
     const prev = getCharacterStateAtPosition(s(row.id), s(current.id), 0, chapters)
     const st = prev?.event?.narrativeState
+    const prevState = st
+      ? { location: s(st.location), condition: s(st.condition), knownInfo: st.knownInfo ?? [], possessions: st.possessions ?? [] }
+      : { location: '', condition: '', knownInfo: [] as string[], possessions: [] as string[] }
+    prevById.set(s(row.id), prevState)
     return {
       name: s(row.name),
-      上一章状态: st
-        ? { location: s(st.location), condition: s(st.condition), knownInfo: st.knownInfo ?? [], possessions: st.possessions ?? [] }
-        : null,
+      上一章状态: st ? prevState : null,
     }
   })
 
@@ -1450,6 +1453,7 @@ export async function runCharacterStateExtract(
     `本章正文：\n${content.slice(0, 8000)}`,
     `本章出场角色及其截至上一章的已知状态 JSON：${stableStringify(roster)}`,
     '请只输出本章中状态发生变化的角色，格式遵循系统提示。',
+    '额外要求：在每个角色对象里再加一个字段 "evidence"（字符串）——从【本章正文】里原样摘录一句最能体现该角色这次状态变化的话，且这句话里必须出现该角色的姓名或称呼（10～60 字，必须是正文中逐字存在的原文，不要改写、不要加引号）。若实在找不到含其姓名的原句，则摘录最贴近变化发生处的原文片段。',
   ].join('\n\n')
 
   let parsed: JsonRecord
@@ -1462,6 +1466,16 @@ export async function runCharacterStateExtract(
   const states = Array.isArray(parsed.states) ? parsed.states : []
   const nameToId = new Map<string, string>()
   for (const row of scoped) nameToId.set(s(row.name), s(row.id))
+
+  // 角色 id -> 所有可匹配的名字/别名（长名优先，避免子串误命中）
+  const labelsById = new Map<string, string[]>()
+  for (const row of payload.characters ?? []) {
+    const id = s(row.id)
+    if (!id) continue
+    const labels = Array.from(new Set([s(row.name), ...stringList(row.aliases)].filter(Boolean)))
+      .sort((a, b) => b.length - a.length)
+    if (labels.length > 0) labelsById.set(id, labels)
+  }
 
   for (const raw of states as JsonRecord[]) {
     const name = s(raw.name)
@@ -1482,14 +1496,108 @@ export async function runCharacterStateExtract(
     if (!state.location && !state.condition && state.knownInfo.length === 0 && state.possessions.length === 0 && state.relationDelta.length === 0) {
       continue
     }
+
+    // 用 evidence 原文 + 角色名定位真实锚点，使该位置的角色名变色
+    const labels = labelsById.get(charId) ?? [name].filter(Boolean)
+    const anchor = locateCharacterAnchor(content, labels, s(raw.evidence))
+
+    // 与上一章状态差分，构造悬停可见的「改了什么」明细
+    const prev = prevById.get(charId)
+    const details = buildNarrativeChangeDetails(prev, state)
+
     recordCharacterChangeFields(charId, ['narrativeState'], {
       chapterId: s(current.id),
-      anchorStart: 0,
+      anchorStart: anchor ? anchor.start : 0,
+      anchorEnd: anchor ? anchor.end : undefined,
+      details: details.length > 0 ? details : undefined,
       narrativeState: state,
     })
     updated.push({ characterId: charId, name, state })
   }
   return { updated, warnings }
+}
+
+/**
+ * 用 AI 给出的 evidence 原文片段，在正文里定位该角色名出现的精确位置，
+ * 作为本次状态变化的锚点（使该处角色名在叠加层中单独上色）。
+ * 优先在 evidence 命中的区间内/附近找角色名；找不到则回退到全文首次出现。
+ */
+function locateCharacterAnchor(
+  content: string,
+  labels: string[],
+  evidence: string,
+): { start: number; end: number } | null {
+  const text = content ?? ''
+  if (!text) return null
+  const cleanLabels = labels.map((l) => String(l ?? '').trim()).filter(Boolean)
+  if (cleanLabels.length === 0) return null
+
+  // evidence 命中区间（用于把锚点限定在变化发生处附近）
+  let regionStart = -1
+  let regionEnd = -1
+  const ev = String(evidence ?? '').trim()
+  if (ev) {
+    const i = text.indexOf(ev)
+    if (i >= 0) {
+      regionStart = i
+      regionEnd = i + ev.length
+    }
+  }
+
+  const findLabelIn = (from: number, to: number): { start: number; end: number } | null => {
+    let best: { start: number; end: number } | null = null
+    for (const label of cleanLabels) {
+      let idx = text.indexOf(label, Math.max(0, from))
+      while (idx >= 0 && idx < to) {
+        const cand = { start: idx, end: idx + label.length }
+        if (!best || cand.start < best.start) best = cand
+        idx = text.indexOf(label, idx + 1)
+      }
+    }
+    return best
+  }
+
+  // 1) evidence 区间内找角色名
+  if (regionStart >= 0) {
+    const inRegion = findLabelIn(regionStart, regionEnd)
+    if (inRegion) return inRegion
+  }
+  // 2) evidence 之后最近一次出现
+  if (regionEnd >= 0) {
+    const after = findLabelIn(regionEnd, text.length)
+    if (after) return after
+  }
+  // 3) 全文首次出现
+  const anywhere = findLabelIn(0, text.length)
+  return anywhere
+}
+
+/** 上一章状态 vs 本章状态差分，生成悬停可见的变更明细。 */
+function buildNarrativeChangeDetails(
+  prev: { location: string; condition: string; knownInfo: string[]; possessions: string[] } | undefined,
+  next: CharacterNarrativeState,
+): CharacterChangeDetail[] {
+  const details: CharacterChangeDetail[] = []
+  const joinList = (arr: string[]): string => (arr ?? []).filter(Boolean).join('、')
+  const pushStr = (field: string, location: string, before: string, after: string): void => {
+    const a = String(after ?? '').trim()
+    const b = String(before ?? '').trim()
+    if (a && a !== b) details.push({ field, location, before: b, after: a })
+  }
+  const pushList = (field: string, location: string, beforeArr: string[], afterArr: string[]): void => {
+    const after = joinList(afterArr)
+    const before = joinList(beforeArr)
+    if (after && after !== before) details.push({ field, location, before, after })
+  }
+  pushStr('location', '角色状态/所在位置', prev?.location ?? '', next.location)
+  pushStr('condition', '角色状态/身心状态', prev?.condition ?? '', next.condition)
+  pushList('possessions', '角色状态/持有物品', prev?.possessions ?? [], next.possessions)
+  pushList('knownInfo', '角色状态/掌握信息', prev?.knownInfo ?? [], next.knownInfo)
+  // relationDelta 是本章增量，无上一章基线
+  if (next.relationDelta.length > 0) {
+    details.push({ field: 'relationDelta', location: '角色状态/关系变化', before: '', after: joinList(next.relationDelta) })
+  }
+  return details
 }
 
 function isLikelyUnnamedDescriptor(name: string): boolean {

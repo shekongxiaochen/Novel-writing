@@ -10,7 +10,7 @@ use axum::{
     Form, Router,
 };
 use axum_admin::auth::AdminAuth;
-use minijinja::{context, Environment};
+use minijinja::context;
 use serde::Deserialize;
 use tower_cookies::CookieManagerLayer;
 use tower_cookies::Cookies;
@@ -18,7 +18,6 @@ use tower_cookies::Cookies;
 use crate::services::{embedding_provider_service::EmbeddingProviderService, embedding_service};
 
 const SESSION_COOKIE: &str = "axum_admin_session";
-const ADMIN_TITLE: &str = "Novel 管理后台";
 
 #[derive(Clone)]
 pub struct EmbeddingConfigState {
@@ -108,14 +107,13 @@ async fn list_providers(
         .collect();
     let rows_json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
 
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/embedding_config_page.html"))
-        .expect("embedding_config template");
-    let html = tpl
-        .render(context!(admin_title => ADMIN_TITLE, page => "list", rows_json => rows_json))
-        .expect("render embedding_config list");
-    Ok(Html(html))
+    Ok(super::shell::render_shell_page(
+        "embedding_config_page.html",
+        include_str!("../../admin-templates/embedding_config_page.html"),
+        "embedding-config",
+        "向量配置",
+        context!(page => "list", rows_json => rows_json),
+    ))
 }
 
 // ── 增/改表单展示 ──
@@ -272,11 +270,6 @@ fn render_form(
     test_ok: Option<&str>,
     error: Option<&str>,
 ) -> Result<Html<String>, StatusCode> {
-    let env = Environment::new();
-    let tpl = env
-        .template_from_str(include_str!("../../admin-templates/embedding_config_page.html"))
-        .expect("embedding_config template");
-
     let (id, name, base_url, model, dimension, multiplier, price_in, api_key_set) =
         if let Some(p) = provider {
             (
@@ -312,12 +305,11 @@ fn render_form(
                 false,
             )
         };
-    render_form_html(tpl, id, name, base_url, model, dimension, multiplier, price_in, api_key_set, test_ok, error)
+    render_form_html(id, name, base_url, model, dimension, multiplier, price_in, api_key_set, test_ok, error)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn render_form_html(
-    tpl: minijinja::Template<'_, '_>,
     id: String,
     name: String,
     base_url: String,
@@ -337,9 +329,13 @@ fn render_form_html(
     let is_edit = !id.is_empty();
     let page_title = if is_edit { "编辑向量服务" } else { "添加向量服务" };
 
-    let html = tpl
-        .render(context!(
-            admin_title => ADMIN_TITLE,
+    Ok(super::shell::render_shell_page_sub(
+        "embedding_config_page.html",
+        include_str!("../../admin-templates/embedding_config_page.html"),
+        "embedding-config",
+        "向量配置",
+        Some(page_title),
+        context!(
             page => "form",
             page_title => page_title,
             is_edit => is_edit,
@@ -354,9 +350,8 @@ fn render_form_html(
             api_key_placeholder => api_key_placeholder,
             error => error,
             test_ok => test_ok,
-        ))
-        .expect("render embedding_config form");
-    Ok(Html(html))
+        ),
+    ))
 }
 
 fn render_form_error(

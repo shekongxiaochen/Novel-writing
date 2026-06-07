@@ -1,0 +1,47 @@
+# === Build artifacts ===
+backend/target/
+frontend/dist/
+frontend/release/
+frontend/src-tauri/target/
+**/node_modules/
+
+# === Caches ===
+.cache/
+.npm-cache/
+.tmp/
+.tmp_find_blobs.ps1
+
+# === Recovery backups ===
+.codex-recovery-backup/
+.codex-recovery-tmp-pre-overwrite/
+
+# === Sensitive / runtime data ===
+cookies.txt
+dump.rdb
+backend/dump.rdb
+backend-deploy.tar.gz
+admin-ui-patch.tar.gz
+remove-prompts-patch.tar.gz
+*.tar.gz
+
+# 环境变量 / 密钥（绝不进仓库，保留 .example 示例）
+.env
+.env.*
+!.env.example
+!.env.prod.example
+backend/.env
+frontend/.env.development
+frontend/.env.production
+
+*.log
+**/vite-dev.log
+**/vite-dev.err.log
+**/vite.log
+**/vite.err.log
+
+# === Tooling / local ===
+.codegraph/
+
+# === Misc ===
+edge-shot.png
+C盘垃圾文件扫描报告.txt
