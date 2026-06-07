@@ -19,6 +19,8 @@ RUN mkdir src && \
 
 # 复制源代码
 COPY src ./src
+# 复制 HTML 模板（代码用 include_str! 在编译时读取，必须在 cargo build 前就位）
+COPY admin-templates ./admin-templates
 
 # 构建应用（触碰 main.rs 确保重新编译真实代码而非占位）
 RUN touch src/main.rs && cargo build --release
