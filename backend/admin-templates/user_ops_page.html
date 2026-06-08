@@ -45,11 +45,27 @@
   </section>
 
   <section class="bg-white rounded-lg border border-zinc-200 shadow-sm overflow-hidden">
-    <div class="px-6 py-4 border-b border-zinc-100">
+    <div class="px-6 py-4 border-b border-zinc-100 flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-base font-semibold flex items-center gap-2">
         <i class="fa-solid fa-users text-zinc-400"></i> 全部用户与余额
       </h2>
+      <form method="get" action="/admin/user-ops" class="flex items-center gap-2">
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-xs"></i>
+          <input name="q" type="text" value="{{ search }}" placeholder="按账号或昵称搜索"
+                 class="rounded-md border-zinc-200 text-sm pl-8 pr-3 py-1.5 w-56" />
+        </div>
+        <button type="submit" class="px-3 py-1.5 rounded-md bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-800">搜索</button>
+        {% if search %}
+        <a href="/admin/user-ops" class="px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-500 text-sm hover:bg-zinc-50">清除</a>
+        {% endif %}
+      </form>
     </div>
+    {% if search %}
+    <div class="px-6 py-2 bg-zinc-50 text-xs text-zinc-500 border-b border-zinc-100">
+      搜索「{{ search }}」，共 {{ users | length }} 个结果
+    </div>
+    {% endif %}
     <div class="overflow-x-auto">
       <table class="w-full text-sm text-left">
         <thead class="bg-zinc-50 text-zinc-600">
@@ -73,7 +89,7 @@
             <td class="px-4 py-3 text-right"><a href="/admin/users/{{ u.id }}" class="text-sky-600 hover:text-sky-800 font-medium">详情</a></td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="px-4 py-8 text-center text-zinc-400">暂无用户</td></tr>
+          <tr><td colspan="6" class="px-4 py-8 text-center text-zinc-400">{% if search %}没有匹配「{{ search }}」的用户{% else %}暂无用户{% endif %}</td></tr>
           {% endfor %}
         </tbody>
       </table>

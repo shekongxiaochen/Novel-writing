@@ -21,6 +21,12 @@ pub struct AiPromptRequest {
     /// 温度参数
     #[serde(default)]
     pub temperature: Option<f64>,
+    /// 存在惩罚（正文续写用，压制套话复现）
+    #[serde(default)]
+    pub presence_penalty: Option<f64>,
+    /// 频率惩罚（正文续写用，压制口头禅与复读）
+    #[serde(default)]
+    pub frequency_penalty: Option<f64>,
     /// 最大 token 数
     #[serde(default)]
     pub max_tokens: Option<u32>,

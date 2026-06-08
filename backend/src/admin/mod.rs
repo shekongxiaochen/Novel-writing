@@ -10,6 +10,7 @@ use sea_orm::{
 use sea_orm_migration::MigratorTrait;
 
 mod ai_config;
+mod announcement;
 mod card_key_admin;
 mod dashboard;
 mod embedding_config;
@@ -309,6 +310,10 @@ pub async fn build_router(
             settings: SettingsService::new(sqlx_pool.clone()),
             auth: auth_for_admin.clone(),
         }))
+        .merge(announcement::routes(announcement::AnnouncementAdminState {
+            settings: SettingsService::new(sqlx_pool.clone()),
+            auth: auth_for_admin.clone(),
+        }))
         .merge(embedding_config::routes(embedding_config::EmbeddingConfigState {
             providers: EmbeddingProviderService::new(sqlx_pool.clone()),
             auth: auth_for_admin,
@@ -318,6 +323,7 @@ pub async fn build_router(
     tracing::info!("Admin user ops: http://127.0.0.1:8080/admin/user-ops");    tracing::info!("Admin AI config: http://127.0.0.1:8080/admin/ai-config");
     tracing::info!("Admin embedding config: http://127.0.0.1:8080/admin/embedding-config");
     tracing::info!("Admin prompts: http://127.0.0.1:8080/admin/prompts");
+    tracing::info!("Admin announcement: http://127.0.0.1:8080/admin/announcement");
     tracing::info!("Admin card keys: http://127.0.0.1:8080/admin/card-keys");
 
     Ok(router)

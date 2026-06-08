@@ -121,9 +121,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       },
     })
   } catch {
-    throw new Error(
-      `无法连接后端（${API_BASE_URL}）。请确认 Rust 后端已启动、迁移已执行，且前端地址在 CORS_ORIGINS 中。`,
-    )
+    throw new Error('网络连接失败，请检查网络后重试。')
   }
 
   const text = await resp.text()
