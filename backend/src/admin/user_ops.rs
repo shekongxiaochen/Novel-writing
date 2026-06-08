@@ -20,6 +20,7 @@ use crate::services::{
     wallet_service::WalletService,
     wallet_units::{units_to_yuan, yuan_i64_to_units},
 };
+use crate::utils::crypto;
 
 const SESSION_COOKIE: &str = "axum_admin_session";
 
@@ -42,6 +43,7 @@ struct RechargeForm {
 struct PageQuery {
     recharge: Option<String>,
     ok: Option<String>,
+    q: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -71,6 +73,7 @@ struct UserOpsView {
     recharge_user_id: String,
     ok: bool,
     error: Option<String>,
+    search: String,
 }
 
 pub fn routes(state: UserOpsState) -> Router {
@@ -79,6 +82,7 @@ pub fn routes(state: UserOpsState) -> Router {
         .route("/admin/user-ops", get(show_page).post(recharge))
         .route("/admin/users/:id", get(show_user_detail))
         .route("/admin/users/:id/toggle-active", post(toggle_active))
+        .route("/admin/users/:id/reset-password", post(reset_password))
         .route_layer(from_fn_with_state(arc.clone(), require_admin))
         .layer(CookieManagerLayer::new())
         .with_state(arc)
@@ -103,12 +107,18 @@ async fn show_page(
     State(state): State<Arc<UserOpsState>>,
     query: Query<PageQuery>,
 ) -> Result<Html<String>, StatusCode> {
-    let view = load_view(&state, query.recharge.clone(), query.ok.is_some(), None)
-        .await
-        .map_err(|e| {
-            tracing::error!("user-ops load: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let view = load_view(
+        &state,
+        query.recharge.clone(),
+        query.ok.is_some(),
+        None,
+        query.q.clone(),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("user-ops load: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     Ok(Html(render_page(view)))
 }
 
@@ -118,7 +128,7 @@ async fn recharge(
 ) -> Result<impl IntoResponse, StatusCode> {
     let user_id = form.user_id.trim().to_string();
     if user_id.is_empty() {
-        let view = load_view(&state, None, false, Some("请选择用户".to_string()))
+        let view = load_view(&state, None, false, Some("请选择用户".to_string()), None)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Ok((StatusCode::BAD_REQUEST, Html(render_page(view))).into_response());
@@ -127,7 +137,7 @@ async fn recharge(
     let amount: i64 = match form.amount.trim().parse() {
         Ok(n) => n,
         Err(_) => {
-            let view = load_view(&state, Some(user_id), false, Some("充值数额无效".to_string()))
+            let view = load_view(&state, Some(user_id), false, Some("充值数额无效".to_string()), None)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             return Ok((StatusCode::BAD_REQUEST, Html(render_page(view))).into_response());
@@ -135,7 +145,7 @@ async fn recharge(
     };
 
     if amount <= 0 {
-        let view = load_view(&state, Some(user_id), false, Some("充值数额须大于 0".to_string()))
+        let view = load_view(&state, Some(user_id), false, Some("充值数额须大于 0".to_string()), None)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Ok((StatusCode::BAD_REQUEST, Html(render_page(view))).into_response());
@@ -155,7 +165,7 @@ async fn recharge(
                 crate::error::AppError::NotFound => "用户不存在".to_string(),
                 _ => "充值失败，请稍后重试".to_string(),
             };
-            let view = load_view(&state, Some(user_id), false, Some(msg))
+            let view = load_view(&state, Some(user_id), false, Some(msg), None)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             Ok((StatusCode::BAD_REQUEST, Html(render_page(view))).into_response())
@@ -168,24 +178,53 @@ async fn load_view(
     recharge_user_id: Option<String>,
     ok: bool,
     error: Option<String>,
+    search: Option<String>,
 ) -> Result<UserOpsView, crate::error::AppError> {
-    let users = sqlx::query_as::<_, UserBalanceRow>(
-        r#"
-        SELECT
-            u.id,
-            u.username,
-            u.display_name,
-            u.is_active,
-            u.created_at,
-            COALESCE(w.balance_tokens, 0) AS balance
-        FROM users u
-        LEFT JOIN ai_wallets w ON w.user_id = u.id
-        ORDER BY u.created_at DESC
-        LIMIT 500
-        "#,
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let search = search.map(|s| s.trim().to_string()).unwrap_or_default();
+
+    let users = if search.is_empty() {
+        sqlx::query_as::<_, UserBalanceRow>(
+            r#"
+            SELECT
+                u.id,
+                u.username,
+                u.display_name,
+                u.is_active,
+                u.created_at,
+                COALESCE(w.balance_tokens, 0) AS balance
+            FROM users u
+            LEFT JOIN ai_wallets w ON w.user_id = u.id
+            ORDER BY u.created_at DESC
+            LIMIT 500
+            "#,
+        )
+        .fetch_all(&state.db)
+        .await?
+    } else {
+        // 按账号或昵称模糊搜索（参数化，转义 LIKE 通配符防注入）
+        let escaped = search.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let pattern = format!("%{}%", escaped);
+        sqlx::query_as::<_, UserBalanceRow>(
+            r#"
+            SELECT
+                u.id,
+                u.username,
+                u.display_name,
+                u.is_active,
+                u.created_at,
+                COALESCE(w.balance_tokens, 0) AS balance
+            FROM users u
+            LEFT JOIN ai_wallets w ON w.user_id = u.id
+            WHERE u.username LIKE ? OR u.display_name LIKE ?
+            ORDER BY u.created_at DESC
+            LIMIT 500
+            "#,
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .fetch_all(&state.db)
+        .await?
+    };
 
     let ledger = sqlx::query_as::<_, LedgerRow>(
         r#"
@@ -213,6 +252,7 @@ async fn load_view(
         ledger,
         ok,
         error,
+        search,
     })
 }
 
@@ -246,9 +286,15 @@ struct NovelRow {
     created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct DetailQuery {
+    pwd: Option<String>,
+}
+
 async fn show_user_detail(
     State(state): State<Arc<UserOpsState>>,
     Path(uid): Path<String>,
+    query: Query<DetailQuery>,
 ) -> Result<Html<String>, StatusCode> {
     let fail = |e: sqlx::Error| {
         tracing::error!("user detail load: {:?}", e);
@@ -294,28 +340,97 @@ async fn show_user_detail(
     .await
     .map_err(fail)?;
 
-    Ok(render_user_detail(user, novels, ledger))
+    Ok(render_user_detail(user, novels, ledger, query.pwd.clone()))
 }
 
 async fn toggle_active(
     State(state): State<Arc<UserOpsState>>,
     Path(uid): Path<String>,
 ) -> Result<Redirect, StatusCode> {
+    let fail = |e: sqlx::Error| {
+        tracing::error!("toggle active: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+
     sqlx::query("UPDATE users SET is_active = NOT is_active WHERE id = ?")
         .bind(&uid)
         .execute(&state.db)
         .await
-        .map_err(|e| {
-            tracing::error!("toggle active: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(fail)?;
+
+    // 若该用户现在处于停用状态，立即删除其所有未过期 session，
+    // 使封禁尽快生效（配合 60 秒 session 缓存，最迟 60 秒后彻底失效）。
+    let is_active: Option<bool> = sqlx::query_scalar("SELECT is_active FROM users WHERE id = ?")
+        .bind(&uid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(fail)?;
+    if is_active == Some(false) {
+        sqlx::query("DELETE FROM user_sessions WHERE user_id = ?")
+            .bind(&uid)
+            .execute(&state.db)
+            .await
+            .map_err(fail)?;
+    }
+
     Ok(Redirect::to(&format!("/admin/users/{}", uid)))
+}
+
+async fn reset_password(
+    State(state): State<Arc<UserOpsState>>,
+    Path(uid): Path<String>,
+) -> Result<Redirect, StatusCode> {
+    let fail = |e: sqlx::Error| {
+        tracing::error!("reset password: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+
+    // 确认用户存在
+    let exists: Option<String> = sqlx::query_scalar("SELECT id FROM users WHERE id = ?")
+        .bind(&uid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(fail)?;
+    if exists.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // 生成新随机密码并哈希存储（明文仅在本次重定向后展示一次，不落库）
+    let new_password = crypto::generate_password();
+    let iterations: u32 = std::env::var("PASSWORD_HASH_ITERATIONS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(120_000);
+    let password_hash = crypto::hash_password(&new_password, iterations).map_err(|e| {
+        tracing::error!("reset password hash: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+        .bind(&password_hash)
+        .bind(&uid)
+        .execute(&state.db)
+        .await
+        .map_err(fail)?;
+
+    // 重置密码后使该用户所有现有 session 失效，强制用新密码重新登录
+    sqlx::query("DELETE FROM user_sessions WHERE user_id = ?")
+        .bind(&uid)
+        .execute(&state.db)
+        .await
+        .map_err(fail)?;
+
+    Ok(Redirect::to(&format!(
+        "/admin/users/{}?pwd={}",
+        uid, new_password
+    )))
 }
 
 fn render_user_detail(
     user: UserDetailRow,
     novels: Vec<NovelRow>,
     ledger: Vec<LedgerRow>,
+    new_password: Option<String>,
 ) -> Html<String> {
     let novels_ctx: Vec<_> = novels
         .iter()
@@ -369,6 +484,7 @@ fn render_user_detail(
                 balance_fmt => format!("{:.4} 元", units_to_yuan(user.balance)),
                 novels => novels_ctx,
                 ledger => ledger_ctx,
+                new_password => new_password.unwrap_or_default(),
             ),
         )
         .0,
@@ -429,6 +545,7 @@ fn render_page(view: UserOpsView) -> String {
             recharge_user_id => view.recharge_user_id,
             ok => view.ok,
             error => view.error,
+            search => view.search,
         ),
     )
     .0

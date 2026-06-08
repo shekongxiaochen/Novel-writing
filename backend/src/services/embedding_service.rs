@@ -56,7 +56,11 @@ pub async fn embed_texts(
     if texts.is_empty() {
         return Ok(EmbedResult { vectors: Vec::new(), total_tokens: 0 });
     }
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
     let url = embeddings_url(base_url);
     let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
     let mut total_tokens: u32 = 0;

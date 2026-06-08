@@ -718,6 +718,42 @@ export type NovelForeshadowAnalysisResult = {
   warnings: string[]
 }
 
+export type OutlineRevisionSuggestion = {
+  id: string
+  reason: string
+  title?: string
+  summary?: string
+  goal?: string
+  conflict?: string
+  twist?: string
+  result?: string
+  suspense?: string
+  tension?: number
+  uiState?: AiSuggestionUiState
+}
+
+export type OutlineAdditionSuggestion = {
+  tempId: string
+  afterOutlineId?: string
+  parentOutlineId?: string
+  title: string
+  summary: string
+  level: 'chapter' | 'scene'
+  goal?: string
+  conflict?: string
+  twist?: string
+  result?: string
+  suspense?: string
+  tension?: number
+  uiState?: AiSuggestionUiState
+}
+
+export type OutlineRewriteResult = {
+  revisions: OutlineRevisionSuggestion[]
+  additions: OutlineAdditionSuggestion[]
+  warnings: string[]
+}
+
 export type NovelChapterClassificationResult = {
   chapterType: string
   pacing: string

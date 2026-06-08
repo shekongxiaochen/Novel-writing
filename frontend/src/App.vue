@@ -550,6 +550,14 @@
     @confirm="confirmDeleteNovelFromShelf"
     @cancel="pendingDeleteNovel = null"
   />
+
+  <AnnouncementDialog
+    v-model="announcementOpen"
+    :title="announcementTitle"
+    :body="announcementBody"
+    :image="announcementImage"
+    @close="onAnnouncementClose"
+  />
 </template>
 
 <script setup lang="ts">
@@ -576,6 +584,7 @@ import type { Chapter, Novel } from './types'
 import type { CharacterChangeDetail } from './lib/storage'
 import { formatChapterSummaryText } from './lib/chapterSummary'
 import { summarizeNovelChapterFromWorkspaceStream } from './lib/localAi'
+import { fetchAnnouncement } from './lib/backendAi'
 import { currentThemeOption } from './composables/useTheme'
 import { useAuth } from './composables/useAuth'
 import { requestAiAccess } from './composables/useAiAccess'
@@ -583,6 +592,7 @@ import { useCloudSync } from './composables/useCloudSync'
 import { Teleport } from 'vue'
 import AuthDialog from './components/AuthDialog.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import AnnouncementDialog from './components/AnnouncementDialog.vue'
 import CreateNovelDialog from './components/CreateNovelDialog.vue'
 import NovelShelfDialog from './components/NovelShelfDialog.vue'
 import ThemePickerPopover from './components/ThemePickerPopover.vue'
@@ -1821,6 +1831,43 @@ onMounted(() => window.addEventListener('pointerdown', closeChapterAreaMenu))
 onMounted(() => window.addEventListener('keydown', onGlobalChapterSwitch))
 onMounted(() => window.addEventListener('keydown', onEscapeCloseChapterModal))
 onMounted(() => window.addEventListener('resize', onWindowResizeForSummaryStudio))
+
+// ── 弹窗公告 ──
+const announcementOpen = ref(false)
+const announcementTitle = ref('')
+const announcementBody = ref('')
+const announcementImage = ref('')
+const announcementVersion = ref('')
+const ANNOUNCEMENT_SEEN_KEY = 'novel-writing.announcement-seen-version'
+
+onMounted(async () => {
+  const data = await fetchAnnouncement()
+  if (!data || !data.enabled) return
+  if (!data.title.trim() && !data.body.trim() && !data.image.trim()) return
+  let seen = ''
+  try {
+    seen = localStorage.getItem(ANNOUNCEMENT_SEEN_KEY) ?? ''
+  } catch {
+    /* ignore */
+  }
+  if (seen === data.version) return
+  announcementTitle.value = data.title
+  announcementBody.value = data.body
+  announcementImage.value = data.image
+  announcementVersion.value = data.version
+  announcementOpen.value = true
+})
+
+function onAnnouncementClose(dontShowAgain: boolean): void {
+  if (dontShowAgain) {
+    try {
+      localStorage.setItem(ANNOUNCEMENT_SEEN_KEY, announcementVersion.value)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 onMounted(() => {
   try {
     const key = 'novel-writing.session-started'

@@ -16,6 +16,7 @@ import type {
   NovelForeshadowAnalysisResult,
   Novel,
   OutlineItem,
+  OutlineRewriteResult,
   OutlineStorylineType,
 } from '../types'
 import type { AiToolResult } from '../types'
@@ -950,7 +951,9 @@ export async function continueChapterFromWorkspaceStream(
     user_prompt: prompt,
     context_prompt: contextPrompt || undefined,
     ai_style_prompt: input.aiStylePrompt,
-    temperature: 0.25,
+    temperature: 0.8,
+    presence_penalty: 0.3,
+    frequency_penalty: 0.3,
     max_tokens: maxTokens,
   }, callbacks, signal)
   return {
@@ -2059,6 +2062,139 @@ export async function analyzeNovelForeshadowsFromWorkspace(
             warnings: stringList(row.warnings),
           }))
       : [],
+    warnings: stringList(raw.warnings),
+  }
+}
+
+/**
+ * 计算"已写"大纲节点 id 集合：被任意章节通过 outlineItemIds 绑定的节点，
+ * 或 status==='done' 的节点，视为已写，动态回写禁止修改它们。
+ */
+function collectWrittenOutlineIds(payload: WorkspaceSnapshotPayload): Set<string> {
+  const written = new Set<string>()
+  for (const ch of payload.chapters ?? []) {
+    for (const oid of ch.outlineItemIds ?? []) {
+      const id = s(oid)
+      if (id) written.add(id)
+    }
+  }
+  for (const item of payload.outline ?? []) {
+    if (s(item.status) === 'done') {
+      const id = s(item.id)
+      if (id) written.add(id)
+    }
+  }
+  return written
+}
+
+/**
+ * 动态大纲回写：对照已写正文与现有大纲，让未写节点贴合已发生剧情，
+ * 并在剧情超出原大纲覆盖时补充后续节拍。绝不改动已写节点（prompt 铁律 + TS 侧二次过滤）。
+ */
+export async function rewriteOutlineFromProgressByAi(
+  payload: WorkspaceSnapshotPayload,
+  input: {
+    mode: AiExtractMode
+    chapterIds?: string[]
+    novel?: { title?: string; summary?: string; continuityBrief?: string; genre?: string }
+  },
+): Promise<OutlineRewriteResult> {
+  const outlineAll = payload.outline ?? []
+  const context = buildExtractContext(payload, input.mode, input.chapterIds)
+  if (context.chapters.length === 0 || outlineAll.length === 0) {
+    return { revisions: [], additions: [], warnings: outlineAll.length === 0 ? ['本作品还没有大纲，无法动态回写'] : ['没有可分析的章节正文'] }
+  }
+
+  const writtenIds = collectWrittenOutlineIds(payload)
+
+  const outlineForAi = stableSortByKeys(
+    outlineAll.map((row) => ({
+      id: s(row.id),
+      parentId: s(row.parentId) || null,
+      order: typeof row.order === 'number' ? row.order : null,
+      level: s(row.level) || 'scene',
+      status: s(row.status),
+      title: s(row.title),
+      summary: s(row.summary),
+      goal: s(row.goal),
+      conflict: s(row.conflict),
+      twist: s(row.twist),
+      result: s(row.result),
+      suspense: s(row.suspense),
+      tension: typeof row.tension === 'number' ? row.tension : null,
+      written: writtenIds.has(s(row.id)),
+    })),
+    ['order', 'id'],
+  )
+
+  const prompt = [
+    `分析范围：${input.mode}`,
+    '请严格按既定 JSON 结构输出结果。',
+    '下面内容分为三部分：现有大纲（每个节点带 id 与 written 标记）、已写正文（章总结/正文）、作品信息。',
+    `现有大纲 JSON：${stableStringify({ outline: outlineForAi })}`,
+    `已写正文 JSON：${stableStringify({
+      chapters: context.chapters.map((row) => ({
+        chapterNo: row.chapterNo,
+        title: row.title,
+        summary: s(row.annotation).trim() || compactChapterExcerpt(row.content, 600),
+      })),
+    })}`,
+    `作品信息 JSON：${stableStringify({
+      title: s(input.novel?.title),
+      summary: s(input.novel?.summary),
+      continuityBrief: s(input.novel?.continuityBrief),
+      genre: s(input.novel?.genre),
+    })}`,
+    '只对 written=false 的节点提出 revisions；additions 仅在已写剧情已超出原大纲覆盖、后续无节点承接时补充。',
+  ].join('\n')
+
+  const raw = await callAiPromptJson('outline_rewrite', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE })
+
+  const writableLevels = new Set(['chapter', 'scene'])
+  const revisions = (Array.isArray(raw.revisions) ? raw.revisions : [])
+    .map((row: any) => {
+      const id = s(row?.id)
+      if (!id) return null
+      // 双保险：丢弃任何指向已写节点的修订，以及大纲里不存在的 id
+      if (writtenIds.has(id)) return null
+      if (!outlineAll.some((item) => s(item.id) === id)) return null
+      const out: any = { id, reason: s(row.reason) }
+      for (const field of ['title', 'summary', 'goal', 'conflict', 'twist', 'result', 'suspense'] as const) {
+        if (row[field] !== undefined && s(row[field])) out[field] = s(row[field])
+      }
+      if (typeof row.tension === 'number') out.tension = row.tension
+      return out
+    })
+    .filter(Boolean)
+    // 仅保留确实带改动字段的修订（除 id/reason 外至少一个字段）
+    .filter((row: any) => Object.keys(row).some((k) => k !== 'id' && k !== 'reason'))
+
+  const additions = (Array.isArray(raw.additions) ? raw.additions : [])
+    .map((row: any, index: number) => {
+      const title = s(row?.title)
+      if (!title) return null
+      const rawLevel = s(row.level)
+      const out: any = {
+        tempId: s(row.tempId) || `add-${index + 1}`,
+        title,
+        summary: s(row.summary),
+        level: (writableLevels.has(rawLevel) ? rawLevel : 'chapter') as 'chapter' | 'scene',
+      }
+      const afterId = s(row.afterOutlineId)
+      if (afterId && outlineAll.some((item) => s(item.id) === afterId)) out.afterOutlineId = afterId
+      const parentId = s(row.parentOutlineId)
+      if (parentId && outlineAll.some((item) => s(item.id) === parentId)) out.parentOutlineId = parentId
+      for (const field of ['goal', 'conflict', 'twist', 'result', 'suspense'] as const) {
+        if (row[field] !== undefined && s(row[field])) out[field] = s(row[field])
+      }
+      if (typeof row.tension === 'number') out.tension = row.tension
+      return out
+    })
+    .filter(Boolean)
+
+  return {
+    revisions: revisions as OutlineRewriteResult['revisions'],
+    additions: additions as OutlineRewriteResult['additions'],
     warnings: stringList(raw.warnings),
   }
 }

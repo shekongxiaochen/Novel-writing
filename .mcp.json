@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "D:\\novel-dev\\npm-global\\codegraph.cmd",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    }
+  }
+}

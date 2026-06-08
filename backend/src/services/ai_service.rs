@@ -98,15 +98,9 @@ impl AiService {
             result.usage.cached_tokens,
             &billing,
         );
-        if charge > balance {
-            return Err(AppError::InsufficientBalance);
-        }
-
-        let job_id = id::generate_id();
-        let new_balance = self
-            .wallet
-            .deduct_tokens(user_id, charge, &billing, &job_id)
-            .await?;
+        // 余额不足以支付全部费用时扣光剩余余额，而非一分不扣后直接返回错误，
+        // 否则用户保留极小正余额即可反复发起请求白嫖上游成本（denial-of-wallet）。
+        let new_balance = charge_billable(&self.wallet, user_id, charge, &billing).await?;
 
         Ok(to_chat_response(result, new_balance))
     }
@@ -151,7 +145,11 @@ impl AiService {
                     }
                     Err(e) => {
                         upstream_ok = false;
-                        let msg = format!("data: {}\n\n", serde_json::json!({ "error": { "message": e } }));
+                        tracing::error!("AI 流式上游读取失败: {}", e);
+                        let msg = format!(
+                            "data: {}\n\n",
+                            serde_json::json!({ "error": { "message": "AI 服务暂时不可用，请稍后重试。" } })
+                        );
                         let _ = tx.send(Ok(Bytes::from(msg))).await;
                         return;
                     }
@@ -221,6 +219,8 @@ fn completion_options_from_request(req: &AiChatRequest) -> CompletionOptions {
     CompletionOptions {
         temperature: req.temperature,
         max_tokens: req.max_tokens,
+        presence_penalty: req.presence_penalty,
+        frequency_penalty: req.frequency_penalty,
         tools: req.tools.clone(),
         tool_choice: req.tool_choice.clone(),
         response_format: req.response_format.clone(),

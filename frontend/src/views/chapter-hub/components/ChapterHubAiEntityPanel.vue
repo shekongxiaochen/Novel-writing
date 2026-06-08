@@ -33,6 +33,7 @@
                 class="chapter-hub-ai-panel__mode-seg"
                 :class="{ 'is-active': deskMode === 'ask' }"
                 :aria-selected="deskMode === 'ask' ? 'true' : 'false'"
+                :disabled="busy"
                 @click="deskMode === 'write' && $emit('toggle-desk-mode')"
               >提问</button>
               <button
@@ -41,6 +42,7 @@
                 class="chapter-hub-ai-panel__mode-seg"
                 :class="{ 'is-active': deskMode === 'write' }"
                 :aria-selected="deskMode === 'write' ? 'true' : 'false'"
+                :disabled="busy"
                 @click="deskMode === 'ask' && $emit('toggle-desk-mode')"
               >写作</button>
             </div>
@@ -365,6 +367,39 @@
                       <p v-if="item.lastMentionChapterNo" class="chapter-hub-ai-suggestion__meta">最近相关章节：第 {{ item.lastMentionChapterNo }} 章</p>
                       <p v-if="item.suggestedPayoff" class="chapter-hub-ai-suggestion__meta">建议处理：{{ item.suggestedPayoff }}</p>
                     </article>
+                  </div>
+                </details>
+                <details v-if="((run.outlineRewriteResult?.revisions.length ?? 0) + (run.outlineRewriteResult?.additions.length ?? 0)) > 0" class="chapter-hub-ai-section" open>
+                  <summary class="chapter-hub-ai-section__summary">
+                    <span>大纲动态回写</span>
+                    <span class="chapter-hub-ai-section__count">{{ (run.outlineRewriteResult?.revisions.length ?? 0) + (run.outlineRewriteResult?.additions.length ?? 0) }}</span>
+                  </summary>
+                  <div class="chapter-hub-ai-section__content">
+                    <p class="chapter-hub-ai-suggestion__meta">已加入下方「待确认的修改」，确认采用后才会写入大纲（不会改动已写章节的大纲）。</p>
+                    <article v-for="(item, index) in run.outlineRewriteResult?.revisions ?? []" :key="`outline-rev-${run.id}-${index}`" class="chapter-hub-ai-suggestion">
+                      <div class="chapter-hub-ai-suggestion__top">
+                        <div class="chapter-hub-ai-suggestion__main">
+                          <strong>{{ item.title || '修订未写节点' }}</strong>
+                          <p v-if="item.summary" class="chapter-hub-ai-suggestion__summary">{{ item.summary }}</p>
+                        </div>
+                        <div class="chapter-hub-ai-suggestion__chips">
+                          <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">修订</span>
+                        </div>
+                      </div>
+                      <p v-if="item.reason" class="chapter-hub-ai-suggestion__meta">修订原因：{{ item.reason }}</p>
+                    </article>
+                    <article v-for="(item, index) in run.outlineRewriteResult?.additions ?? []" :key="`outline-add-${run.id}-${index}`" class="chapter-hub-ai-suggestion">
+                      <div class="chapter-hub-ai-suggestion__top">
+                        <div class="chapter-hub-ai-suggestion__main">
+                          <strong>{{ item.title }}</strong>
+                          <p v-if="item.summary" class="chapter-hub-ai-suggestion__summary">{{ item.summary }}</p>
+                        </div>
+                        <div class="chapter-hub-ai-suggestion__chips">
+                          <span class="chapter-hub-ai-chip chapter-hub-ai-chip--soft">新增{{ item.level === 'scene' ? '场景' : '章节' }}</span>
+                        </div>
+                      </div>
+                    </article>
+                    <p v-for="warning in run.outlineRewriteResult?.warnings ?? []" :key="`outline-warn-${warning}`" class="chapter-hub-ai-warning-card">{{ warning }}</p>
                   </div>
                 </details>
               </template>
@@ -1150,6 +1185,7 @@ import type {
   NovelChapterClassificationResult,
   NovelEntityExtractResult,
   NovelForeshadowAnalysisResult,
+  OutlineRewriteResult,
 } from '../../../types'
 
 const props = defineProps<{
@@ -1172,6 +1208,7 @@ const props = defineProps<{
     entityResult?: NovelEntityExtractResult
     foreshadowResult?: NovelForeshadowAnalysisResult
     classificationResult?: NovelChapterClassificationResult
+    outlineRewriteResult?: OutlineRewriteResult
     appliedActions: Array<{ id: string; text: string; tone: 'applied' | 'ignored' }>
   }>
   chatSessions: Array<{ id: string; title: string; updatedAt: string }>
@@ -1308,7 +1345,7 @@ function ragSourceLabel(source: ContinueRagSnippetHit['source']): string {
 }
 const lastContinueDirection = ref('')
 
-const busy = computed(() => props.loading || props.chatLoading || props.continueDraft.loading)
+const busy = computed(() => props.loading || props.chatLoading || props.chatThinking || props.continueDraft.loading)
 const askComposerBusy = computed(() => props.chatLoading || props.chatThinking)
 const writeComposerBusy = computed(() => props.continueDraft.loading)
 const composerHint = computed(() => {
