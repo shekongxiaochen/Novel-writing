@@ -16,7 +16,7 @@ use axum::{
     Router,
 };
 use config::Config;
-use handlers::{ai, auth, billing, health, novels};
+use handlers::{ai, announcement, auth, billing, health, novels};
 use middleware::{auth_middleware, cors_layer};
 use services::{
     AiProviderService, AiService, AppState, AuthService, AutoApplyLogService, CacheService, CardKeyService,
@@ -123,7 +123,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/health", get(health::health_check))
         .route("/auth/device-status", get(auth::device_status))
         .route("/auth/register-by-device", post(auth::register_by_device))
-        .route("/auth/login", post(auth::login));
+        .route("/auth/login", post(auth::login))
+        .route("/announcement", get(announcement::get_announcement));
 
     let authed_routes = Router::new()
         .route("/auth/me", get(auth::get_current_user))

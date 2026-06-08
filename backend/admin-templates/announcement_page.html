@@ -1,0 +1,124 @@
+{% extends "shell.html" %}
+{% block title %}弹窗公告 — {{ admin_title }}{% endblock %}
+{% block content %}
+<div class="max-w-3xl space-y-6">
+  <div id="flash"></div>
+  <div class="bg-white rounded-lg border border-zinc-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-zinc-100">
+      <h2 class="text-sm font-semibold">弹窗公告</h2>
+      <p class="text-xs text-zinc-500 mt-1">保存后立即生效。客户端启动时拉取，开启状态下会弹窗展示；用户勾选「不再提示」后，除非你修改内容（版本号会自动递增），否则不再弹。</p>
+    </div>
+
+    <form method="post" action="/admin/announcement/save" class="p-6 space-y-5">
+      <div>
+        <label class="block text-sm font-medium mb-2">公告标题</label>
+        <input type="text" name="title" value="{{ title }}" maxlength="120"
+          class="w-full rounded-lg border-zinc-300 text-sm focus:border-sky-500 focus:ring-sky-500"
+          placeholder="例如：v2.1 更新说明" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-2">公告正文</label>
+        <textarea name="body" rows="10" spellcheck="false"
+          class="w-full rounded-lg border-zinc-300 text-sm leading-relaxed focus:border-sky-500 focus:ring-sky-500"
+          placeholder="支持换行。纯文本展示。">{{ body }}</textarea>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium mb-2">公告图片（可选，如二维码）</label>
+        <input type="hidden" name="image" id="imageData" value="{{ image }}" />
+        <div class="flex items-start gap-4">
+          <div id="imgPreviewWrap" class="{% if not image %}hidden{% endif %} shrink-0">
+            <img id="imgPreview" src="{{ image }}" alt="公告图片预览"
+              class="max-w-[160px] max-h-[160px] rounded-lg border border-zinc-200 object-contain bg-zinc-50" />
+          </div>
+          <div class="flex-1 space-y-2">
+            <input type="file" id="imageFile" accept="image/png,image/jpeg,image/gif,image/webp"
+              class="block w-full text-sm text-zinc-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100" />
+            <p class="text-xs text-zinc-500">支持 PNG/JPG/GIF/WebP，1MB 以内。建议二维码尺寸不超过 600×600。</p>
+            <button type="button" id="imageClear"
+              class="{% if not image %}hidden{% endif %} text-xs text-red-600 hover:text-red-700">
+              <i class="fa-solid fa-trash-can mr-1"></i>移除图片
+            </button>
+          </div>
+        </div>
+        <p id="imageErr" class="hidden text-xs text-red-600 mt-2"></p>
+      </div>
+
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="enabled" value="1" {% if enabled %}checked{% endif %}
+          class="rounded border-zinc-300 text-sky-600 focus:ring-sky-500" />
+        <span>启用公告（开启后客户端启动会弹窗）</span>
+      </label>
+      <div class="flex items-center gap-3 pt-1">
+        <button type="submit" class="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700">
+          <i class="fa-solid fa-floppy-disk mr-1"></i>保存并生效
+        </button>
+        <span class="text-xs text-zinc-400">当前版本号：{{ version }}（每次保存自动 +1）</span>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.get("ok")) document.getElementById("flash").innerHTML =
+      '<div class="px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm"><i class="fa-solid fa-circle-check mr-1"></i>已保存，公告已生效。</div>';
+
+    (function () {
+      const fileInput = document.getElementById("imageFile");
+      const dataField = document.getElementById("imageData");
+      const preview = document.getElementById("imgPreview");
+      const previewWrap = document.getElementById("imgPreviewWrap");
+      const clearBtn = document.getElementById("imageClear");
+      const errEl = document.getElementById("imageErr");
+      const MAX_BYTES = 1024 * 1024; // 1MB（原始文件）
+
+      function showErr(msg) {
+        errEl.textContent = msg;
+        errEl.classList.remove("hidden");
+      }
+      function clearErr() {
+        errEl.textContent = "";
+        errEl.classList.add("hidden");
+      }
+      function setImage(dataUrl) {
+        dataField.value = dataUrl || "";
+        if (dataUrl) {
+          preview.src = dataUrl;
+          previewWrap.classList.remove("hidden");
+          clearBtn.classList.remove("hidden");
+        } else {
+          preview.src = "";
+          previewWrap.classList.add("hidden");
+          clearBtn.classList.add("hidden");
+        }
+      }
+
+      fileInput.addEventListener("change", function () {
+        clearErr();
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+          showErr("请选择图片文件");
+          fileInput.value = "";
+          return;
+        }
+        if (file.size > MAX_BYTES) {
+          showErr("图片超过 1MB，请压缩后再上传");
+          fileInput.value = "";
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = function () { setImage(String(reader.result)); };
+        reader.onerror = function () { showErr("读取图片失败，请重试"); };
+        reader.readAsDataURL(file);
+      });
+
+      clearBtn.addEventListener("click", function () {
+        clearErr();
+        fileInput.value = "";
+        setImage("");
+      });
+    })();
+  </script>
+</div>
+{% endblock %}

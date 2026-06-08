@@ -109,6 +109,18 @@ impl AuthService {
         ip: &str,
     ) -> Result<RegisterByDeviceResponse> {
         Self::validate_device_id(device_id)?;
+
+        // 按 IP 维度限制注册频率：防止攻击者伪造大量 X-Device-Id 刷海量账号（DB/钱包行膨胀）。
+        // 每个 IP 每小时最多注册 REGISTER_IP_LIMIT 个账号。
+        const REGISTER_IP_LIMIT: i64 = 10;
+        let reg_key = format!("register_ip:{}", ip);
+        let reg_count: Option<i64> = self.cache.get(&reg_key).await?;
+        if reg_count.unwrap_or(0) >= REGISTER_IP_LIMIT {
+            return Err(AppError::Validation(
+                "注册过于频繁，请稍后再试".to_string(),
+            ));
+        }
+
         let hash = crypto::hash_device_id(device_id);
 
         let existing: Option<(String,)> = sqlx::query_as(
@@ -154,6 +166,10 @@ impl AuthService {
 
         self.wallet.ensure_wallet(&user_id).await?;
 
+        // 注册成功后累加该 IP 的注册计数（1 小时窗口）
+        self.cache.incr(&reg_key).await?;
+        self.cache.expire(&reg_key, 3600).await?;
+
         let token = self.login(&username, &password, ip).await?;
         let user = self.verify_token(&token).await?;
         let balance = self.wallet.balance(&user.id).await?;
@@ -182,6 +198,17 @@ impl AuthService {
             }
         }
 
+        // 按 IP 维度限流：防止攻击者更换 username 横向爆破（绕过按账号的限流）。
+        let ip_failure_key = format!("login_failures_ip:{}", ip);
+        let ip_failures: Option<i64> = self.cache.get(&ip_failure_key).await?;
+        if let Some(count) = ip_failures {
+            if count >= (self.config.login_failure_limit as i64) * 5 {
+                return Err(AppError::Validation(
+                    "登录失败次数过多，请稍后再试".to_string(),
+                ));
+            }
+        }
+
         let row: Option<UserRow> = sqlx::query_as(&format!(
             "{} WHERE username = ?",
             Self::USER_SELECT
@@ -200,6 +227,10 @@ impl AuthService {
             self.cache.incr(&failure_key).await?;
             self.cache
                 .expire(&failure_key, self.config.login_failure_window_minutes * 60)
+                .await?;
+            self.cache.incr(&ip_failure_key).await?;
+            self.cache
+                .expire(&ip_failure_key, self.config.login_failure_window_minutes * 60)
                 .await?;
             self.record_login_attempt(username, ip, false).await?;
             return Err(AppError::Validation("账号或密码错误".to_string()));
@@ -230,7 +261,7 @@ impl AuthService {
         .await?;
 
         let cache_key = format!("session:{}", token);
-        self.cache.set(&cache_key, &user, 1800).await?;
+        self.cache.set(&cache_key, &user, 60).await?;
         self.cache.delete(&failure_key).await?;
         self.record_login_attempt(username, ip, true).await?;
 
@@ -275,7 +306,9 @@ impl AuthService {
             .execute(&self.db)
             .await?;
 
-        self.cache.set(&cache_key, &user, 1800).await?;
+        // session 缓存仅 60 秒：封禁/停用最多 60 秒后必然失效（届时走 DB 查询，
+        // 而停用时已删除其 DB session，故彻底失效）。避免长缓存导致封禁延迟生效。
+        self.cache.set(&cache_key, &user, 60).await?;
         Ok(user)
     }
 

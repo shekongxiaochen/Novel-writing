@@ -3,6 +3,19 @@
 {% block content %}
 <div class="max-w-5xl space-y-6">
 
+  {% if new_password %}
+  <div class="px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">
+    <div class="flex items-start gap-2">
+      <i class="fa-solid fa-key mt-0.5"></i>
+      <div class="flex-1">
+        <p class="font-semibold mb-1">密码已重置，请立即复制并转交用户（此密码仅显示这一次，刷新后不再出现）：</p>
+        <code class="inline-block px-3 py-1.5 rounded bg-white border border-amber-300 font-mono text-base tracking-wider select-all">{{ new_password }}</code>
+        <p class="text-xs text-amber-700 mt-2">该用户原有登录态已全部失效，需用此新密码重新登录。</p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     <div class="lg:col-span-2 bg-white rounded-lg border border-zinc-200 shadow-sm p-6">
       <div class="flex items-center justify-between mb-4">
@@ -10,14 +23,20 @@
           {% if is_active %}<span class="ml-2 align-middle inline-flex items-center px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700">正常</span>
           {% else %}<span class="ml-2 align-middle inline-flex items-center px-2 py-0.5 rounded text-xs bg-zinc-200 text-zinc-600">已停用</span>{% endif %}
         </h2>
-        <form method="post" action="/admin/users/{{ id }}/toggle-active"
-              onsubmit="return confirm('{% if is_active %}确定停用该用户？停用后将无法登录使用。{% else %}确定恢复启用该用户？{% endif %}');">
-          {% if is_active %}
-          <button class="px-3 py-1.5 rounded-md border border-red-200 text-red-600 text-sm hover:bg-red-50"><i class="fa-solid fa-ban mr-1"></i>停用账号</button>
-          {% else %}
-          <button class="px-3 py-1.5 rounded-md border border-emerald-200 text-emerald-700 text-sm hover:bg-emerald-50"><i class="fa-solid fa-circle-check mr-1"></i>恢复启用</button>
-          {% endif %}
-        </form>
+        <div class="flex items-center gap-2">
+          <form method="post" action="/admin/users/{{ id }}/reset-password"
+                onsubmit="return confirm('确定重置该用户的密码？将生成一个新随机密码，并使其当前所有登录态失效。');">
+            <button class="px-3 py-1.5 rounded-md border border-amber-300 text-amber-700 text-sm hover:bg-amber-50"><i class="fa-solid fa-key mr-1"></i>重置密码</button>
+          </form>
+          <form method="post" action="/admin/users/{{ id }}/toggle-active"
+                onsubmit="return confirm('{% if is_active %}确定停用该用户？停用后将无法登录使用。{% else %}确定恢复启用该用户？{% endif %}');">
+            {% if is_active %}
+            <button class="px-3 py-1.5 rounded-md border border-red-200 text-red-600 text-sm hover:bg-red-50"><i class="fa-solid fa-ban mr-1"></i>停用账号</button>
+            {% else %}
+            <button class="px-3 py-1.5 rounded-md border border-emerald-200 text-emerald-700 text-sm hover:bg-emerald-50"><i class="fa-solid fa-circle-check mr-1"></i>恢复启用</button>
+            {% endif %}
+          </form>
+        </div>
       </div>
       <dl class="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
         <div><dt class="text-zinc-400 text-xs">用户名</dt><dd class="font-medium">{{ username }}</dd></div>

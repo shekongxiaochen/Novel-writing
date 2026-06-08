@@ -438,6 +438,7 @@ import type {
   NovelChapterClassificationResult,
   NovelEntityExtractResult,
   NovelForeshadowAnalysisResult,
+  OutlineRewriteResult,
   ForeshadowPlant,
   NewForeshadowFulfillmentInput,
   NewForeshadowPlantInput,
@@ -491,6 +492,7 @@ import {
   classifyNovelChapterFromWorkspace,
   continueChapterFromWorkspaceStream,
   extractNovelEntitiesFromWorkspace,
+  rewriteOutlineFromProgressByAi,
   summarizeNovelChapterFromWorkspaceStream,
   summarizeNovelContinuityBriefFromWorkspaceStream,
   summarizeChapterScenesFromWorkspaceStream,
@@ -512,6 +514,7 @@ import {
   isNextChapterIntent,
 } from '../../lib/inferContinueFromDirection'
 import { suggestNextChapterOutlineBinding } from '../../lib/outlineBeatPack'
+import { buildOutlineRewriteToolCalls, buildPendingToolActions } from '../../features/chapter-hub/lib/aiPendingToolActions'
 import {
   emptyAiDeskSessionUiState,
   hydrateContinueDraft,
@@ -601,6 +604,7 @@ const aiExtractError = ref('')
 const aiAnalysisKind = ref<AiAnalysisKind>('entities')
 const aiExtractResult = ref<NovelEntityExtractResult>(emptyAiExtractResult())
 const aiForeshadowResult = ref<NovelForeshadowAnalysisResult>(emptyAiForeshadowResult())
+const aiOutlineRewriteResult = ref<OutlineRewriteResult>({ revisions: [], additions: [], warnings: [] })
 const aiClassificationResult = ref<NovelChapterClassificationResult>(emptyAiClassificationResult())
 const aiConsistencyResult = ref<ConsistencyCheckResult | null>(null)
 const aiConsistencyLoading = ref(false)
@@ -615,6 +619,7 @@ type AiExtractRun = {
   entityResult?: NovelEntityExtractResult
   foreshadowResult?: NovelForeshadowAnalysisResult
   classificationResult?: NovelChapterClassificationResult
+  outlineRewriteResult?: OutlineRewriteResult
   appliedActions: Array<{ id: string; text: string; tone: 'applied' | 'ignored' }>
 }
 const aiExtractRuns = ref<AiExtractRun[]>([])
@@ -710,6 +715,16 @@ const aiActiveDirectionPreset = ref('')
 const aiContinuityBriefLoading = ref(false)
 let aiDeskUiPersistTimer: number | null = null
 let aiContinuityBriefAbortController: AbortController | null = null
+
+// 是否有任意 AI 任务正在进行（续写 / 提问 / 抽取）。
+// 用于防止在一个请求进行中再次发起并发请求（如续写中途切到提问再提交）。
+const aiBusy = computed(
+  () =>
+    aiContinueDraft.value.loading ||
+    aiChatLoading.value ||
+    aiChatThinking.value ||
+    aiExtractLoading.value,
+)
 
 function emptyChapterSummaryDraft(): AiChapterSummaryDraft {
   return { chapterId: '', text: '', loading: false, status: 'idle' }
@@ -1521,6 +1536,8 @@ function switchToAiDeskMode(nextMode: AiDeskMode): void {
 }
 
 function toggleAiDeskMode(): void {
+  // AI 任务进行中禁止切换模式，避免借切换模式绕过并发锁发起第二个请求
+  if (aiBusy.value) return
   const nextMode: AiDeskMode = aiDeskMode.value === 'ask' ? 'write' : 'ask'
   switchToAiDeskMode(nextMode)
 }
@@ -2243,6 +2260,7 @@ function pushAiExtractRun(
     entityResult?: NovelEntityExtractResult
     foreshadowResult?: NovelForeshadowAnalysisResult
     classificationResult?: NovelChapterClassificationResult
+    outlineRewriteResult?: OutlineRewriteResult
   },
 ): void {
   aiExtractRuns.value = [
@@ -2256,6 +2274,7 @@ function pushAiExtractRun(
       entityResult: payload.entityResult,
       foreshadowResult: payload.foreshadowResult,
       classificationResult: payload.classificationResult,
+      outlineRewriteResult: payload.outlineRewriteResult,
       appliedActions: [],
     },
     ...aiExtractRuns.value,
@@ -2895,6 +2914,7 @@ function buildCombinedExtractSummary(
   foreshadowResult: NovelForeshadowAnalysisResult,
   classificationResult: NovelChapterClassificationResult,
   mode: AiExtractMode,
+  outlineRewriteResult?: OutlineRewriteResult,
 ): string {
   const entityTotal =
     entityResult.characters.length + entityResult.factions.length + entityResult.items.length + entityResult.memberships.length + entityResult.relations.length + entityResult.outlineItems.length
@@ -2902,7 +2922,11 @@ function buildCombinedExtractSummary(
     `${scopeLabel(mode)}整理完成。`,
     `实体建议 ${entityTotal} 条，新增伏笔候选 ${foreshadowResult.newPlants.length} 条，分类结果 ${classificationResult.chapterType || '未给出'}。`,
   ]
-  const warningTotal = entityResult.warnings.length + foreshadowResult.warnings.length + classificationResult.warnings.length
+  const rewriteTotal = (outlineRewriteResult?.revisions.length ?? 0) + (outlineRewriteResult?.additions.length ?? 0)
+  if (rewriteTotal > 0) {
+    lines.push(`大纲动态回写建议 ${rewriteTotal} 条（修订 ${outlineRewriteResult?.revisions.length ?? 0}、新增 ${outlineRewriteResult?.additions.length ?? 0}），已加入待确认。`)
+  }
+  const warningTotal = entityResult.warnings.length + foreshadowResult.warnings.length + classificationResult.warnings.length + (outlineRewriteResult?.warnings.length ?? 0)
   if (warningTotal > 0) lines.push(`提醒 ${warningTotal} 条。`)
   return lines.join('\n')
 }
@@ -2932,6 +2956,7 @@ function resetAiExtractState(): void {
   aiExtractResult.value = emptyAiExtractResult()
   aiForeshadowResult.value = emptyAiForeshadowResult()
   aiClassificationResult.value = emptyAiClassificationResult()
+  aiOutlineRewriteResult.value = { revisions: [], additions: [], warnings: [] }
   aiAppliedActions.value = []
   aiExtractRuns.value = []
   aiPendingAppliedDetail.value = ''
@@ -2955,6 +2980,7 @@ async function runAiExtract(mode: AiExtractMode): Promise<void> {
   aiExtractResult.value = emptyAiExtractResult()
   aiForeshadowResult.value = emptyAiForeshadowResult()
   aiClassificationResult.value = emptyAiClassificationResult()
+  aiOutlineRewriteResult.value = { revisions: [], additions: [], warnings: [] }
   persistActiveAiSessionState()
   try {
     const snapshot = buildNovelWorkspacePayload(id)
@@ -2965,22 +2991,41 @@ async function runAiExtract(mode: AiExtractMode): Promise<void> {
           ? aiRecentChapterIds()
           : []
     const focusQuote = aiSelectionQuote.value.trim() || undefined
-    const [entityResult, foreshadowResult, classificationResult] = await Promise.all([
+    const novelBrief = novel.value
+      ? {
+          title: novel.value.title,
+          summary: novel.value.summary,
+          continuityBrief: novel.value.continuityBrief,
+          genre: novel.value.genre,
+        }
+      : undefined
+    const [entityResult, foreshadowResult, classificationResult, outlineRewriteResult] = await Promise.all([
       extractNovelEntitiesFromWorkspace(snapshot, { mode, chapterIds }),
       analyzeNovelForeshadowsFromWorkspace(snapshot, { mode, chapterIds, focusQuote }),
       classifyNovelChapterFromWorkspace(snapshot, { mode, chapterIds, focusQuote }),
+      rewriteOutlineFromProgressByAi(snapshot, { mode, chapterIds, novel: novelBrief }),
     ])
     aiExtractResult.value = entityResult
     autoSkipNegligibleExtractUpdates()
     aiForeshadowResult.value = foreshadowResult
     aiClassificationResult.value = classificationResult
+    aiOutlineRewriteResult.value = outlineRewriteResult
     autoApplyExtractResult()
+    // 大纲动态回写建议转成待确认工具调用，并入现有"先预览后确认"列表
+    const outlineRewriteCalls = buildOutlineRewriteToolCalls(outlineRewriteResult)
+    if (outlineRewriteCalls.length > 0) {
+      aiPendingToolActions.value = [
+        ...aiPendingToolActions.value.filter((row) => row.status === 'pending'),
+        ...buildPendingToolActions(outlineRewriteCalls),
+      ]
+    }
     pushAiExtractRun('entities', mode, {
       entityResult: aiExtractResult.value,
       foreshadowResult: aiForeshadowResult.value,
       classificationResult: aiClassificationResult.value,
+      outlineRewriteResult: aiOutlineRewriteResult.value,
     })
-    appendAiChatMessage('assistant', buildCombinedExtractSummary(aiExtractResult.value, aiForeshadowResult.value, aiClassificationResult.value, mode), mode)
+    appendAiChatMessage('assistant', buildCombinedExtractSummary(aiExtractResult.value, aiForeshadowResult.value, aiClassificationResult.value, mode, aiOutlineRewriteResult.value), mode)
     persistActiveAiSessionState()
   } catch (e: unknown) {
     aiExtractError.value = e instanceof Error ? e.message : 'AI 分析失败，请稍后重试'
@@ -3063,6 +3108,9 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
   const id = novelId.value
   if (!id) return
   if (!requestAiAccess()) return
+  // 防止并发：提问/抽取任务进行中时，忽略续写请求。
+  // （续写自身进行中时由界面将「生成」切换为「终止」按钮处理，不在此拦截，以支持重新生成。）
+  if (aiChatLoading.value || aiChatThinking.value || aiExtractLoading.value) return
 
   const rawDirection = String(payload.direction ?? '').trim()
 
@@ -3493,6 +3541,8 @@ const TOOL_ACTION_INTENT_RE =
 async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }): Promise<void> {
   const id = novelId.value
   if (!id) return
+  // 防止并发：已有 AI 任务进行中时（续写/提问/抽取），忽略新的提交
+  if (aiBusy.value) return
   const deskMode = payload.mode ?? aiDeskMode.value
   const question = String(payload.question ?? '').trim()
   const isToolAction = TOOL_ACTION_INTENT_RE.test(question)

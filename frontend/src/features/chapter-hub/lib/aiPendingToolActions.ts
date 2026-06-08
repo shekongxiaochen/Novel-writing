@@ -1,4 +1,4 @@
-import type { AiPendingToolAction, AiToolCall } from '../../../types'
+import type { AiPendingToolAction, AiToolCall, OutlineRewriteResult } from '../../../types'
 
 function n(value: unknown): string {
   return String(value ?? '').trim()
@@ -162,4 +162,58 @@ export function buildPendingToolActions(toolCalls: AiToolCall[]): AiPendingToolA
       status: 'pending',
     }
   })
+}
+
+let outlineRewriteToolSeq = 0
+
+function makeToolCallId(): string {
+  outlineRewriteToolSeq += 1
+  return `outline-rewrite-${Date.now()}-${outlineRewriteToolSeq}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * 把动态大纲回写结果转成工具调用：
+ * - revision → update_outline_item（按 id 改未写节点）
+ * - addition → create_outline_item（补新节拍，可带 parentId）
+ * 返回的 AiToolCall[] 交给 buildPendingToolActions 走现有"先预览后确认"面板。
+ */
+export function buildOutlineRewriteToolCalls(result: OutlineRewriteResult): AiToolCall[] {
+  const calls: AiToolCall[] = []
+
+  for (const rev of result.revisions ?? []) {
+    if (!n(rev.id)) continue
+    const args: Record<string, unknown> = { id: rev.id }
+    for (const field of ['title', 'summary', 'goal', 'conflict', 'twist', 'result', 'suspense'] as const) {
+      if (rev[field] !== undefined && n(rev[field] as string)) args[field] = rev[field]
+    }
+    if (typeof rev.tension === 'number') args.tension = rev.tension
+    // 除 id 外没有任何改动字段则跳过
+    if (Object.keys(args).length <= 1) continue
+    calls.push({
+      id: makeToolCallId(),
+      type: 'function',
+      function: { name: 'update_outline_item', arguments: JSON.stringify(args) },
+    })
+  }
+
+  for (const add of result.additions ?? []) {
+    if (!n(add.title)) continue
+    const args: Record<string, unknown> = {
+      title: add.title,
+      summary: n(add.summary),
+      level: add.level,
+    }
+    if (add.parentOutlineId) args.parentId = add.parentOutlineId
+    for (const field of ['goal', 'conflict', 'twist', 'result', 'suspense'] as const) {
+      if (add[field] !== undefined && n(add[field] as string)) args[field] = add[field]
+    }
+    if (typeof add.tension === 'number') args.tension = add.tension
+    calls.push({
+      id: makeToolCallId(),
+      type: 'function',
+      function: { name: 'create_outline_item', arguments: JSON.stringify(args) },
+    })
+  }
+
+  return calls
 }

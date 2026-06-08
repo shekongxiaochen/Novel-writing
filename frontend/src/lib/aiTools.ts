@@ -718,6 +718,7 @@ function execCreateOutlineItem(novelId: string, args: Record<string, any>): AiTo
     title,
     summary: n(args.summary),
     level: args.level,
+    parentId: typeof args.parentId === 'string' && args.parentId ? args.parentId : undefined,
     goal: n(args.goal),
     conflict: n(args.conflict),
     twist: n(args.twist),

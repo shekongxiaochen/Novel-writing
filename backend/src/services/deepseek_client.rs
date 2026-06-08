@@ -17,6 +17,8 @@ pub struct DeepSeekUsage {
 pub struct CompletionOptions {
     pub temperature: Option<f64>,
     pub max_tokens: Option<u32>,
+    pub presence_penalty: Option<f64>,
+    pub frequency_penalty: Option<f64>,
     pub tools: Option<Value>,
     pub tool_choice: Option<Value>,
     pub response_format: Option<Value>,
@@ -71,6 +73,10 @@ struct ChatRequestBody {
     temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    presence_penalty: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequency_penalty: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,13 +142,19 @@ pub async fn chat_completion(
         stream: false,
         temperature: options.temperature,
         max_tokens: options.max_tokens,
+        presence_penalty: options.presence_penalty,
+        frequency_penalty: options.frequency_penalty,
         tools: options.tools.clone(),
         tool_choice: options.tool_choice.clone(),
         response_format: options.response_format.clone(),
         stream_options: None,
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
     let resp = client
         .post(&url)
         .bearer_auth(key)
@@ -209,13 +221,19 @@ pub async fn chat_completion_stream(
         stream: true,
         temperature: options.temperature,
         max_tokens: options.max_tokens,
+        presence_penalty: options.presence_penalty,
+        frequency_penalty: options.frequency_penalty,
         tools: options.tools.clone(),
         tool_choice: options.tool_choice.clone(),
         response_format: options.response_format.clone(),
         stream_options: Some(StreamOptions { include_usage: true }),
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
     let resp = client
         .post(&url)
         .bearer_auth(key)
@@ -294,7 +312,11 @@ pub async fn check_balance(api_key: &str, base_url: &str) -> Result<BalanceInfo,
         format!("{}/user/balance", base)
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
     let resp = client
         .get(&url)
         .bearer_auth(key)

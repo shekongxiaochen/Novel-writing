@@ -80,6 +80,10 @@ impl SettingsService {
             ("deepseek_model", "deepseek-chat"),
             ("deepseek_api_key", ""),
             ("deepseek_base_url", "https://api.deepseek.com"),
+            ("announcement.title", ""),
+            ("announcement.body", ""),
+            ("announcement.enabled", "0"),
+            ("announcement.version", "0"),
         ];
         for (key, value) in DEFAULTS {
             let exists = self.get_optional(key).await?.is_some();

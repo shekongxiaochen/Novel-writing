@@ -151,9 +151,8 @@ async function aiRequest(path: string, body: AiCompletionBody, signal?: AbortSig
     })
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') throw error
-    throw new Error(
-      `无法连接后端（${API_BASE_URL}）。请确认 Rust 后端已启动且已登录。`,
-    )
+    console.debug('[backendAi] 请求失败', error)
+    throw new Error('网络连接失败，请检查网络后重试。')
   }
   return resp
 }
@@ -322,6 +321,8 @@ type AiPromptBody = {
   context_prompt?: string
   ai_style_prompt?: string
   temperature?: number
+  presence_penalty?: number
+  frequency_penalty?: number
   max_tokens?: number
   stream?: boolean
   response_format?: string
@@ -346,9 +347,8 @@ async function aiPromptRequest(path: string, body: AiPromptBody, signal?: AbortS
     })
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') throw error
-    throw new Error(
-      `无法连接后端（${API_BASE_URL}）。请确认 Rust 后端已启动且已登录。`,
-    )
+    console.debug('[backendAi] 请求失败', error)
+    throw new Error('网络连接失败，请检查网络后重试。')
   }
   return resp
 }
@@ -484,5 +484,33 @@ export function assertAiReady(): void {
   }
   if (Number(session.user.balanceYuan) <= 0) {
     throw new Error('余额不足，请充值后再试')
+  }
+}
+
+export type AnnouncementPayload = {
+  enabled: boolean
+  title: string
+  body: string
+  image: string
+  version: string
+}
+
+/** 拉取弹窗公告（公开接口，无需鉴权）。失败时静默返回 null，绝不阻塞启动。 */
+export async function fetchAnnouncement(): Promise<AnnouncementPayload | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/announcement`, {
+      headers: { Accept: 'application/json' },
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as AnnouncementPayload
+    return {
+      enabled: Boolean(data.enabled),
+      title: String(data.title ?? ''),
+      body: String(data.body ?? ''),
+      image: String(data.image ?? ''),
+      version: String(data.version ?? '0'),
+    }
+  } catch {
+    return null
   }
 }

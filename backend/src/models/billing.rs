@@ -56,6 +56,10 @@ pub struct AiChatRequest {
     #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
+    pub presence_penalty: Option<f64>,
+    #[serde(default)]
+    pub frequency_penalty: Option<f64>,
+    #[serde(default)]
     pub stream: Option<bool>,
     #[serde(default)]
     pub tools: Option<Value>,

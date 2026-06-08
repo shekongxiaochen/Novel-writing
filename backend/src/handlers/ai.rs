@@ -103,12 +103,17 @@ pub async fn prompt_chat(
     // 6. 钳制 temperature 和 max_tokens（防止滥用）
     let temperature = req.temperature.map(|t| t.clamp(0.0, 2.0));
     let max_tokens = req.max_tokens.map(|m| m.min(16384));
+    // 惩罚项钳制在 DeepSeek 合法区间 [-2.0, 2.0]
+    let presence_penalty = req.presence_penalty.map(|p| p.clamp(-2.0, 2.0));
+    let frequency_penalty = req.frequency_penalty.map(|p| p.clamp(-2.0, 2.0));
 
     // 7. 构造 AiChatRequest 并调用现有 AI 服务
     let chat_req = AiChatRequest {
         messages,
         temperature,
         max_tokens,
+        presence_penalty,
+        frequency_penalty,
         stream: req.stream,
         tools: req.tools,
         tool_choice: req.tool_choice,
