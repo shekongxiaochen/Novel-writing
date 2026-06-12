@@ -23,18 +23,18 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Build Tauri (macOS universal)
+      - name: Build Tauri (macOS dmg)
         working-directory: frontend
-        run: npx tauri build --target universal-apple-darwin
+        run: npx tauri build --bundles dmg
 
-      - name: List build output
-        run: find frontend/src-tauri/target -type f \( -name "*.dmg" -o -name "*.app" \) 2>/dev/null || echo "no dmg/app found"
+      - name: List all bundle output
+        run: find frontend/src-tauri/target -type f \( -name "*.dmg" -o -name "*.app" -o -name "*.pkg" \) | head -30
 
-      - name: Find and copy artifacts
+      - name: Collect artifacts
         run: |
           mkdir -p macos-artifacts
           find frontend/src-tauri/target -name "*.dmg" -exec cp {} macos-artifacts/ \;
-          ls -lh macos-artifacts/ || echo "empty"
+          ls -lh macos-artifacts/
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
