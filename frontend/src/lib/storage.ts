@@ -25,6 +25,7 @@ import type {
   NewForeshadowFulfillmentInput,
   Novel,
   OutlineItem,
+  OutlineNodeLevel,
   OutlineStoryline,
   OutlineTension,
   TimelineEvent,
@@ -32,6 +33,7 @@ import type {
 } from '../types'
 import { getCurrentUser } from './auth'
 import { normalizeCharacterAliases } from './characterLabels'
+import { childLevelOf } from './outlineHierarchy'
 
 const NOVELS_KEY = 'novel-writing.novels'
 const CHAPTERS_KEY = 'novel-writing.chapters'
@@ -819,6 +821,13 @@ export function updateChapter(partial: Pick<Chapter, 'id'> & Partial<Chapter>): 
   all[idx] = updated
   saveAllChapters(all)
   if (typeof partial.content === 'string') {
+    // 正文被清空时，自动清除章总结和场景摘要，避免 AI 续写时受旧剧情影响
+    if (partial.content.trim().length === 0 && (prev.content ?? '').trim().length > 0) {
+      updated.annotation = ''
+      updated.sceneSummaries = []
+      all[idx] = updated
+      saveAllChapters(all)
+    }
     syncForeshadowsAfterChapterContentEdit(updated.id, prev.content ?? '', updated.content ?? '')
     syncEntityChangeAnchorsAfterChapterContentEdit(updated.id, prev.content ?? '', updated.content ?? '')
     syncCharacterFirstAppearanceByNovel(updated.novelId)
@@ -1005,7 +1014,7 @@ function normalizeOutlineItem(row: OutlineItem | (Partial<OutlineItem> & Record<
     title: String(row.title ?? '').trim() || '未命名情节点',
     summary: String(row.summary ?? '').trim(),
     status: row.status === 'doing' || row.status === 'done' ? row.status : 'todo',
-    level: row.level === 'volume' || row.level === 'act' || row.level === 'chapter' || row.level === 'scene' ? row.level : 'scene',
+    level: row.level === 'volume' || row.level === 'act' || row.level === 'chapter' || row.level === 'scene' ? row.level : 'volume',
     goal: String(row.goal ?? '').trim(),
     conflict: String(row.conflict ?? '').trim(),
     twist: String(row.twist ?? '').trim(),
@@ -1024,6 +1033,7 @@ function normalizeOutlineItem(row: OutlineItem | (Partial<OutlineItem> & Record<
     storylineIds: normalizeIdList(row.storylineIds),
     emotionalTurn: String(row.emotionalTurn ?? '').trim(),
     proseHint: String(row.proseHint ?? '').trim(),
+    proseSummary: String(row.proseSummary ?? '').trim(),
     createdAt: String(row.createdAt ?? '') || now,
     updatedAt: String(row.updatedAt ?? '') || now,
   }
@@ -1142,11 +1152,108 @@ export function getOutlineByNovelId(novelId: string): OutlineItem[] {
     .sort((a, b) => a.order - b.order)
 }
 
+const OUTLINE_MIGRATION_KEY = 'novel-writing.outline-hierarchy-migrated'
+
+function readMigratedNovelIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(OUTLINE_MIGRATION_KEY)
+    if (!raw) return new Set()
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? new Set(arr.map((x) => String(x))) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+function markMigrated(novelId: string): void {
+  try {
+    const ids = readMigratedNovelIds()
+    ids.add(novelId)
+    localStorage.setItem(OUTLINE_MIGRATION_KEY, JSON.stringify([...ids]))
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 一次性把历史大纲数据归一到严格层级（幂等，每作品只跑一次）：
+ *  1. parentId 指向不存在的节点 → 置 null
+ *  2. 自顶向下按 parentId 重算每个节点的 level，消除 level/parentId 不一致
+ *  3. 无 parent 的旧孤儿（章/场景）归到一个「未归类卷」volume 下
+ * 旧数据不重要，策略以「不再出现顶层孤儿场景」为目标，简化处理。
+ */
+export function migrateOutlineHierarchy(novelId: string): void {
+  if (!novelId) return
+  if (readMigratedNovelIds().has(novelId)) return
+
+  const all = getAllOutlineItems()
+  const items = all.filter((i) => i.novelId === novelId)
+  if (items.length === 0) {
+    markMigrated(novelId)
+    return
+  }
+
+  const byId = new Map(items.map((i) => [i.id, i]))
+  // 1. 清理悬空 parentId
+  for (const it of items) {
+    if (it.parentId && !byId.has(it.parentId)) it.parentId = null
+  }
+
+  // 3. 顶层孤儿（非 volume 却没有 parent）需要一个兜底卷
+  const needsFallbackVolume = items.some(
+    (i) => !i.parentId && (i.level ?? 'volume') !== 'volume',
+  )
+  let fallbackVolumeId: string | null = null
+  if (needsFallbackVolume) {
+    const existing = items.find((i) => !i.parentId && i.level === 'volume')
+    if (existing) {
+      fallbackVolumeId = existing.id
+    } else {
+      const created = createOutlineItem({
+        novelId,
+        title: '未归类卷',
+        summary: '',
+        level: 'volume',
+        parentId: null,
+      })
+      fallbackVolumeId = created.id
+      // createOutlineItem 已写盘；重新取全量以纳入新卷
+      return migrateOutlineHierarchy(novelId)
+    }
+    for (const it of items) {
+      if (!it.parentId && (it.level ?? 'volume') !== 'volume') it.parentId = fallbackVolumeId
+    }
+  }
+
+  // 2. 自顶向下按 parentId 重算 level
+  const childrenOf = new Map<string | null, OutlineItem[]>()
+  for (const it of items) {
+    const key = it.parentId ?? null
+    const list = childrenOf.get(key) ?? []
+    list.push(it)
+    childrenOf.set(key, list)
+  }
+  const assignLevel = (node: OutlineItem, parentLevel: OutlineNodeLevel | null): void => {
+    node.level = childLevelOf(parentLevel)
+    for (const child of childrenOf.get(node.id) ?? []) assignLevel(child, node.level)
+  }
+  for (const root of childrenOf.get(null) ?? []) assignLevel(root, null)
+
+  // 写回（只动本作品的行）
+  const others = all.filter((i) => i.novelId !== novelId)
+  saveAllOutlineItems([...others, ...items])
+  markMigrated(novelId)
+}
+
 export function createOutlineItem(input: NewOutlineInput): OutlineItem {
   const all = getAllOutlineItems()
   const novelItems = all.filter((i) => i.novelId === input.novelId)
   const maxOrder = novelItems.reduce((max, i) => Math.max(max, i.order), 0)
   const now = nowIso()
+  const parentId = String(input.parentId ?? '').trim() || null
+  // level 优先用显式传入；否则按父节点推导（无父→卷）。杜绝「无 level → 顶层孤儿场景」。
+  const parent = parentId ? all.find((i) => i.id === parentId) : null
+  const level: OutlineNodeLevel = input.level ?? childLevelOf(parent?.level ?? null)
   const item: OutlineItem = {
     id: uid(),
     novelId: input.novelId,
@@ -1154,14 +1261,14 @@ export function createOutlineItem(input: NewOutlineInput): OutlineItem {
     title: input.title.trim() || `情节点 ${maxOrder + 1}`,
     summary: input.summary.trim(),
     status: 'todo',
-    level: input.level ?? 'scene',
+    level,
     goal: String(input.goal ?? '').trim(),
     conflict: String(input.conflict ?? '').trim(),
     twist: String(input.twist ?? '').trim(),
     result: String(input.result ?? '').trim(),
     suspense: String(input.suspense ?? '').trim(),
     plotStage: input.plotStage ?? 'idea',
-    parentId: String(input.parentId ?? '').trim() || null,
+    parentId,
     location: String(input.location ?? '').trim(),
     timeLabel: String(input.timeLabel ?? '').trim(),
     povCharacterId: String(input.povCharacterId ?? '').trim() || null,
@@ -1173,6 +1280,7 @@ export function createOutlineItem(input: NewOutlineInput): OutlineItem {
     storylineIds: normalizeIdList(input.storylineIds),
     emotionalTurn: String(input.emotionalTurn ?? '').trim(),
     proseHint: String(input.proseHint ?? '').trim(),
+    proseSummary: '',
     createdAt: now,
     updatedAt: now,
   }
@@ -1188,6 +1296,16 @@ export function updateOutlineItem(
   const idx = all.findIndex((i) => i.id === partial.id)
   if (idx < 0) return null
 
+  const nextParentId =
+    partial.parentId !== undefined ? String(partial.parentId ?? '').trim() || null : all[idx].parentId ?? null
+  const parentChanged = partial.parentId !== undefined && nextParentId !== (all[idx].parentId ?? null)
+  // parentId 变化且未显式指定 level 时，按新父推导 level，保持层级一致。
+  let nextLevel: OutlineNodeLevel = partial.level ?? all[idx].level ?? 'volume'
+  if (parentChanged && partial.level === undefined) {
+    const parent = nextParentId ? all.find((i) => i.id === nextParentId) : null
+    nextLevel = childLevelOf(parent?.level ?? null)
+  }
+
   const updated: OutlineItem = {
     ...all[idx],
     ...partial,
@@ -1197,7 +1315,7 @@ export function updateOutlineItem(
     issueIds: partial.issueIds !== undefined ? normalizeIdList(partial.issueIds) : all[idx].issueIds ?? [],
     storylineIds:
       partial.storylineIds !== undefined ? normalizeIdList(partial.storylineIds) : all[idx].storylineIds ?? [],
-    parentId: partial.parentId !== undefined ? String(partial.parentId ?? '').trim() || null : all[idx].parentId ?? null,
+    parentId: nextParentId,
     location: partial.location != null ? String(partial.location).trim() : String(all[idx].location ?? '').trim(),
     timeLabel: partial.timeLabel != null ? String(partial.timeLabel).trim() : String(all[idx].timeLabel ?? '').trim(),
     povCharacterId: partial.povCharacterId !== undefined ? String(partial.povCharacterId ?? '').trim() || null : all[idx].povCharacterId ?? null,
@@ -1210,7 +1328,8 @@ export function updateOutlineItem(
     emotionalTurn:
       partial.emotionalTurn != null ? String(partial.emotionalTurn).trim() : String(all[idx].emotionalTurn ?? '').trim(),
     proseHint: partial.proseHint != null ? String(partial.proseHint).trim() : String(all[idx].proseHint ?? '').trim(),
-    level: partial.level ?? all[idx].level ?? 'scene',
+    proseSummary: partial.proseSummary != null ? String(partial.proseSummary).trim() : String(all[idx].proseSummary ?? '').trim(),
+    level: nextLevel,
     plotStage: partial.plotStage ?? all[idx].plotStage ?? 'idea',
     updatedAt: nowIso(),
   }

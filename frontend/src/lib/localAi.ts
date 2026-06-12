@@ -16,6 +16,7 @@ import type {
   NovelForeshadowAnalysisResult,
   Novel,
   OutlineItem,
+  OutlineNodeLevel,
   OutlineRewriteResult,
   OutlineStorylineType,
 } from '../types'
@@ -36,6 +37,7 @@ import {
 } from './askContext'
 import { buildContinueRagHits, formatContinueRagSnippetsForPrompt, type ContinueRagSnippet } from './continueRag'
 import { buildOutlineBeatPathForChapter } from './outlineBeatPack'
+import { isValidParentLevel } from './outlineHierarchy'
 import { buildDisplayNameMap } from './characterLabels'
 import { buildOutlineAiContextPack } from './outlineContextPack'
 
@@ -539,7 +541,7 @@ function buildContinueUserPrompt(
   payload: WorkspaceSnapshotPayload,
   input: {
     chapterId: string
-    position: 'cursor' | 'end'
+    position: 'cursor' | 'end' | 'replace'
     cursorOffset?: number
     targetChars?: number
     direction?: string
@@ -586,9 +588,16 @@ function buildContinueUserPrompt(
     input.position === 'cursor'
       ? Math.max(0, Math.min(content.length, Math.trunc(Number(input.cursorOffset ?? content.length))))
       : content.length
-  const anchor =
-    input.position === 'end' ? sliceTextTail(content, 2800) : sliceTextTail(content.slice(0, offset), 2800)
-  if (!anchor.trim()) warnings.push('当前锚点附近几乎没有正文，续写可能偏离既有语气。')
+  const isRewrite = input.position === 'replace'
+  // 重写：锚点为本章完整旧正文（从头取），供 AI 整章重写参考；续写：取末尾/光标前片段
+  const anchor = isRewrite
+    ? content.slice(0, 4000)
+    : input.position === 'end'
+      ? sliceTextTail(content, 2800)
+      : sliceTextTail(content.slice(0, offset), 2800)
+  if (!anchor.trim()) {
+    warnings.push(isRewrite ? '本章原文几乎为空，重写将基本等同于新写本章。' : '当前锚点附近几乎没有正文，续写可能偏离既有语气。')
+  }
 
   const prev = currentIndex > 0 ? chapters[currentIndex - 1] : null
   const summaryCount = Math.max(1, Math.min(5, Math.trunc(Number(input.prevSummaryCount ?? 3))))
@@ -765,6 +774,31 @@ function buildContinueUserPrompt(
   const novel = input.novel ?? {}
   const targetChars = Math.max(400, Math.min(6000, Math.trunc(Number(input.targetChars ?? 1500))))
 
+  // 重写专用：汇总本章「必须保留的出口事实」——章总结、本章绑定大纲节点的结果性字段、本章埋下的伏笔。
+  // 这些是后续章节可能依赖的既定结果，重写时只能改写法、不能改这些结论，否则后文会崩。
+  const mustKeepLines = isRewrite
+    ? (() => {
+        const lines: string[] = []
+        if (s(current.annotation)) lines.push(`本章原有章总结（核心事件，须保留其结果）：${s(current.annotation)}`)
+        const boundOutline = (payload.outline ?? []).filter((row) => outlineIdSet.has(s(row.id)))
+        for (const node of boundOutline) {
+          const parts2 = [
+            s(node.goal) ? `目标：${s(node.goal)}` : '',
+            s(node.conflict) ? `冲突：${s(node.conflict)}` : '',
+            s(node.twist) ? `转折：${s(node.twist)}` : '',
+            s(node.result) ? `结果：${s(node.result)}` : '',
+          ].filter(Boolean)
+          if (parts2.length > 0) lines.push(`大纲节拍《${s(node.title)}》——${parts2.join('；')}`)
+        }
+        const plantedHere = foreshadowSource
+          .filter((row) => s(row.plantChapterId) === s(current.id))
+          .map((row) => s(row.title))
+          .filter(Boolean)
+        if (plantedHere.length > 0) lines.push(`本章埋下的伏笔（重写后仍须在本章埋下，不得丢失）：${plantedHere.join('、')}`)
+        return lines
+      })()
+    : []
+
   const enableRag = input.enableRag !== false
   const ragHits =
     enableRag && currentIndex > 0
@@ -803,17 +837,35 @@ function buildContinueUserPrompt(
       : ''
 
   const parts: Record<string, string> = {
-    instruction: [
-      '【续写要求】',
-      `参考篇幅约 ${targetChars} 字（仅供参考，宁缺毋滥，不要为凑字数注水）。`,
-      input.position === 'end' ? '续写位置：本章末尾之后。' : `续写位置：本章第 ${offset} 字处（光标处）之后。`,
-      beatTaskLine,
-      s(input.direction) ? `作者方向：${s(input.direction)}` : outlineIds.length > 0 ? '作者未额外指定方向，请严格按大纲节拍自然推进。' : '作者未额外指定方向，请自然推进当前场景。',
-      s(input.selectionQuote) ? `引用片段：${s(input.selectionQuote)}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n'),
-    anchor: ['【锚点正文 —— 必须紧接其后续写，禁止重复】', anchor].join('\n'),
+    instruction: isRewrite
+      ? [
+          '【重写要求】',
+          '把下方【本章原文】整章重写一遍，输出一份从头到尾完整的本章新正文（不是续写片段、不是局部修改）。',
+          `参考篇幅约 ${targetChars} 字（仅供参考，与原文大致相当即可，不要为凑字数注水）。`,
+          '只改写法、过程、文笔、对话、细节、节奏；不得改变下方【必须保留的关键事实】里的任何结果。',
+          beatTaskLine,
+          s(input.direction) ? `作者的重写方向：${s(input.direction)}` : '作者未额外指定方向，请在保留关键事实的前提下提升文笔与可读性。',
+          s(input.selectionQuote) ? `作者特别关注的片段：${s(input.selectionQuote)}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : [
+          '【续写要求】',
+          `参考篇幅约 ${targetChars} 字（仅供参考，宁缺毋滥，不要为凑字数注水）。`,
+          input.position === 'end' ? '续写位置：本章末尾之后。' : `续写位置：本章第 ${offset} 字处（光标处）之后。`,
+          beatTaskLine,
+          s(input.direction) ? `作者方向：${s(input.direction)}` : outlineIds.length > 0 ? '作者未额外指定方向，请严格按大纲节拍自然推进。' : '作者未额外指定方向，请自然推进当前场景。',
+          s(input.selectionQuote) ? `引用片段：${s(input.selectionQuote)}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+    must_keep:
+      isRewrite && mustKeepLines.length > 0
+        ? ['【必须保留的关键事实 —— 重写后这些结果不得改变，否则后续章节会对不上】', ...mustKeepLines].join('\n')
+        : '',
+    anchor: isRewrite
+      ? ['【本章原文（供重写参考，你要整章重写它，不要保留原句）】', anchor].join('\n')
+      : ['【锚点正文 —— 必须紧接其后续写，禁止重复】', anchor].join('\n'),
     golden_three:
       typeof current.chapterNo === 'number' && current.chapterNo <= 3
         ? [
@@ -881,11 +933,11 @@ function buildContinueUserPrompt(
   }
 
   // 拆分为「稳定上下文」与「动态正文任务」两条消息：
-  // 稳定块（作品信息/连续性/弧线/大纲/前情/档案）在同一章多次续写间基本不变，
+  // 稳定块仅含全书级别基本不变的信息（作品信息/连续性/弧线），
   // 单独成一条消息置于动态块之前，使其落入可命中 DeepSeek 前缀缓存的稳定前缀；
-  // 动态块仅含本次的续写指令、当前章信息、锚点正文与检索片段。
-  const contextOrder = ['novel_brief', 'continuity_brief', 'arc_context', 'outline_beat_path', 'prev_summaries', 'prev_tail', 'bible_compact']
-  const dynamicOrder = ['instruction', 'golden_three', 'chapter_meta', 'anchor', 'rag_snippets']
+  // 动态块含本次续写的所有章相关内容（大纲节拍/前情/档案/锚点/指令/检索片段）。
+  const contextOrder = ['novel_brief', 'continuity_brief', 'arc_context']
+  const dynamicOrder = ['outline_beat_path', 'bible_compact', 'prev_summaries', 'prev_tail', 'instruction', 'must_keep', 'golden_three', 'chapter_meta', 'anchor', 'rag_snippets']
 
   const contextPrompt = contextOrder
     .map((key) => pack[key])
@@ -907,7 +959,7 @@ export async function continueChapterFromWorkspaceStream(
   payload: WorkspaceSnapshotPayload,
   input: {
     chapterId: string
-    position: 'cursor' | 'end'
+    position: 'cursor' | 'end' | 'replace'
     cursorOffset?: number
     targetChars?: number
     direction?: string
@@ -946,7 +998,7 @@ export async function continueChapterFromWorkspaceStream(
   const novelId = currentChapter?.novelId || undefined
 
   const { text } = await postAiPromptStream({
-    prompt_type: 'continue',
+    prompt_type: input.position === 'replace' ? 'rewrite' : 'continue',
     novel_id: novelId,
     user_prompt: prompt,
     context_prompt: contextPrompt || undefined,
@@ -2150,7 +2202,12 @@ export async function rewriteOutlineFromProgressByAi(
 
   const raw = await callAiPromptJson('outline_rewrite', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE })
 
-  const writableLevels = new Set(['chapter', 'scene'])
+  const writableLevels = new Set<OutlineNodeLevel>(['volume', 'act', 'chapter', 'scene'])
+  const levelById = new Map<string, OutlineNodeLevel>()
+  for (const row of outlineAll) {
+    const lvl = s(row.level) as OutlineNodeLevel
+    levelById.set(s(row.id), writableLevels.has(lvl) ? lvl : 'scene')
+  }
   const revisions = (Array.isArray(raw.revisions) ? raw.revisions : [])
     .map((row: any) => {
       const id = s(row?.id)
@@ -2169,21 +2226,37 @@ export async function rewriteOutlineFromProgressByAi(
     // 仅保留确实带改动字段的修订（除 id/reason 外至少一个字段）
     .filter((row: any) => Object.keys(row).some((k) => k !== 'id' && k !== 'reason'))
 
+  const additionWarnings: string[] = []
   const additions = (Array.isArray(raw.additions) ? raw.additions : [])
     .map((row: any, index: number) => {
       const title = s(row?.title)
       if (!title) return null
-      const rawLevel = s(row.level)
+      const rawLevel = s(row.level) as OutlineNodeLevel
+      const level: OutlineNodeLevel = writableLevels.has(rawLevel) ? rawLevel : 'chapter'
+
+      const parentId = s(row.parentOutlineId)
+      const hasParent = !!parentId && outlineAll.some((item) => s(item.id) === parentId)
+      const parentLevel = hasParent ? levelById.get(parentId) ?? null : null
+
+      // 父级合法性校验：场景/章必须挂在合法父级下；卷可无父。非法的丢弃并记 warning，防孤儿。
+      if (level !== 'volume') {
+        if (!hasParent || !isValidParentLevel(level, parentLevel)) {
+          additionWarnings.push(
+            `已忽略新增「${title}」：${level} 缺少合法父级（应挂在 ${parentLevelHint(level)} 下）`,
+          )
+          return null
+        }
+      }
+
       const out: any = {
         tempId: s(row.tempId) || `add-${index + 1}`,
         title,
         summary: s(row.summary),
-        level: (writableLevels.has(rawLevel) ? rawLevel : 'chapter') as 'chapter' | 'scene',
+        level,
       }
       const afterId = s(row.afterOutlineId)
       if (afterId && outlineAll.some((item) => s(item.id) === afterId)) out.afterOutlineId = afterId
-      const parentId = s(row.parentOutlineId)
-      if (parentId && outlineAll.some((item) => s(item.id) === parentId)) out.parentOutlineId = parentId
+      if (hasParent) out.parentOutlineId = parentId
       for (const field of ['goal', 'conflict', 'twist', 'result', 'suspense'] as const) {
         if (row[field] !== undefined && s(row[field])) out[field] = s(row[field])
       }
@@ -2195,8 +2268,15 @@ export async function rewriteOutlineFromProgressByAi(
   return {
     revisions: revisions as OutlineRewriteResult['revisions'],
     additions: additions as OutlineRewriteResult['additions'],
-    warnings: stringList(raw.warnings),
+    warnings: [...stringList(raw.warnings), ...additionWarnings],
   }
+}
+
+function parentLevelHint(level: OutlineNodeLevel): string {
+  if (level === 'scene') return '章'
+  if (level === 'chapter') return '幕'
+  if (level === 'act') return '卷'
+  return '顶层'
 }
 
 export async function classifyNovelChapterFromWorkspace(
@@ -2326,6 +2406,54 @@ export async function summarizeNovelChapterFromWorkspaceStream(
     temperature: 0.3,
   }, callbacks, signal)
   return text
+}
+
+/**
+ * 章节命名：根据本章正文（不足时退回章总结）让 AI 起一个贴合剧情的标题。
+ * 用于续写「写下一章」后，给占位标题（空 / 第N章）自动回填一个有内容的章名。
+ * 返回清洗后的纯文本标题；无正文或失败时返回空串。
+ */
+export async function generateChapterTitleFromWorkspace(
+  payload: WorkspaceSnapshotPayload,
+  chapterId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  assertAiReady()
+  const chapters = [...(payload.chapters ?? [])]
+  const target = chapters.find((row) => s(row.id) === s(chapterId))
+  if (!target) return ''
+  const body = String(target.content ?? '').trim()
+  const annotation = String(target.annotation ?? '').trim()
+  const basis = body || annotation
+  if (!basis) return ''
+  // 正文过长时只取开头与结尾，控制 token 又能体现首尾关键剧情
+  const head = basis.slice(0, 1800)
+  const tail = basis.length > 2600 ? basis.slice(-800) : ''
+  const prompt = [
+    '请为下面这一章起一个贴合本章剧情的标题。',
+    `本章正文${tail ? '（节选开头与结尾）' : ''}：\n${head}${tail ? `\n……\n${tail}` : ''}`,
+    annotation && body ? `本章总结参考：${annotation}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const result = await postAiPrompt({
+    prompt_type: 'chapter_title',
+    user_prompt: prompt,
+    temperature: 0.7,
+    max_tokens: 64,
+  })
+  const raw = typeof result.content === 'string' ? result.content : ''
+  // 清洗：去掉书名号/引号/前后空白/可能的「第N章」前缀/结尾标点，只留标题本身
+  return raw
+    .replace(/<｜｜DSML｜｜[^>]*>[\s\S]*?<｜｜DSML｜｜[^>]*>/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+    ?.replace(/^[「『《【\["']+|[」』》】\]"']+$/g, '')
+    .replace(/^第?\s*[0-9一二三四五六七八九十百千]+\s*章[：:、.\s]*/, '')
+    .replace(/[。.！!？?，,；;：:]+$/, '')
+    .trim()
+    .slice(0, 30) ?? ''
 }
 
 // ── 场景级摘要 ──
@@ -3192,30 +3320,102 @@ export async function generateWorldSettingDraftByAi(
     novelSummary?: string
     novel?: { title: string; summary?: string; genre?: string; perspective?: string; tone?: string }
     aiStylePrompt?: string
-    existingSetting?: { name: string; content: string }
-    history: Array<{ label: string; prompt: string; answer: string }>
+    /** 用户用自己的话描述想要一个什么样的世界（自由文本，主输入） */
+    userBrief: string
+    /** 迭代修订：在上一版基础上按修改意见重写 */
+    revise?: { previousName?: string; previousContent: string; feedback: string }
+    /** 流式输出回调，便于 UI 实时展示生成过程 */
+    onChunk?: (delta: string) => void
   },
+  signal?: AbortSignal,
 ): Promise<{ name: string; content: string; cards: Array<{ key: string; value: string }> }> {
   const parts = [
     `作品名：${s(input.novelTitle) || '未命名作品'}`,
     `类型：${s(input.novel?.genre) || '未指定'}`,
-    `现有简介：${s(input.novelSummary) || '暂无'}`,
   ]
-  if (input.existingSetting) {
-    parts.push(`已有世界观设定「${input.existingSetting.name}」（将在其基础上扩展深化）：\n${input.existingSetting.content}`)
-  }
-  parts.push(`访谈记录：${stableStringify(input.history.map((row) => ({ label: s(row.label), prompt: s(row.prompt), answer: s(row.answer) })))}`)
-  const prompt = parts.filter(Boolean).join('\n')
+  if (s(input.novelSummary)) parts.push(`作品简介：${s(input.novelSummary)}`)
 
-  const parsed = await callAiPromptJson('world_setting_draft', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt })
-  const rawCards = Array.isArray(parsed.cards) ? parsed.cards : []
-  const cards = rawCards
-    .map((c) => c as { key?: string; title?: string; value?: string; content?: string })
-    .map((c) => ({ key: s(c.key ?? c.title), value: s(c.value ?? c.content) }))
-    .filter((c) => c.key || c.value)
+  if (input.revise) {
+    // 修订模式：给上一版全文 + 修改意见，让 AI 基于上一版改写
+    parts.push(
+      '',
+      '【上一版世界观】',
+      s(input.revise.previousContent),
+      '',
+      '【作者的修改意见（请只改动这些地方，其余保留）】',
+      s(input.revise.feedback) || '（作者未给出具体意见，请整体润色提升一档）',
+    )
+  } else {
+    parts.push('', '【作者的核心设定 — 不可更改，整个世界观必须以此为基础展开】', s(input.userBrief) || '（作者没有特别说明，请发挥你的想象，创作一个有新意、自洽、适合这个题材的世界）')
+  }
+  const prompt = parts.filter((p) => p !== undefined).join('\n')
+
+  // 世界观走自然语言长文（非 JSON 模式），max_tokens 拉满到模型上限，让模型尽情展开；
+  // 拿到 Markdown 长文后在前端按 # 名称 / ## 维度 切分成卡片。
+  const { text } = await postAiPromptStream(
+    {
+      prompt_type: 'world_setting_draft',
+      user_prompt: prompt,
+      ai_style_prompt: input.aiStylePrompt,
+      temperature: OUTLINE_DESIGN_JSON_TEMPERATURE,
+      max_tokens: 16384,
+    },
+    { onChunk: (d) => input.onChunk?.(d), onError: () => {} },
+    signal,
+  )
+
+  return parseWorldSettingMarkdown(text, input.revise?.previousName)
+}
+
+/**
+ * 把世界观长文 Markdown 切成卡片。
+ * 约定：第一行 `# 名称` 是设定名；其后每个 `## 维度` 起一张卡片，
+ * 标题作 key、小节正文作 value。无标题时整段兜底为「概述」卡。
+ */
+function parseWorldSettingMarkdown(
+  raw: string,
+  fallbackName?: string,
+): { name: string; content: string; cards: Array<{ key: string; value: string }> } {
+  const content = s(raw).trim()
+  const lines = content.split('\n')
+  let name = s(fallbackName)
+  const cards: Array<{ key: string; value: string }> = []
+  let curKey = ''
+  let curBuf: string[] = []
+
+  const flush = (): void => {
+    if (!curKey) return
+    const value = curBuf.join('\n').trim()
+    if (value) cards.push({ key: curKey, value })
+    curBuf = []
+  }
+
+  for (const line of lines) {
+    const h1 = line.match(/^#\s+(.+?)\s*$/)
+    const h2 = line.match(/^#{2,3}\s+(.+?)\s*$/)
+    if (h1) {
+      // 一级标题作设定名（取第一个；已有 fallbackName 时不覆盖）
+      if (!name) name = h1[1].trim()
+      continue
+    }
+    if (h2) {
+      flush()
+      curKey = h2[1].trim()
+      continue
+    }
+    if (curKey) curBuf.push(line)
+  }
+  flush()
+
+  // 整篇没有 ## 小节时，把全文作为一张概述卡，保证不丢内容
+  if (cards.length === 0) {
+    const stripped = content.replace(/^#\s+.+\n?/, '').trim()
+    if (stripped) cards.push({ key: '概述', value: stripped })
+  }
+
   return {
-    name: s(parsed.name) || '未命名世界观设定',
-    content: s(parsed.content) || '',
+    name: name || '未命名世界观设定',
+    content,
     cards,
   }
 }
@@ -3239,7 +3439,9 @@ export async function expandOutlineDesignByAi(
     selectedOptionId?: string
     optionRefinement?: string
     optionRevisionHistory?: Array<{ selectedOptionId: string; selectedTitle: string; note: string }>
+    onChunk?: (delta: string) => void
   },
+  signal?: AbortSignal,
 ): Promise<{
   title: string
   summary: string
@@ -3288,10 +3490,23 @@ export async function expandOutlineDesignByAi(
       const block = buildGenrePromptInjection(profiles)
       return block ? `【类型指导】\n${block}` : ''
     })(),
-    '请把这一方案展开成一个可直接写入写作工具的大纲结构。',
+    '请把这一方案展开成一个可直接写入写作工具的大纲结构，严格遵循卷→幕→章→场景的层级：幕代表一个大的故事弧/副本（统领若干章），章是单个章节。每幕要给足章（至少 8-15 章），绝不能一幕只有两三章就结束。大纲可以留白：靠后的幕/章只给标题和方向、细节留到写正文时逐步补充，但章的数量必须给足、骨架要完整。',
   ].filter(Boolean).join('\n\n')
 
-  const parsed = await callAiPromptJson('outline_expand', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt })
+  assertAiReady()
+  const { text } = await postAiPromptStream(
+    {
+      prompt_type: 'outline_expand',
+      user_prompt: prompt,
+      ai_style_prompt: input.aiStylePrompt,
+      temperature: OUTLINE_DESIGN_JSON_TEMPERATURE,
+      max_tokens: 16384,
+      response_format: 'json',
+    },
+    { onChunk: (d) => input.onChunk?.(d), onError: () => {} },
+    signal,
+  )
+  const parsed = parseAiJsonContent(text)
   const storylineTypeSet = new Set<OutlineStorylineType>(['main', 'subplot', 'character', 'romance', 'antagonist', 'world', 'custom'])
   const levelSet = new Set(['volume', 'act', 'chapter', 'scene'])
   const plotStageSet = new Set(['idea', 'drafted', 'written', 'resolved'])
@@ -3491,10 +3706,10 @@ export async function expandOutlineSkeletonByAi(
       const block = buildGenrePromptInjection(profiles)
       return block ? `【类型指导】\n${block}` : ''
     })(),
-    '请只生成卷/幕/章骨架，不要生成场景；章节 goal 须考虑核心角色动机与关系走向。',
+    '请生成卷→幕→章三级骨架（不要生成场景）：每卷下要有若干幕，每幕下要有足够多的章（每幕至少 8-15 章，绝不能一幕只有两三章就结束，否则故事会显得太短）。幕代表一个大的故事弧/副本，章是单个章节。大纲可以留白：靠后的幕/章只给标题和方向、细节留到写正文时再补，但章的数量必须给足。章节 goal 须考虑核心角色动机与关系走向。',
   ].filter(Boolean).join('\n\n')
 
-  const parsed = await callAiPromptJson('outline_skeleton', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt })
+  const parsed = await callAiPromptJson('outline_skeleton', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt, maxTokens: 16384 })
   const storylineTypeSet = new Set<OutlineStorylineType>(['main', 'subplot', 'character', 'romance', 'antagonist', 'world', 'custom'])
   const skeletonLevels = new Set(['volume', 'act', 'chapter'])
 
@@ -3571,7 +3786,7 @@ export async function expandOutlineScenesForSkeletonByAi(
     })(),
   ].filter(Boolean).join('\n\n')
 
-  const parsed = await callAiPromptJson('outline_fill_scenes', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt })
+  const parsed = await callAiPromptJson('outline_fill_scenes', prompt, { temperature: OUTLINE_DESIGN_JSON_TEMPERATURE, aiStylePrompt: input.aiStylePrompt, maxTokens: 16384 })
   const levelSet = new Set(['scene'])
   const plotStageSet = new Set(['idea', 'drafted', 'written', 'resolved'])
   const normalizeTension = (value: unknown): 1 | 2 | 3 | 4 | 5 => {

@@ -1,0 +1,7 @@
+# 防止把宿主机（Windows）的依赖与编译产物带进 Linux 构建上下文
+node_modules
+dist
+src-tauri/target
+src-tauri/gen/schemas
+*.log
+.git

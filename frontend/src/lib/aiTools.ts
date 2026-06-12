@@ -295,11 +295,11 @@ export const AI_WRITE_TOOLS: AiToolDefinition[] = [
     function: {
       name: 'create_chapter',
       description:
-        '在作品末尾新建一章。用于「写下一章」「新开章节」等需求；可选 title、章总结 annotation、初稿 content（replace 写入）、绑定的大纲节点 outlineItemIds。',
+        '在作品末尾新建一章。用于「写下一章」「新开章节」等需求。请尽量提供一个贴合剧情的具体章节标题 title（如「初入宗门」「血色黄昏」「火灵根的秘密」），不要用「第N章」这类占位标题；可选章总结 annotation、初稿 content（replace 写入）、绑定的大纲节点 outlineItemIds。',
       parameters: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: '章节标题，可省略则自动生成「第N章」' },
+          title: { type: 'string', description: '章节标题，要具体贴合本章剧情（如「火灵根的秘密」「她的第三条规矩」），避免「第N章」等占位标题' },
           annotation: { type: 'string', description: '章总结（可选）' },
           content: { type: 'string', description: '初稿正文（可选，有则写入新章）' },
           outlineItemIds: {

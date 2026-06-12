@@ -1,17 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import type { AiMessage, AiPendingToolAction, Novel } from '../../../types'
-import { askAiWithToolsStream } from '../../../lib/localAi'
-import { buildNovelWorkspacePayload } from '../../../lib/storage'
-import { executeToolCall } from '../../../lib/aiTools'
+import type { AiPendingToolAction, Novel } from '../../../types'
 import { fetchWalletBalance } from '../../../lib/backendAi'
 import { requestAiAccess } from '../../../composables/useAiAccess'
 import { useAuth } from '../../../composables/useAuth'
 import { formatBalanceYuan } from '../../../lib/balanceFormat'
 import { describeToolCall } from '../../../features/chapter-hub/lib/aiPendingToolActions'
-
-type ChatMsg = { id: string; role: 'user' | 'assistant'; content: string }
-type FocusEntity = { kind: string; id: string; label: string } | null
+import { renderMarkdown } from '../../../lib/renderMarkdown'
+import { useWorkspaceAiChat, type FocusEntity } from '../../../composables/useWorkspaceAiChat'
 
 const props = defineProps<{
   novelId: string
@@ -70,92 +66,21 @@ async function refreshBalance(): Promise<void> {
     balanceRefreshing.value = false
   }
 }
-const loading = ref(false)
-const thinking = ref(false)
-const errorText = ref('')
-const messages = ref<ChatMsg[]>([])
-const history = ref<AiMessage[]>([])
-const pendingActions = ref<AiPendingToolAction[]>([])
 const scrollRef = ref<HTMLElement | null>(null)
-let abort: AbortController | null = null
 
-const STORAGE_PREFIX = 'novel-writing.workspace-ai-chat.'
-function storageKey(id: string): string {
-  return `${STORAGE_PREFIX}${id}`
-}
-
-function loadChat(id: string): void {
-  messages.value = []
-  history.value = []
-  pendingActions.value = []
-  if (!id || typeof window === 'undefined') return
-  try {
-    const raw = localStorage.getItem(storageKey(id))
-    if (!raw) return
-    const parsed = JSON.parse(raw) as { messages?: ChatMsg[]; history?: AiMessage[] }
-    if (Array.isArray(parsed.messages)) messages.value = parsed.messages.slice(-100)
-    if (Array.isArray(parsed.history)) history.value = parsed.history.slice(-40)
-  } catch {
-    /* ignore */
-  }
-}
-
-function persistChat(): void {
-  if (!props.novelId || typeof window === 'undefined') return
-  try {
-    localStorage.setItem(
-      storageKey(props.novelId),
-      JSON.stringify({ messages: messages.value.slice(-100), history: history.value.slice(-40) }),
-    )
-  } catch {
-    /* ignore */
-  }
-}
-
-watch(() => props.novelId, (id) => loadChat(id), { immediate: true })
+// 会话与流式状态来自模块级单例 composable，不随本组件挂载/卸载而销毁。
+// 切换标签页导致侧边栏卸载时，进行中的流式请求与已输出内容都能保活。
+const chat = computed(() => useWorkspaceAiChat(props.novelId))
+const messages = computed(() => chat.value.messages.value ?? [])
+const pendingActions = computed(() => chat.value.pendingActions.value ?? [])
+const loading = computed(() => chat.value.loading.value ?? false)
+const thinking = computed(() => chat.value.thinking.value ?? false)
+const errorText = computed(() => chat.value.errorText.value ?? '')
 
 const focusLabel = computed(() => props.focusEntity?.label ?? '')
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function renderInline(text: string): string {
-  let t = escapeHtml(text)
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  t = t.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
-  t = t.replace(/`([^`]+)`/g, '<code>$1</code>')
-  return t
-}
-
 function renderMd(content: string): string {
-  const src = String(content ?? '').replace(/\r\n/g, '\n').trim()
-  if (!src) return ''
-  const blocks: string[] = []
-  let list: string[] = []
-  const flushList = () => {
-    if (list.length) {
-      blocks.push(`<ul>${list.map((li) => `<li>${renderInline(li)}</li>`).join('')}</ul>`)
-      list = []
-    }
-  }
-  for (const rawLine of src.split('\n')) {
-    const line = rawLine.trim()
-    if (!line) { flushList(); continue }
-    const h = line.match(/^(#{1,4})\s+(.*)$/)
-    if (h) { flushList(); const lv = h[1].length; blocks.push(`<h${lv}>${renderInline(h[2])}</h${lv}>`); continue }
-    const li = line.match(/^[-*+]\s+(.*)$/)
-    if (li) { list.push(li[1]); continue }
-    flushList()
-    blocks.push(`<p>${renderInline(line)}</p>`)
-  }
-  flushList()
-  return blocks.join('')
+  return renderMarkdown(content)
 }
 
 function scrollToBottom(): void {
@@ -163,11 +88,6 @@ function scrollToBottom(): void {
     const el = scrollRef.value
     if (el) el.scrollTop = el.scrollHeight
   })
-}
-
-function pushMsg(role: 'user' | 'assistant', content: string): void {
-  messages.value = [...messages.value, { id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, role, content }]
-  scrollToBottom()
 }
 
 // 流式输出时内容逐字追加，需跟随滚动到底
@@ -181,168 +101,46 @@ watch(open, (v) => {
   emit('open-change', v)
 })
 
-function toolContext() {
-  return props.focusEntity ? { focusEntity: { ...props.focusEntity } } : {}
-}
+// 待确认工具调用变化时通知父组件；immediate 保证组件重新挂载时父组件能同步到当前待确认项
+watch(pendingActions, (v) => emit('pending-change', v), { deep: true, immediate: true })
 
 async function send(): Promise<void> {
   const question = draft.value.trim()
   if (!question || loading.value) return
   if (!requestAiAccess()) return
-  // 仍有未处理的待确认工具调用时，先给它们补上「未采用」工具响应，
-  // 否则历史里会出现 tool_calls 后缺少对应 tool 消息，上游 API 会报 400。
-  if (pendingActions.value.length > 0) ignoreAll()
-  const focus = props.focusEntity
-  const composed = focus
-    ? `【当前聚焦】${focus.kind}「${focus.label}」(内部 id=${focus.id}，仅供你调用工具时使用，禁止在回复里向用户显示 id 或工具名称)\n\n${question}`
-    : question
-  pushMsg('user', focus ? `[${focus.label}] ${question}` : question)
   draft.value = ''
-  loading.value = true
-  thinking.value = true
-  errorText.value = ''
-  abort?.abort()
-  abort = new AbortController()
-  const assistant: ChatMsg = { id: `${Date.now()}-a`, role: 'assistant', content: '' }
-  messages.value = [...messages.value, assistant]
-  try {
-    const snapshot = buildNovelWorkspacePayload(props.novelId)
-    const { history: nextHistory, pendingToolActions, text } = await askAiWithToolsStream(
-      snapshot,
-      {
-        mode: 'all',
-        question: composed,
-        chapterIds: [],
-        novelId: props.novelId,
-        prevSummaryCount: 3,
-        enableRag: true,
-        novel: props.novel
-          ? {
-              title: props.novel.title,
-              summary: props.novel.summary,
-              continuityBrief: props.novel.continuityBrief,
-              genre: props.novel.genre,
-              perspective: props.novel.perspective,
-              tone: props.novel.tone,
-            }
-          : undefined,
-      },
-      {
-        onChunk: (t) => {
-          if (thinking.value) thinking.value = false
-          assistant.content += t
-        },
-        onError: (err) => {
-          if (err.name === 'AbortError') return
-          errorText.value = err.message || 'AI 请求失败'
-        },
-      },
-      history.value.length > 0 ? history.value : undefined,
-      abort.signal,
-      { alwaysEnableTools: true, confirmBeforeApply: true, toolContext: toolContext() },
-    )
-    history.value = nextHistory
-    assistant.content = String(assistant.content ?? '')
-      .replace(/<｜｜DSML｜｜[^>]*>[\s\S]*?<｜｜DSML｜｜[^>]*>/g, '')
-      .trim()
-    if (pendingToolActions && pendingToolActions.length > 0) {
-      pendingActions.value = pendingToolActions
-      assistant.content = assistant.content
-        ? `${assistant.content}\n\n下方有待确认的修改，点「采用」后才会写入。`
-        : '已生成待确认的修改，点「采用」后才会写入。'
-    } else if (!assistant.content.trim()) {
-      assistant.content = text?.trim() || '已回答完毕，但这次没有可显示的内容。'
-    }
-    persistChat()
-  } catch (e) {
-    if (e instanceof Error && e.name === 'AbortError') {
-      if (!assistant.content.trim()) assistant.content = '已停止回答。'
-    } else {
-      messages.value = messages.value.filter((m) => m.id !== assistant.id)
-      errorText.value = e instanceof Error ? e.message : 'AI 请求失败，请稍后重试'
-    }
-  } finally {
-    loading.value = false
-    thinking.value = false
-    abort = null
-  }
+  await chat.value.send(question, { novel: props.novel, focus: props.focusEntity ?? null })
 }
 
 function stop(): void {
-  abort?.abort()
-  loading.value = false
-  thinking.value = false
-}
-
-function applyOne(action: AiPendingToolAction): void {
-  if (!props.novelId) return
-  const result = executeToolCall(props.novelId, action.toolCall, toolContext())
-  const toolMsg: AiMessage = { role: 'tool', tool_call_id: action.toolCall.id, content: JSON.stringify(result) }
-  history.value = [...history.value, toolMsg].slice(-40)
-  pendingActions.value = pendingActions.value.filter((row) => row.id !== action.id)
-  pushMsg('assistant', `【已采用】${result.message}`)
-  persistChat()
-  emit('applied')
+  chat.value.stop()
 }
 
 function applyOneById(id: string): void {
-  const action = pendingActions.value.find((row) => row.id === id)
-  if (action) applyOne(action)
+  chat.value.applyOneById(id, props.focusEntity ?? null, () => emit('applied'))
+}
+
+function applyOne(action: AiPendingToolAction): void {
+  applyOneById(action.id)
 }
 
 function ignoreOneById(id: string): void {
-  const action = pendingActions.value.find((row) => row.id === id)
-  if (action) {
-    const toolMsg: AiMessage = {
-      role: 'tool',
-      tool_call_id: action.toolCall.id,
-      content: JSON.stringify({ success: false, message: '作者未采用此修改' }),
-    }
-    history.value = [...history.value, toolMsg].slice(-40)
-  }
-  pendingActions.value = pendingActions.value.filter((row) => row.id !== id)
-  persistChat()
+  chat.value.ignoreOneById(id)
 }
 
 function applyAll(): void {
-  const pending = [...pendingActions.value]
-  if (!props.novelId || pending.length === 0) return
-  const msgs: string[] = []
-  for (const action of pending) {
-    const result = executeToolCall(props.novelId, action.toolCall, toolContext())
-    msgs.push(result.message)
-    const toolMsg: AiMessage = { role: 'tool', tool_call_id: action.toolCall.id, content: JSON.stringify(result) }
-    history.value = [...history.value, toolMsg].slice(-40)
-  }
-  pendingActions.value = []
-  pushMsg('assistant', `【已采用】${msgs.join('；')}`)
-  persistChat()
-  emit('applied')
+  chat.value.applyAll(props.focusEntity ?? null, () => emit('applied'))
 }
 
 function ignoreAll(): void {
-  if (pendingActions.value.length > 0) {
-    const toolMsgs: AiMessage[] = pendingActions.value.map((action) => ({
-      role: 'tool',
-      tool_call_id: action.toolCall.id,
-      content: JSON.stringify({ success: false, message: '作者未采用此修改' }),
-    }))
-    history.value = [...history.value, ...toolMsgs].slice(-40)
-  }
-  pendingActions.value = []
-  persistChat()
+  chat.value.ignoreAll()
 }
-
-watch(pendingActions, (v) => emit('pending-change', v), { deep: true })
-
-defineExpose({ open, applyOneById, ignoreOneById, applyAll, ignoreAll })
 
 function clearChat(): void {
-  messages.value = []
-  history.value = []
-  pendingActions.value = []
-  persistChat()
+  chat.value.clearChat()
 }
+
+defineExpose({ open, applyOneById, ignoreOneById, applyAll, ignoreAll })
 
 function onComposerKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey) {

@@ -143,6 +143,8 @@ export type OutlineItem = {
   emotionalTurn?: string
   /** 语气/意象/禁忌等写作提示（可选） */
   proseHint?: string
+  /** 写后实际场景内容摘要（场景写完后从正文回填，与 summary=写前细纲 区分） */
+  proseSummary?: string
   createdAt: string
   updatedAt: string
 }
@@ -170,6 +172,7 @@ export type NewOutlineInput = {
   issueIds?: string[]
   emotionalTurn?: string
   proseHint?: string
+  proseSummary?: string
 }
 
 /** 角色与势力的从属关系（多对多）；描述为该角色在此势力中的身份/立场等 */
@@ -406,7 +409,7 @@ export type NewTimelineEventInput = {
 export type AiAnalysisKind = 'entities' | 'foreshadows' | 'classification'
 export type AiExtractMode = 'current' | 'recent' | 'all'
 export type AiDeskMode = 'ask' | 'write'
-export type AiContinuePosition = 'cursor' | 'end'
+export type AiContinuePosition = 'cursor' | 'end' | 'replace'
 export type AiContinueTargetChars = 800 | 1500 | 3000
 export type AiContinuePrevSummaryCount = 2 | 3 | 5
 
@@ -738,7 +741,7 @@ export type OutlineAdditionSuggestion = {
   parentOutlineId?: string
   title: string
   summary: string
-  level: 'chapter' | 'scene'
+  level: OutlineNodeLevel
   goal?: string
   conflict?: string
   twist?: string

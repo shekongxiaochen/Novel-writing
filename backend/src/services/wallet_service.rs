@@ -223,4 +223,14 @@ impl WalletService {
     ) -> Result<i64> {
         self.admin_adjust(user_id, tokens, ref_id).await
     }
+
+    /// 新用户注册赠送体验额度（写入流水，reason = signup_bonus）
+    pub async fn grant_signup_bonus(&self, user_id: &str, amount_units: i64) -> Result<i64> {
+        if amount_units <= 0 {
+            return self.balance(user_id).await;
+        }
+        let ref_id = id::generate_id();
+        self.apply_ledger_delta(user_id, amount_units, "signup_bonus", &ref_id)
+            .await
+    }
 }

@@ -16,6 +16,9 @@ export type OutlineDraftLintItem = {
   characterNames?: string[]
 }
 
+/** 每幕建议的最少章节数；低于此值视为「幕太单薄」。与生成提示词里的「每幕至少 8-15 章」一致取下限。 */
+const MIN_CHAPTERS_PER_ACT = 8
+
 function s(value: unknown): string {
   return String(value ?? '').trim()
 }
@@ -39,6 +42,26 @@ export function lintOutlineDraftItems(items: OutlineDraftLintItem[]): OutlineDra
   if (!items.length) return issues
 
   const scenes = items.filter((row) => s(row.level) === 'scene' || !s(row.level))
+
+  // --- Rule 0: Under-chaptered acts（每幕章节太少）---
+  // 大纲常见问题：AI 一幕只给一两章，撑不起一个故事弧。统计每个「幕」直接挂的「章」数。
+  const acts = items.filter((row) => s(row.level) === 'act')
+  if (acts.length > 0) {
+    const chapterCountByAct = new Map<string, number>()
+    for (const row of items) {
+      if (s(row.level) !== 'chapter') continue
+      const pid = s(row.parentTempId)
+      if (!pid) continue
+      chapterCountByAct.set(pid, (chapterCountByAct.get(pid) ?? 0) + 1)
+    }
+    const thinActs = acts.filter((act) => (chapterCountByAct.get(s(act.tempId)) ?? 0) < MIN_CHAPTERS_PER_ACT)
+    if (thinActs.length > 0) {
+      issues.push({
+        severity: 'warn',
+        message: `有 ${thinActs.length} 个幕的章节偏少（少于 ${MIN_CHAPTERS_PER_ACT} 章）。一个幕是一段大故事弧，章太少会让故事显得仓促；可让 AI 重新生成或写入后手动补章（场景可后补）。`,
+      })
+    }
+  }
 
   // --- Rule 1: Duplicate conflict ---
   const conflicts = scenes.map((row) => s(row.conflict)).filter(Boolean)

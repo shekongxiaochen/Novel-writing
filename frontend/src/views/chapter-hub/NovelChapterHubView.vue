@@ -414,8 +414,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+defineOptions({ name: 'NovelChapterHubView' })
 import { requestAiAccess } from '../../composables/useAiAccess'
 import { focusMode } from '../../composables/useFocusMode'
+import { useChapterAiDesk } from '../../composables/useChapterAiDesk'
 import type {
   AiDeskChatMessage,
   AiAnalysisKind,
@@ -494,6 +496,7 @@ import {
   extractNovelEntitiesFromWorkspace,
   rewriteOutlineFromProgressByAi,
   summarizeNovelChapterFromWorkspaceStream,
+  generateChapterTitleFromWorkspace,
   summarizeNovelContinuityBriefFromWorkspaceStream,
   summarizeChapterScenesFromWorkspaceStream,
   checkChapterConsistencyFromWorkspaceStream,
@@ -512,6 +515,7 @@ import { buildChapterContinueOutlineHint } from '../../lib/outlineContinueHint'
 import {
   inferContinueOptionsFromDirection,
   isNextChapterIntent,
+  isRewriteIntent,
 } from '../../lib/inferContinueFromDirection'
 import { suggestNextChapterOutlineBinding } from '../../lib/outlineBeatPack'
 import { buildOutlineRewriteToolCalls, buildPendingToolActions } from '../../features/chapter-hub/lib/aiPendingToolActions'
@@ -566,6 +570,22 @@ const props = withDefaults(defineProps<ChapterHubShellProps>(), {
 
 const route = useRoute()
 const router = useRouter()
+
+// AI 进行中状态走模块级单例（按 novelId 分桶），切页/组件重挂载不丢、生成不中断。
+// 这些是单例里的 ref（同名），下方所有 .value 用法保持不变；aborts 是非响应式的 AbortController 持有器。
+const aiDesk = useChapterAiDesk(String(route.params.novelId ?? ''))
+const {
+  aiContinueDraft,
+  aiContinueThinkingText,
+  aiChatMessages,
+  conversationHistory,
+  aiChatLoading,
+  aiChatThinking,
+  aiExtractLoading,
+  aiChapterSummaryDraft,
+  aiContinuityBriefLoading,
+} = aiDesk
+const deskAborts = aiDesk.aborts
 const emptyAiExtractResult = (): NovelEntityExtractResult => ({
   characters: [],
   factions: [],
@@ -597,9 +617,6 @@ const emptyAiClassificationResult = (): NovelChapterClassificationResult => ({
   warnings: [],
 })
 
-const aiExtractLoading = ref(false)
-const aiChatLoading = ref(false)
-const aiChatThinking = ref(false)
 const aiExtractError = ref('')
 const aiAnalysisKind = ref<AiAnalysisKind>('entities')
 const aiExtractResult = ref<NovelEntityExtractResult>(emptyAiExtractResult())
@@ -627,8 +644,6 @@ const aiPendingAppliedDetail = ref('')
 const aiPendingToolActions = ref<AiPendingToolAction[]>([])
 const aiExtractHasRun = ref(false)
 const aiExtractLastMode = ref<AiExtractMode | null>(null)
-const aiChatMessages = ref<AiDeskChatMessage[]>([])
-const conversationHistory = ref<AiMessage[]>([])
 type AiDeskChatSession = {
   id: string
   title: string
@@ -685,8 +700,6 @@ const pinnedQuoteRangeForPaper = computed(() => {
   if (!pin || !chapter || pin.chapterId !== chapter.id) return null
   return normalizeQuoteRange(pin.start, pin.end, (chapter.content ?? '').length)
 })
-let aiChatAbortController: AbortController | null = null
-let aiContinueAbortController: AbortController | null = null
 
 function emptyAiContinueDraft(): AiContinueDraft {
   return {
@@ -708,13 +721,9 @@ function emptyAiContinueDraft(): AiContinueDraft {
   }
 }
 
-const aiContinueDraft = ref<AiContinueDraft>(emptyAiContinueDraft())
-const aiContinueThinkingText = ref('')
 const aiComposerDraft = ref('')
 const aiActiveDirectionPreset = ref('')
-const aiContinuityBriefLoading = ref(false)
 let aiDeskUiPersistTimer: number | null = null
-let aiContinuityBriefAbortController: AbortController | null = null
 
 // 是否有任意 AI 任务正在进行（续写 / 提问 / 抽取）。
 // 用于防止在一个请求进行中再次发起并发请求（如续写中途切到提问再提交）。
@@ -729,9 +738,6 @@ const aiBusy = computed(
 function emptyChapterSummaryDraft(): AiChapterSummaryDraft {
   return { chapterId: '', text: '', loading: false, status: 'idle' }
 }
-
-const aiChapterSummaryDraft = ref<AiChapterSummaryDraft>(emptyChapterSummaryDraft())
-let aiChapterSummaryAbortController: AbortController | null = null
 
 function emptyAiAskContextMeta(): AiAskContextMeta {
   return { warnings: [], droppedLayers: [], usedLayers: [], usedChars: 0, ragHits: [] }
@@ -1280,8 +1286,8 @@ async function generateContinuityBrief(): Promise<void> {
   if (!id || !currentNovel) return
   if (!requestAiAccess()) return
 
-  aiContinuityBriefAbortController?.abort()
-  aiContinuityBriefAbortController = new AbortController()
+  deskAborts.continuityBrief?.abort()
+  deskAborts.continuityBrief = new AbortController()
   aiContinuityBriefLoading.value = true
   aiExtractError.value = ''
   appendAiSystemNote('正在生成全书连续性摘要…')
@@ -1306,7 +1312,7 @@ async function generateContinuityBrief(): Promise<void> {
           aiExtractError.value = err.message || '生成全书摘要失败'
         },
       },
-      aiContinuityBriefAbortController.signal,
+      deskAborts.continuityBrief.signal,
     )
     const brief = String(text ?? '').trim()
     if (!brief) return
@@ -1321,7 +1327,7 @@ async function generateContinuityBrief(): Promise<void> {
     aiExtractError.value = e instanceof Error ? e.message : '生成全书摘要失败'
   } finally {
     aiContinuityBriefLoading.value = false
-    aiContinuityBriefAbortController = null
+    deskAborts.continuityBrief = null
     void fetchWalletBalance().catch(() => {
       /* ignore */
     })
@@ -1329,7 +1335,7 @@ async function generateContinuityBrief(): Promise<void> {
 }
 
 function stopChapterSummaryDraft(): void {
-  aiChapterSummaryAbortController?.abort()
+  deskAborts.chapterSummary?.abort()
 }
 
 function ignoreChapterSummaryDraft(): void {
@@ -1361,8 +1367,8 @@ async function runChapterSummaryAfterContinue(
   const id = novelId.value
   if (!id || !requestAiAccess()) return
 
-  aiChapterSummaryAbortController?.abort()
-  aiChapterSummaryAbortController = new AbortController()
+  deskAborts.chapterSummary?.abort()
+  deskAborts.chapterSummary = new AbortController()
   aiChapterSummaryDraft.value = {
     chapterId,
     text: '',
@@ -1388,7 +1394,7 @@ async function runChapterSummaryAfterContinue(
           aiExtractError.value = err.message || '章总结生成失败'
         },
       },
-      aiChapterSummaryAbortController.signal,
+      deskAborts.chapterSummary.signal,
     )
     const summary = formatChapterSummaryText(text || aiChapterSummaryDraft.value.text).trim()
     if (!summary) {
@@ -1427,7 +1433,7 @@ async function runChapterSummaryAfterContinue(
       aiChapterSummaryDraft.value = emptyChapterSummaryDraft()
     }
   } finally {
-    aiChapterSummaryAbortController = null
+    deskAborts.chapterSummary = null
     void fetchWalletBalance().catch(() => {
       /* ignore */
     })
@@ -1454,14 +1460,68 @@ async function runSceneSummaryAfterContinue(chapterId: string): Promise<void> {
     )
     if (scenes.length > 0) {
       updateChapter({ id: chapterId, sceneSummaries: scenes })
+      const synced = syncScenesToOutline(chapterId, scenes)
       reload()
-      appendAiSystemNote(`已生成 ${scenes.length} 个场景摘要`)
+      const extra = synced > 0 ? `，并回填到大纲 ${synced} 个场景` : ''
+      appendAiSystemNote(`已生成 ${scenes.length} 个场景摘要${extra}`)
     }
   } catch (e: unknown) {
     if (e instanceof Error && e.name !== 'AbortError') {
       console.warn('场景摘要生成失败:', e.message)
     }
   }
+}
+
+/**
+ * 把本章拆出的场景摘要回填到大纲的 scene 节点（场景概念合并）：
+ * - 找本章绑定的 chapter 级大纲节点作为父；
+ * - 已有 scene 子节点按 order 逐个回填 proseSummary、标 done/written；
+ * - scene 子节点不足时按 level='scene' 显式补建（防孤儿）。
+ * 返回回填+新建的场景数。找不到 chapter 父节点则跳过（返回 0）。
+ */
+function syncScenesToOutline(chapterId: string, scenes: { title: string; summary: string }[]): number {
+  const id = novelId.value
+  if (!id) return 0
+  const chapter = chapters.value.find((c) => c.id === chapterId)
+  const boundIds = Array.isArray(chapter?.outlineItemIds) ? chapter!.outlineItemIds : []
+  if (boundIds.length === 0) return 0
+
+  const allOutline = getOutlineByNovelId(id)
+  const chapterNode = boundIds
+    .map((oid) => allOutline.find((o) => o.id === oid))
+    .find((node): node is NonNullable<typeof node> => !!node && node.level === 'chapter')
+  if (!chapterNode) return 0
+
+  const sceneChildren = allOutline
+    .filter((o) => o.parentId === chapterNode.id && o.level === 'scene')
+    .sort((a, b) => a.order - b.order)
+
+  let touched = 0
+  scenes.forEach((scene, i) => {
+    const proseSummary = String(scene.summary ?? scene.title ?? '').trim()
+    if (!proseSummary) return
+    const existing = sceneChildren[i]
+    try {
+      if (existing) {
+        updateOutlineItem({ id: existing.id, proseSummary, status: 'done', plotStage: 'written' })
+      } else {
+        const created = createOutlineItem({
+          novelId: id,
+          title: String(scene.title ?? `场景 ${i + 1}`).trim() || `场景 ${i + 1}`,
+          summary: '',
+          level: 'scene',
+          parentId: chapterNode.id,
+          plotStage: 'written',
+          proseSummary,
+        })
+        updateOutlineItem({ id: created.id, status: 'done' })
+      }
+      touched += 1
+    } catch (e) {
+      console.warn('场景回填大纲失败:', e)
+    }
+  })
+  return touched
 }
 
 const aiChatSessionSummaries = computed(() =>
@@ -3078,7 +3138,7 @@ async function runConsistencyCheck(): Promise<void> {
 }
 
 function stopAiReadingDesk(): void {
-  aiChatAbortController?.abort()
+  deskAborts.chat?.abort()
   aiChatThinking.value = false
   aiChatLoading.value = false
 }
@@ -3094,7 +3154,7 @@ function resolveContinueCursorOffset(): number {
 }
 
 function stopAiContinue(): void {
-  aiContinueAbortController?.abort()
+  deskAborts.continue?.abort()
   if (aiContinueDraft.value.loading) {
     aiContinueDraft.value = {
       ...aiContinueDraft.value,
@@ -3146,8 +3206,8 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
   const position: AiContinuePosition = aiContinueDraft.value.position
   const cursorOffset = position === 'cursor' ? resolveContinueCursorOffset() : chapter.content?.length ?? 0
 
-  aiContinueAbortController?.abort()
-  aiContinueAbortController = new AbortController()
+  deskAborts.continue?.abort()
+  deskAborts.continue = new AbortController()
   aiExtractError.value = ''
   aiContinueThinkingText.value = ''
   aiContinueDraft.value = {
@@ -3207,7 +3267,7 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
           aiExtractError.value = err.message || '续写失败'
         },
       },
-      aiContinueAbortController.signal,
+      deskAborts.continue.signal,
     )
 
     const finalText = (result.text || aiContinueDraft.value.text).trim()
@@ -3253,7 +3313,7 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
       aiContinueDraft.value = { ...aiContinueDraft.value, loading: false, status: 'idle' }
     }
   } finally {
-    aiContinueAbortController = null
+    deskAborts.continue = null
     aiContinueThinkingText.value = ''
     if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
     void fetchWalletBalance().catch(() => {
@@ -3267,7 +3327,41 @@ async function applyContinueDraft(): Promise<void> {
   const text = aiContinueDraft.value.text.trim()
   if (!chapter || !text) return
 
+  const isRewrite = aiContinueDraft.value.position === 'replace'
   const content = chapter.content ?? ''
+
+  if (isRewrite) {
+    // 重写：整章替换。AI 输出格式为「标题\n\n正文」，拆出首行标题、其余为正文。
+    const lines = text.split('\n')
+    const firstLine = (lines.find((l) => l.trim().length > 0) ?? '').trim()
+    const firstIdx = lines.findIndex((l) => l.trim().length > 0)
+    const rest = lines.slice(firstIdx + 1).join('\n').trim()
+    // 首行像标题（短、无句末标点）且确实还有正文，才当标题剥离；否则整体作正文，标题留给后续 AI 命名
+    const looksLikeTitle = firstLine.length > 0 && firstLine.length <= 24 && !/[。！？，、；：.!?]$/.test(firstLine) && rest.length > 0
+    const newBody = looksLikeTitle ? rest : text
+    const newTitle = looksLikeTitle ? firstLine.replace(/^[「『《【\["']+|[」』》】\]"']+$/g, '').trim() : ''
+
+    updateChapter({ id: chapter.id, content: newBody, ...(newTitle ? { title: newTitle } : {}) })
+    chapters.value = chapters.value.map((item) =>
+      item.id === chapter.id ? { ...item, content: newBody, ...(newTitle ? { title: newTitle } : {}) } : item,
+    )
+    triggerChapterHubSaveToast()
+    aiContinueDraft.value = { ...aiContinueDraft.value, status: 'applied' }
+    appendAiSystemNote(`已整章重写并替换本章正文（约 ${newBody.replace(/\s/g, '').length} 字${newTitle ? `，标题「${newTitle}」` : ''}）；正在更新章总结、整理档案，并做重写体检…`)
+    appendAiChatMessage('assistant', `【已采用重写】${newBody.slice(0, 80)}${newBody.length > 80 ? '…' : ''}`, 'current')
+    if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+
+    void runChapterSummaryAfterContinue(chapter.id, { autoApply: true })
+    switchToAiDeskMode('ask')
+    void runAiExtract('current')
+    void runSceneSummaryAfterContinue(chapter.id)
+    void runCharacterStateAfterContinue(chapter.id)
+    autoAlignOutlineAfterContinue(chapter.id)
+    if (!newTitle) void maybeGenerateChapterTitleAfterContinue(chapter.id)
+    void runRewriteHealthCheck(chapter.id)
+    return
+  }
+
   let nextContent = content
   if (aiContinueDraft.value.position === 'end') {
     const gap = content.length > 0 && !content.endsWith('\n') ? '\n\n' : ''
@@ -3282,7 +3376,7 @@ async function applyContinueDraft(): Promise<void> {
   chapters.value = chapters.value.map((item) => (item.id === chapter.id ? { ...item, content: nextContent } : item))
   triggerChapterHubSaveToast()
   aiContinueDraft.value = { ...aiContinueDraft.value, status: 'applied' }
-  appendAiSystemNote(`已采用续写内容（约 ${text.length} 字）写入正文；将自动更新章总结并整理人物档案…`)
+  appendAiSystemNote(`已采用续写内容（约 ${text.replace(/\s/g, '').length} 字）写入正文；将自动更新章总结并整理人物档案…`)
   appendAiChatMessage('assistant', `【已采用续写】${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`, 'current')
   if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
 
@@ -3292,6 +3386,63 @@ async function applyContinueDraft(): Promise<void> {
   void runSceneSummaryAfterContinue(chapter.id)
   void runCharacterStateAfterContinue(chapter.id)
   autoAlignOutlineAfterContinue(chapter.id)
+  void maybeGenerateChapterTitleAfterContinue(chapter.id)
+}
+
+/**
+ * 重写体检：整章重写采用后，自动跑一次本章一致性检查，把「后文可能对不上 / 伏笔变化 /
+ * 角色状态变化」列成一条提醒消息，结果也展示在现有 aiConsistencyResult 面板。不自动改后文。
+ */
+async function runRewriteHealthCheck(chapterId: string): Promise<void> {
+  const id = novelId.value
+  if (!id || !requestAiAccess()) return
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const result = await checkChapterConsistencyFromWorkspaceStream(snapshot, chapterId, {
+      onChunk: () => {},
+      onError: (err: Error) => {
+        if (err.name !== 'AbortError') console.warn('重写体检失败:', err.message)
+      },
+    })
+    aiConsistencyResult.value = result
+    const issueCount =
+      result.characterIssues.length + result.timelineIssues.length + result.foreshadowIssues.length + result.settingIssues.length
+    if (issueCount > 0) {
+      appendAiSystemNote(`重写体检：发现 ${issueCount} 处可能受影响（后文衔接 / 伏笔 / 角色状态 / 设定），已在「一致性检查」面板列出，请人工确认是否需要调整后续章节。`)
+    } else {
+      appendAiSystemNote('重写体检：未发现与既有档案、大纲、伏笔的明显冲突。仍建议浏览后续章节确认衔接。')
+    }
+    if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name !== 'AbortError') console.warn('重写体检失败:', e.message)
+  }
+}
+
+/**
+ * 续写写入正文后：若本章标题仍是占位（空 / 「第N章」），让 AI 根据正文起一个贴合剧情的标题。
+ * 已有作者自定义标题时不覆盖。失败静默，不阻断续写主流程。
+ */
+const PLACEHOLDER_TITLE_RE = /^第\s*[0-9一二三四五六七八九十百千]+\s*章$/
+async function maybeGenerateChapterTitleAfterContinue(chapterId: string): Promise<void> {
+  const id = novelId.value
+  if (!id || !requestAiAccess()) return
+  const current = chapters.value.find((c) => c.id === chapterId)
+  const title = String(current?.title ?? '').trim()
+  if (title && !PLACEHOLDER_TITLE_RE.test(title)) return
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const aiTitle = await generateChapterTitleFromWorkspace(snapshot, chapterId)
+    if (!aiTitle) return
+    // 期间作者可能已手动改名：再次确认仍是占位才写入
+    const latest = chapters.value.find((c) => c.id === chapterId)
+    const latestTitle = String(latest?.title ?? '').trim()
+    if (latestTitle && !PLACEHOLDER_TITLE_RE.test(latestTitle)) return
+    updateChapter({ id: chapterId, title: aiTitle })
+    reload()
+    appendAiSystemNote(`已为本章拟定标题「${aiTitle}」（可在章节信息里手动修改）`)
+  } catch {
+    /* 起名失败不影响续写主流程 */
+  }
 }
 
 /**
@@ -3547,13 +3698,13 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
   const question = String(payload.question ?? '').trim()
   const isToolAction = TOOL_ACTION_INTENT_RE.test(question)
 
-  // 写作模式：只允许续写相关请求，其他一律拒绝
+  // 写作模式：只允许续写/重写相关请求，其他一律拒绝
   if (deskMode === 'write') {
-    if (isNextChapterIntent(question) || WRITE_BODY_INTENT_RE.test(question) || chapters.value.length === 0) {
+    if (isRewriteIntent(question) || isNextChapterIntent(question) || WRITE_BODY_INTENT_RE.test(question) || chapters.value.length === 0) {
       await runAiContinue({ direction: question || '写第一章开头' })
       return
     }
-    appendAiChatMessage('assistant', '写作模式仅支持续写正文。如需提问、创建伏笔、整理角色等操作，请切换到「提问」模式。', 'current')
+    appendAiChatMessage('assistant', '写作模式仅支持续写或重写正文。如需提问、创建伏笔、整理角色等操作，请切换到「提问」模式。', 'current')
     return
   }
 
@@ -3563,12 +3714,14 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
     return
   }
 
-  // 提问模式：识别到续写意图时自动切到写作模式
-  if (WRITE_BODY_INTENT_RE.test(question) && !isToolAction) {
+  // 提问模式：识别到续写/重写意图时自动切到写作模式
+  if ((WRITE_BODY_INTENT_RE.test(question) || isRewriteIntent(question)) && !isToolAction) {
     switchToAiDeskMode('write')
     appendAiChatMessage(
       'assistant',
-      '已识别为生成正文任务：请在下方「续写草稿」中预览，点「采用」后才会写入稿纸。',
+      isRewriteIntent(question)
+        ? '已识别为整章重写任务：请在下方「重写草稿」中预览，点「采用」后才会整章替换本章正文。'
+        : '已识别为生成正文任务：请在下方「续写草稿」中预览，点「采用」后才会写入稿纸。',
       'current',
     )
     await runAiContinue({ direction: question })
@@ -3586,8 +3739,8 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
   aiChatLoading.value = true
   aiChatThinking.value = true
   aiExtractError.value = ''
-  aiChatAbortController?.abort()
-  aiChatAbortController = new AbortController()
+  deskAborts.chat?.abort()
+  deskAborts.chat = new AbortController()
   const msgId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
   const msg: AiDeskChatMessage = {
     id: msgId,
@@ -3597,12 +3750,36 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
     createdAt: new Date().toISOString(),
   }
   aiChatMessages.value = [...aiChatMessages.value, msg]
+  // 通过 id 在响应式数组里就地更新助手消息内容。
+  // 不能直接 msg.content += text：那是改原始对象而非响应式代理，切页/重渲染时累积内容会丢。
+  let pendingPersist = false
+  const patchAssistant = (mut: (m: AiDeskChatMessage) => void): void => {
+    const idx = aiChatMessages.value.findIndex((m) => m.id === msgId)
+    if (idx < 0) return
+    const next = [...aiChatMessages.value]
+    const copy = { ...next[idx] }
+    mut(copy)
+    next[idx] = copy
+    aiChatMessages.value = next
+    // 流式过程中节流持久化，确保切页/刷新时已输出内容不丢
+    if (!pendingPersist && novelId.value) {
+      pendingPersist = true
+      window.setTimeout(() => {
+        pendingPersist = false
+        if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+      }, 400)
+    }
+  }
+  const readAssistantContent = (): string =>
+    String(aiChatMessages.value.find((m) => m.id === msgId)?.content ?? '')
   try {
     const snapshot = buildNovelWorkspacePayload(id)
     const streamCallbacks = {
       onChunk: (text: string) => {
         if (aiChatThinking.value) aiChatThinking.value = false
-        msg.content += text
+        patchAssistant((m) => {
+          m.content += text
+        })
       },
       onError: (err: Error) => {
         if (err.name === 'AbortError') return
@@ -3633,7 +3810,7 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
       },
       streamCallbacks,
       conversationHistory.value.length > 0 ? conversationHistory.value : undefined,
-      aiChatAbortController.signal,
+      deskAborts.chat.signal,
       {
         alwaysEnableTools: true,
         confirmBeforeApply: true,
@@ -3649,28 +3826,33 @@ async function askAiReadingDesk(payload: { question: string; mode?: AiDeskMode }
       ragHits: contextMeta.ragHits,
     }
     // 清除流式传输中可能残留的 DSML tool call 标记
-    msg.content = String(msg.content ?? '').replace(/<｜｜DSML｜｜[^>]*>[\s\S]*?<｜｜DSML｜｜[^>]*>/g, '').trim()
+    let finalContent = readAssistantContent()
+      .replace(/<｜｜DSML｜｜[^>]*>[\s\S]*?<｜｜DSML｜｜[^>]*>/g, '')
+      .trim()
     if (pendingToolActions && pendingToolActions.length > 0) {
       aiPendingToolActions.value = pendingToolActions
       const hasChapterDraft = pendingToolActions.some((row) => row.toolCall.function.name === 'update_chapter_content')
-      msg.content = hasChapterDraft
+      finalContent = hasChapterDraft
         ? `${text}\n\n正文已写入上方「待确认的修改」卡片（显示开头预览），请点「采用」后才会出现在稿纸。`
         : text
       aiChatThinking.value = false
-    } else if (!msg.content.trim()) {
-      msg.content = text?.trim() || '已回答完毕，但这次没有生成可显示的内容。'
+    } else if (!finalContent.trim()) {
+      finalContent = text?.trim() || '已回答完毕，但这次没有生成可显示的内容。'
     }
+    patchAssistant((m) => {
+      m.content = finalContent
+    })
   } catch (e: unknown) {
     if (e instanceof Error && e.name === 'AbortError') {
-      if (!msg.content.trim()) msg.content = '已停止回答。'
-    } else if (!msg.content.trim()) {
+      if (!readAssistantContent().trim()) patchAssistant((m) => { m.content = '已停止回答。' })
+    } else if (!readAssistantContent().trim()) {
       aiChatMessages.value = aiChatMessages.value.filter((m) => m.id !== msgId)
       aiExtractError.value = e instanceof Error ? e.message : 'AI 请求失败，请稍后重试'
     }
   } finally {
     aiChatLoading.value = false
     aiChatThinking.value = false
-    aiChatAbortController = null
+    deskAborts.chat = null
     if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
     void fetchWalletBalance().catch(() => {
       /* ignore */
@@ -4808,6 +4990,10 @@ function onChapterTextareaBlur(event: FocusEvent): void {
 
 watch(selectedChapterId, (nextId, prevId) => {
   clearChapterQuoteSelection()
+  // 续写进行中：本次切章是「生成下一章」自动新建并打开章节所致，
+  // 此时 aiContinueDraft 正持有 loading 状态，绝不能被按章节恢复的逻辑覆盖，
+  // 否则按钮会停留在「生成」、思考动画不显示，直到流式内容才恢复。
+  if (aiContinueDraft.value.loading) return
   const activeId = activeAiChatSessionId.value
   if (activeId && prevId) {
     const prevKey = String(prevId).trim() || '__novel__'
@@ -4867,12 +5053,17 @@ watch(
     )
     activeAiChatSessionId.value = activeId
     const activeSession = sessions.find((session) => session.id === activeId) ?? sessions[0]
-    aiChatMessages.value = activeSession?.messages.slice(-200) ?? []
-    conversationHistory.value = activeSession?.history.slice(-60) ?? []
+    // 若此刻正有 AI 生成在进行（切走又切回触发本 immediate watch），
+    // 单例里已持有更新的流式内容，不能用 localStorage 的旧快照覆盖，否则会打断/回退正在生成的内容。
+    const genInFlight = aiChatLoading.value || aiChatThinking.value || aiContinueDraft.value.loading
+    if (!genInFlight) {
+      aiChatMessages.value = activeSession?.messages.slice(-200) ?? []
+      conversationHistory.value = activeSession?.history.slice(-60) ?? []
+    }
     rememberActiveSessionForMode(activeSession?.kind ?? aiDeskMode.value, activeId)
     clearChapterQuoteSelection()
     restoreAiExtractStateFromSession(activeSession)
-    restoreSessionUiState(activeSession)
+    if (!genInFlight) restoreSessionUiState(activeSession)
   },
   { immediate: true },
 )
