@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { OutlineItem, OutlineNodeLevel, OutlineStatus, OutlineStoryline, OutlineTension } from '../../../../types'
+import { levelText, childLevelOf, canHaveChildren } from '../../../../lib/outlineHierarchy'
 
 type TreeNode = { item: OutlineItem; depth: number; children: TreeNode[] }
-type FlatRow = { item: OutlineItem; depth: number; hasChildren: boolean; collapsed: boolean }
-type DropPos = 'before' | 'after' | 'child'
+type DropPos = 'before' | 'after'
+// 一列 = 一个能有子级的节点，列内只放它的直接子级卡片（单一类型）
+type Column = {
+  node: OutlineItem
+  cards: OutlineItem[]
+  total: number
+  done: number
+  ancestors: string[]
+}
 
 const props = defineProps<{
   tree: TreeNode[]
@@ -37,13 +45,6 @@ function boundStorylines(item: OutlineItem): OutlineStoryline[] {
   return props.storylines.filter((sl) => ids.includes(sl.id))
 }
 
-const collapsed = ref<Set<string>>(new Set())
-function toggleCollapse(id: string): void {
-  const next = new Set(collapsed.value)
-  next.has(id) ? next.delete(id) : next.add(id)
-  collapsed.value = next
-}
-
 const storylineColorById = computed(() => {
   const map = new Map<string, string>()
   for (const sl of props.storylines) map.set(sl.id, sl.color)
@@ -54,26 +55,26 @@ function accentColor(item: OutlineItem): string {
   return (first && storylineColorById.value.get(first)) || ''
 }
 
-const columns = computed(() => {
+// 先序 DFS 遍历整棵树：凡是「能有子级」的节点都生成一列，列内只放它的直接子级卡片。
+// 列顺序 = 先序，使某父节点的子级列紧跟其后（卷 → 该卷的幕列 → 每个幕的章列 → 每个章的场景列）。
+const columns = computed<Column[]>(() => {
   if (props.tree.length === 0) return []
-  const flatten = (node: TreeNode, acc: FlatRow[]): FlatRow[] => {
-    const hasChildren = node.children.length > 0
-    const isCollapsed = collapsed.value.has(node.item.id)
-    acc.push({ item: node.item, depth: node.depth, hasChildren, collapsed: isCollapsed })
-    if (!isCollapsed) for (const child of node.children) flatten(child, acc)
-    return acc
+  const out: Column[] = []
+  const walk = (node: TreeNode, ancestors: string[]): void => {
+    if (canHaveChildren(node.item.level)) {
+      const cards = node.children.map((c) => c.item)
+      const done = cards.filter((c) => c.status === 'done').length
+      out.push({ node: node.item, cards, total: cards.length, done, ancestors })
+    }
+    const childAncestors = [...ancestors, node.item.title || '未命名']
+    for (const child of node.children) walk(child, childAncestors)
   }
-  return props.tree.map((root) => {
-    const rows = flatten(root, [])
-    const all = collectAll(root)
-    const done = all.filter((i) => i.status === 'done').length
-    return { root: root.item, rows, total: all.length, done }
-  })
-})
-function collectAll(node: TreeNode): OutlineItem[] {
-  const out: OutlineItem[] = [node.item]
-  for (const c of node.children) out.push(...collectAll(c))
+  for (const root of props.tree) walk(root, [])
   return out
+})
+
+function childLevelText(level?: OutlineNodeLevel): string {
+  return levelText(childLevelOf(level ?? null))
 }
 
 const draggedId = ref('')
@@ -88,7 +89,7 @@ function onDragOver(id: string, ev: DragEvent): void {
   const el = ev.currentTarget as HTMLElement
   const rect = el.getBoundingClientRect()
   const ratio = (ev.clientY - rect.top) / rect.height
-  const pos: DropPos = ratio < 0.28 ? 'before' : ratio > 0.72 ? 'after' : 'child'
+  const pos: DropPos = ratio < 0.5 ? 'before' : 'after'
   dropTarget.value = { id, pos }
 }
 function onDrop(id: string): void {
@@ -103,12 +104,6 @@ function onDragEnd(): void {
   dropTarget.value = null
 }
 
-function levelText(level?: OutlineNodeLevel): string {
-  if (level === 'volume') return '卷'
-  if (level === 'act') return '幕'
-  if (level === 'chapter') return '章'
-  return '场景'
-}
 function statusText(status: OutlineStatus): string {
   if (status === 'todo') return '待写'
   if (status === 'doing') return '进行中'
@@ -125,21 +120,37 @@ function tensionLevel(t?: OutlineTension): number {
       <div class="ob__empty-card">
         <span class="ob__empty-badge">卷</span>
         <h3 class="ob__empty-title">还没有情节点</h3>
-        <p class="ob__empty-hint">从第一个顶层节点开始搭你的故事骨架，或让 AI 帮你生成一份大纲。</p>
+        <p class="ob__empty-hint">从第一卷开始搭你的故事骨架，或让 AI 帮你生成一份大纲。卷下放幕、幕下放章、章下放场景。</p>
         <div class="ob__empty-actions">
           <button type="button" class="btn-secondary" @click="emit('ai-design')">AI 设计大纲</button>
-          <button type="button" class="btn-primary" @click="emit('create-root')">＋ 新增顶层节点</button>
+          <button type="button" class="btn-primary" @click="emit('create-root')">＋ 新增卷</button>
         </div>
       </div>
     </div>
     <div v-else class="ob__scroll">
-      <section v-for="col in columns" :key="col.root.id" class="ob__col">
+      <section
+        v-for="col in columns"
+        :key="col.node.id"
+        class="ob__col"
+        :class="`is-${col.node.level ?? 'volume'}`"
+      >
         <header class="ob__col-head">
+          <p v-if="col.ancestors.length > 0" class="ob__col-crumbs" :title="col.ancestors.join(' › ')">
+            {{ col.ancestors.join(' › ') }}
+          </p>
           <div class="ob__col-head-main">
-            <span class="ob__col-badge">{{ levelText(col.root.level) }}</span>
-            <h3 class="ob__col-title" :title="col.root.title">{{ col.root.title || '未命名' }}</h3>
+            <span class="ob__col-badge" :class="`is-${col.node.level ?? 'volume'}`">{{ levelText(col.node.level) }}</span>
+            <h3
+              class="ob__col-title"
+              :class="{ 'is-active': col.node.id === activeId }"
+              :title="col.node.title"
+              role="button"
+              tabindex="0"
+              @click="emit('select', col.node.id)"
+              @keydown.enter="emit('select', col.node.id)"
+            >{{ col.node.title || '未命名' }}</h3>
           </div>
-          <div class="ob__col-progress" :title="`${col.done}/${col.total} 已完成`">
+          <div class="ob__col-progress" :title="`${col.done}/${col.total} ${childLevelText(col.node.level)}已完成`">
             <span class="ob__col-progress-bar"><i :style="{ width: col.total ? `${(col.done / col.total) * 100}%` : '0%' }" /></span>
             <span class="ob__col-progress-num">{{ col.done }}/{{ col.total }}</span>
           </div>
@@ -147,88 +158,82 @@ function tensionLevel(t?: OutlineTension): number {
 
         <div class="ob__cards">
           <article
-            v-for="row in col.rows"
-            :key="row.item.id"
+            v-for="card in col.cards"
+            :key="card.id"
             class="ob__card"
             :class="{
-              'is-active': row.item.id === activeId,
-              'is-dragging': row.item.id === draggedId,
-              'is-dimmed': dimmedIds?.has(row.item.id),
-              'is-drop-before': dropTarget?.id === row.item.id && dropTarget?.pos === 'before',
-              'is-drop-after': dropTarget?.id === row.item.id && dropTarget?.pos === 'after',
-              'is-drop-child': dropTarget?.id === row.item.id && dropTarget?.pos === 'child',
+              'is-active': card.id === activeId,
+              'is-dragging': card.id === draggedId,
+              'is-dimmed': dimmedIds?.has(card.id),
+              'is-drop-before': dropTarget?.id === card.id && dropTarget?.pos === 'before',
+              'is-drop-after': dropTarget?.id === card.id && dropTarget?.pos === 'after',
             }"
-            :style="{ marginLeft: `${Math.min(row.depth, 4) * 18}px`, '--accent': accentColor(row.item) || 'var(--color-border-strong)' }"
+            :style="{ '--accent': accentColor(card) || 'var(--color-border-strong)' }"
             draggable="true"
-            @click="emit('select', row.item.id)"
-            @dragstart="onDragStart(row.item.id, $event)"
-            @dragover="onDragOver(row.item.id, $event)"
-            @drop="onDrop(row.item.id)"
+            @click="emit('select', card.id)"
+            @dragstart="onDragStart(card.id, $event)"
+            @dragover="onDragOver(card.id, $event)"
+            @drop="onDrop(card.id)"
             @dragend="onDragEnd"
           >
-            <span v-if="row.depth > 0" class="ob__card-rail" aria-hidden="true" />
             <div class="ob__card-row">
-              <button
-                v-if="row.hasChildren"
-                type="button"
-                class="ob__caret"
-                :class="{ 'is-collapsed': row.collapsed }"
-                @click.stop="toggleCollapse(row.item.id)"
-                :aria-label="row.collapsed ? '展开' : '折叠'"
-              >▾</button>
-              <span v-else class="ob__caret ob__caret--placeholder" aria-hidden="true" />
-              <span class="ob__level">{{ levelText(row.item.level) }}</span>
-              <span class="ob__name">{{ row.item.title || '未命名节点' }}</span>
+              <span class="ob__level">{{ levelText(card.level) }}</span>
+              <span class="ob__name">{{ card.title || '未命名节点' }}</span>
               <span
                 class="ob__status"
-                :class="`is-${row.item.status}`"
+                :class="`is-${card.status}`"
                 role="button"
                 tabindex="0"
-                @click.stop="emit('cycle-status', row.item.id)"
-                @keydown.enter.stop="emit('cycle-status', row.item.id)"
-              >{{ statusText(row.item.status) }}</span>
+                @click.stop="emit('cycle-status', card.id)"
+                @keydown.enter.stop="emit('cycle-status', card.id)"
+              >{{ statusText(card.status) }}</span>
             </div>
-            <p v-if="row.item.summary" class="ob__summary">{{ row.item.summary }}</p>
+            <p v-if="card.summary" class="ob__summary">{{ card.summary }}</p>
             <div class="ob__meta">
-              <span class="ob__tension" :title="`张力 ${tensionLevel(row.item.tension)}/5`">
-                <i v-for="n in 5" :key="n" :class="{ 'is-on': n <= tensionLevel(row.item.tension) }" />
+              <span class="ob__tension" :title="`张力 ${tensionLevel(card.tension)}/5`">
+                <i v-for="n in 5" :key="n" :class="{ 'is-on': n <= tensionLevel(card.tension) }" />
               </span>
               <span
-                v-for="sl in boundStorylines(row.item)"
+                v-for="sl in boundStorylines(card)"
                 :key="sl.id"
                 class="ob__sl-dot"
                 :style="{ background: sl.color }"
                 :title="sl.name"
               />
-              <span v-if="linkedCount(row.item.id) > 0" class="ob__linked">绑 {{ linkedCount(row.item.id) }} 章</span>
+              <span v-if="linkedCount(card.id) > 0" class="ob__linked">绑 {{ linkedCount(card.id) }} 章</span>
               <span class="ob__spacer" />
               <button
                 v-if="storylines.length > 0"
                 type="button"
                 class="ob__mini"
-                :class="{ 'is-on': storylinePickerId === row.item.id }"
+                :class="{ 'is-on': storylinePickerId === card.id }"
                 title="绑定故事线"
-                @click.stop="toggleStorylinePicker(row.item.id)"
+                @click.stop="toggleStorylinePicker(card.id)"
               >线</button>
-              <button type="button" class="ob__mini" title="新增子节点" @click.stop="emit('create-child', row.item.id)">＋子</button>
-              <button type="button" class="ob__mini" title="新增同级节点" @click.stop="emit('create-sibling', row.item.id)">＋同级</button>
+              <button type="button" class="ob__mini" title="新增同级节点" @click.stop="emit('create-sibling', card.id)">＋同级</button>
             </div>
-            <div v-if="storylinePickerId === row.item.id" class="ob__sl-picker" @click.stop>
+            <div v-if="storylinePickerId === card.id" class="ob__sl-picker" @click.stop>
               <button
                 v-for="sl in storylines"
                 :key="sl.id"
                 type="button"
                 class="ob__sl-chip"
-                :class="{ 'is-bound': isStorylineBound(row.item, sl.id) }"
+                :class="{ 'is-bound': isStorylineBound(card, sl.id) }"
                 :style="{ '--sl-color': sl.color }"
-                @click.stop="emit('toggle-storyline', { outlineId: row.item.id, storylineId: sl.id })"
+                @click.stop="emit('toggle-storyline', { outlineId: card.id, storylineId: sl.id })"
               >{{ sl.name }}</button>
             </div>
           </article>
+
+          <p v-if="col.cards.length === 0" class="ob__col-empty">还没有{{ childLevelText(col.node.level) }}</p>
         </div>
+
+        <button type="button" class="ob__col-add" @click="emit('create-child', col.node.id)">
+          ＋ 新增{{ childLevelText(col.node.level) }}
+        </button>
       </section>
 
-      <button type="button" class="ob__add-col" @click="emit('create-root')">＋ 新增顶层节点</button>
+      <button type="button" class="ob__add-col" @click="emit('create-root')">＋ 新增卷</button>
     </div>
   </div>
 </template>
@@ -299,9 +304,23 @@ function tensionLevel(t?: OutlineTension): number {
   max-height: 100%;
   background: color-mix(in srgb, var(--color-surface) 88%, var(--color-surface-muted) 12%);
   border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+  border-top: 3px solid var(--col-color, var(--color-border-strong));
   border-radius: 16px;
   padding: 12px 10px 10px;
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 30%, transparent);
+}
+/* 列按层级配色：卷=紫 幕=蓝 章=橙（沿用竖排视图配色） */
+.ob__col.is-volume { --col-color: #7c3aed; }
+.ob__col.is-act { --col-color: #2563eb; }
+.ob__col.is-chapter { --col-color: #ea580c; }
+.ob__col.is-scene { --col-color: #64748b; }
+.ob__col-crumbs {
+  margin: 0 4px 6px;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ob__col-head {
   display: flex;
@@ -323,9 +342,13 @@ function tensionLevel(t?: OutlineTension): number {
   font-weight: 700;
   padding: 2px 9px;
   border-radius: 999px;
-  background: var(--color-primary);
+  background: var(--col-color, var(--color-primary));
   color: #fff;
 }
+.ob__col-badge.is-volume { background: #7c3aed; }
+.ob__col-badge.is-act { background: #2563eb; }
+.ob__col-badge.is-chapter { background: #ea580c; }
+.ob__col-badge.is-scene { background: #64748b; }
 .ob__col-title {
   margin: 0;
   font-size: 0.95rem;
@@ -334,6 +357,13 @@ function tensionLevel(t?: OutlineTension): number {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+.ob__col-title:hover {
+  color: var(--color-primary);
+}
+.ob__col-title.is-active {
+  color: var(--color-primary);
 }
 .ob__col-progress {
   display: flex;
@@ -400,50 +430,11 @@ function tensionLevel(t?: OutlineTension): number {
 .ob__card.is-drop-after {
   box-shadow: 0 3px 0 -1px var(--color-primary);
 }
-.ob__card.is-drop-child {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft);
-}
-.ob__card-rail {
-  position: absolute;
-  left: -1px;
-  top: -3px;
-  bottom: 50%;
-  width: 10px;
-  border-left: 1.5px solid color-mix(in srgb, var(--color-border-strong) 50%, transparent);
-  border-bottom: 1.5px solid color-mix(in srgb, var(--color-border-strong) 50%, transparent);
-  border-bottom-left-radius: 8px;
-  pointer-events: none;
-}
 .ob__card-row {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-.ob__caret {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 0.7rem;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: transform 0.15s ease, background 0.15s ease;
-}
-.ob__caret:hover {
-  background: color-mix(in srgb, var(--color-border) 50%, transparent);
-}
-.ob__caret.is-collapsed {
-  transform: rotate(-90deg);
-}
-.ob__caret--placeholder {
-  cursor: default;
 }
 .ob__level {
   flex-shrink: 0;
@@ -477,7 +468,6 @@ function tensionLevel(t?: OutlineTension): number {
 .ob__status.is-done { background: color-mix(in srgb, var(--color-success, #16a34a) 18%, transparent); color: var(--color-success, #15803d); }
 .ob__summary {
   margin: 6px 0 0;
-  padding-left: 22px;
   font-size: 0.76rem;
   line-height: 1.45;
   color: var(--color-text-muted);
@@ -491,7 +481,6 @@ function tensionLevel(t?: OutlineTension): number {
   align-items: center;
   gap: 8px;
   margin-top: 8px;
-  padding-left: 22px;
 }
 .ob__tension {
   display: inline-flex;
@@ -567,6 +556,32 @@ function tensionLevel(t?: OutlineTension): number {
 .ob__sl-chip.is-bound {
   background: color-mix(in srgb, var(--sl-color, #64748b) 32%, transparent);
   font-weight: 700;
+}
+.ob__col-empty {
+  margin: 4px 2px;
+  padding: 12px 8px;
+  text-align: center;
+  font-size: 0.74rem;
+  color: var(--color-text-muted);
+  border: 1px dashed color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+}
+.ob__col-add {
+  margin-top: 8px;
+  padding: 7px 10px;
+  width: 100%;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+  border-radius: 9px;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.ob__col-add:hover {
+  background: color-mix(in srgb, var(--color-primary-soft) 40%, transparent);
+  border-color: var(--color-primary);
 }
 .ob__add-col {
   flex: 0 0 180px;

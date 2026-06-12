@@ -29,6 +29,7 @@ dotenvy = "0.15"
 # 密码哈希
 pbkdf2 = { version = "0.12", features = ["simple"] }
 sha2 = "0.10"
+hmac = "0.12"
 argon2 = "0.5"
 
 # JWT

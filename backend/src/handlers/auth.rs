@@ -22,15 +22,22 @@ fn client_ip(headers: &HeaderMap) -> &str {
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.split(',').next())
         .map(str::trim)
-        .filter(|s| !s.is_empty())
+        .filter(|s| is_valid_ip(s))
         .or_else(|| {
             headers
                 .get("X-Real-IP")
                 .and_then(|v| v.to_str().ok())
                 .map(str::trim)
-                .filter(|s| !s.is_empty())
+                .filter(|s| is_valid_ip(s))
         })
         .unwrap_or("0.0.0.0")
+}
+
+/// 校验是否为合法 IPv4/IPv6。X-Forwarded-For/X-Real-IP 客户端可伪造，
+/// 非法值（如注入的 `<script>`）一律丢弃，回落 0.0.0.0，防止脏数据入库后
+/// 在管理后台被无害化前触发存储型 XSS。
+fn is_valid_ip(s: &str) -> bool {
+    !s.is_empty() && s.parse::<std::net::IpAddr>().is_ok()
 }
 
 fn device_id_from_headers(headers: &HeaderMap) -> Option<String> {

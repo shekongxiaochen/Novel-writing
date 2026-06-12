@@ -45,3 +45,5 @@ frontend/.env.production
 # === Misc ===
 edge-shot.png
 C盘垃圾文件扫描报告.txt
+dist-linux/
+dist-windows/

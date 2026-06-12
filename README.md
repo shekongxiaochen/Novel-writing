@@ -1,4 +1,4 @@
-# Novel Writing Assistant
+# Lumen 流明
 
 - 前端：Vue + Vite（`frontend/`）
 - 后端：Rust + Axum（`backend/`，端口 `8080`）

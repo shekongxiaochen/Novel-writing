@@ -1,6 +1,7 @@
 use crate::{
     error::{AppError, Result},
     services::{
+        cache_service::CacheService,
         wallet_service::WalletService,
         wallet_units::yuan_i64_to_units,
     },
@@ -15,6 +16,7 @@ const VALID_YUAN: [i32; 6] = [1, 3, 5, 10, 50, 100];
 pub struct CardKeyService {
     db: Pool<MySql>,
     wallet: WalletService,
+    cache: CacheService,
 }
 
 pub struct RedeemResult {
@@ -24,8 +26,8 @@ pub struct RedeemResult {
 }
 
 impl CardKeyService {
-    pub fn new(db: Pool<MySql>, wallet: WalletService) -> Self {
-        Self { db, wallet }
+    pub fn new(db: Pool<MySql>, wallet: WalletService, cache: CacheService) -> Self {
+        Self { db, wallet, cache }
     }
 
     pub fn normalize_code(raw: &str) -> String {
@@ -35,6 +37,21 @@ impl CardKeyService {
     }
 
     pub async fn redeem(&self, user_id: &str, code_raw: &str) -> Result<RedeemResult> {
+        // 限流：兑换是直接发钱的接口，卡密格式可预测，必须防高速枚举爆破。
+        // 按用户维度每分钟最多 RATE_LIMIT 次尝试（无论成败都计数），
+        // 与登录/注册的限流策略保持一致，不给爆破留缺口。
+        const RATE_LIMIT: i64 = 10;
+        let rl_key = format!("redeem_rate:{}", user_id);
+        let attempts = self.cache.incr(&rl_key).await?;
+        if attempts == 1 {
+            self.cache.expire(&rl_key, 60).await?;
+        }
+        if attempts > RATE_LIMIT {
+            return Err(AppError::Validation(
+                "兑换过于频繁，请稍后再试".to_string(),
+            ));
+        }
+
         let code = Self::normalize_code(code_raw);
         if code.len() < 8 {
             return Err(AppError::Validation("卡密格式无效".to_string()));

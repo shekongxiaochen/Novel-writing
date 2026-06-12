@@ -13,6 +13,12 @@
         </div>
 
         <div v-else-if="mode === 'register' && !deviceStatus?.hasAccount && credentials" class="auth-form">
+          <div v-if="credentials.bonusYuan > 0" class="auth-bonus">
+            <span class="auth-bonus__coin" aria-hidden="true">¥</span>
+            <span class="auth-bonus__text">
+              新用户礼包 · 已到账 <strong>{{ formatYuan(credentials.bonusYuan) }} 元</strong> 体验金
+            </span>
+          </div>
           <p class="auth-success">账号已创建，请立即保存以下信息（仅显示一次）：</p>
           <div class="auth-credentials">
             <p><strong>账号：</strong>{{ credentials.username }}</p>
@@ -110,7 +116,11 @@ const error = ref('')
 const isSubmitting = ref(false)
 const loadingStatus = ref(true)
 const deviceStatus = ref<DeviceStatus | null>(null)
-const credentials = ref<{ username: string; password: string } | null>(null)
+const credentials = ref<{ username: string; password: string; bonusYuan: number } | null>(null)
+
+function formatYuan(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
 
 const pageTitle = computed(() =>
   mode.value === 'login' ? '欢迎回来' : '本设备首次使用',
@@ -181,6 +191,7 @@ async function onSubmit() {
       credentials.value = {
         username: result.username,
         password: result.password,
+        bonusYuan: result.user.balanceYuan,
       }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : '注册失败'
@@ -210,6 +221,77 @@ async function onSubmit() {
 </script>
 
 <style scoped>
+.auth-bonus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 1rem;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #f5a623 36%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #ffd76a 22%, var(--surface-elevated, #f4f4f5)) 0%,
+    color-mix(in srgb, #f5a623 12%, var(--surface-elevated, #f4f4f5)) 100%
+  );
+  color: color-mix(in srgb, #8a5a00 80%, var(--color-text, #1a1a1a) 20%);
+  animation: auth-bonus-in 0.42s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
+.auth-bonus__coin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #ffe79a 0%, #f5b324 62%, #d98a0d 100%);
+  box-shadow: 0 2px 6px rgba(180, 120, 0, 0.32), inset 0 1px 2px rgba(255, 255, 255, 0.5);
+  color: #7a4d00;
+  font-weight: 800;
+  font-size: 0.92rem;
+  animation: auth-coin-pop 0.6s cubic-bezier(0.18, 1.5, 0.4, 1) 0.12s both;
+}
+
+.auth-bonus__text {
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+@keyframes auth-bonus-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes auth-coin-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.3) rotate(-25deg);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(2px) scale(1.18) rotate(8deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-bonus,
+  .auth-bonus__coin {
+    animation: none;
+  }
+}
+
 .auth-credentials {
   margin: 1rem 0;
   padding: 1rem;

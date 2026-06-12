@@ -82,17 +82,13 @@ impl AuthService {
 
     pub async fn device_status(&self, device_id: &str) -> Result<DeviceStatusResponse> {
         Self::validate_device_id(device_id)?;
-        let hash = crypto::hash_device_id(device_id);
 
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT username FROM users WHERE device_id_hash = ? AND is_active = 1",
-        )
-        .bind(&hash)
-        .fetch_optional(&self.db)
-        .await?;
+        // 双读兼容：先按新算法(HMAC)匹配，未命中再按旧算法(裸 SHA256)兜底，
+        // 命中旧值即顺手迁移为新值。存量用户无感，新数据只存 HMAC。
+        let (row, _matched_legacy) = self.find_user_by_device(device_id).await?;
 
         Ok(match row {
-            Some((username,)) => DeviceStatusResponse {
+            Some(username) => DeviceStatusResponse {
                 has_account: true,
                 username: Some(username),
             },
@@ -101,6 +97,47 @@ impl AuthService {
                 username: None,
             },
         })
+    }
+
+    /// 设备 ID 的新算法哈希（HMAC，密钥取 jwt_secret）。
+    fn device_hash(&self, device_id: &str) -> String {
+        crypto::hash_device_id_hmac(device_id, self.config.jwt_secret.as_bytes())
+    }
+
+    /// 按设备查用户名，双读兼容：HMAC 优先，旧 SHA256 兜底。
+    /// 命中旧值时把该用户的 device_id_hash 平滑升级为 HMAC 值。
+    /// 返回 (username, 是否命中旧算法)。
+    async fn find_user_by_device(&self, device_id: &str) -> Result<(Option<String>, bool)> {
+        let new_hash = self.device_hash(device_id);
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT username FROM users WHERE device_id_hash = ? AND is_active = 1")
+                .bind(&new_hash)
+                .fetch_optional(&self.db)
+                .await?;
+        if let Some((username,)) = row {
+            return Ok((Some(username), false));
+        }
+
+        #[allow(deprecated)]
+        let legacy_hash = crypto::hash_device_id(device_id);
+        let legacy: Option<(String, String)> = sqlx::query_as(
+            "SELECT id, username FROM users WHERE device_id_hash = ? AND is_active = 1",
+        )
+        .bind(&legacy_hash)
+        .fetch_optional(&self.db)
+        .await?;
+
+        if let Some((user_id, username)) = legacy {
+            // 平滑迁移：把旧哈希升级为 HMAC（一次性，下次即走新路径）
+            sqlx::query("UPDATE users SET device_id_hash = ? WHERE id = ?")
+                .bind(&new_hash)
+                .bind(&user_id)
+                .execute(&self.db)
+                .await?;
+            return Ok((Some(username), true));
+        }
+
+        Ok((None, false))
     }
 
     pub async fn register_by_device(
@@ -121,12 +158,16 @@ impl AuthService {
             ));
         }
 
-        let hash = crypto::hash_device_id(device_id);
+        let hash = self.device_hash(device_id);
 
+        // 双读兼容：新旧两种哈希都要查，避免存量用户(旧 SHA256)被误判为未注册而重复建号。
+        #[allow(deprecated)]
+        let legacy_hash = crypto::hash_device_id(device_id);
         let existing: Option<(String,)> = sqlx::query_as(
-            "SELECT id FROM users WHERE device_id_hash = ?",
+            "SELECT id FROM users WHERE device_id_hash IN (?, ?)",
         )
         .bind(&hash)
+        .bind(&legacy_hash)
         .fetch_optional(&self.db)
         .await?;
 
@@ -165,6 +206,12 @@ impl AuthService {
         .await?;
 
         self.wallet.ensure_wallet(&user_id).await?;
+
+        // 新用户注册赠送 1 元体验额度
+        const SIGNUP_BONUS_UNITS: i64 = crate::services::wallet_units::UNITS_PER_YUAN;
+        self.wallet
+            .grant_signup_bonus(&user_id, SIGNUP_BONUS_UNITS)
+            .await?;
 
         // 注册成功后累加该 IP 的注册计数（1 小时窗口）
         self.cache.incr(&reg_key).await?;

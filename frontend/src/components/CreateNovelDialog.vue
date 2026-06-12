@@ -122,14 +122,19 @@ function handleCreate(): void {
 }
 
 .create-novel-dialog__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 34px;
   height: 34px;
+  padding: 0;
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: var(--color-text-muted);
   font-size: 1.35rem;
   line-height: 1;
+  cursor: pointer;
 }
 
 .create-novel-dialog__close:hover {

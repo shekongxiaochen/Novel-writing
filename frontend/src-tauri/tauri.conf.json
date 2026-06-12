@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Novel Writing Assistant",
+  "productName": "Lumen",
   "version": "1.0.0",
   "identifier": "com.novelwriting.assistant",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "小说写作助手",
+        "title": "Lumen 流明",
         "width": 1440,
         "height": 960,
         "minWidth": 1180,

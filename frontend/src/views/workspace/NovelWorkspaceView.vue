@@ -213,7 +213,44 @@
           >该故事线下暂无节点，去节点上绑定试试</span>
         </div>
         <div class="outline-map-hero__actions">
+          <div v-if="outlineItems.length > 0" class="outline-level-filter" role="toolbar" aria-label="按层级筛选">
+            <button
+              type="button"
+              :class="{ 'is-active': outlineFilter.level === '' }"
+              @click="outlineFilter.level = ''"
+            >全部</button>
+            <button
+              type="button"
+              :class="{ 'is-active': outlineFilter.level === 'volume' }"
+              @click="outlineFilter.level = 'volume'"
+            >卷</button>
+            <button
+              type="button"
+              :class="{ 'is-active': outlineFilter.level === 'act' }"
+              @click="outlineFilter.level = 'act'"
+            >幕</button>
+            <button
+              type="button"
+              :class="{ 'is-active': outlineFilter.level === 'chapter' }"
+              @click="outlineFilter.level = 'chapter'"
+            >章</button>
+          </div>
+          <input
+            v-if="outlineItems.length > 0"
+            v-model="outlineFilter.keyword"
+            type="search"
+            class="outline-search-input"
+            placeholder="在筛选范围内搜索…"
+            aria-label="搜索大纲"
+          />
           <div v-if="outlineItems.length > 0" class="outline-view-toggle" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="outlineMapViewMode === 'vertical'"
+              :class="{ 'is-active': outlineMapViewMode === 'vertical' }"
+              @click="outlineMapViewMode = 'vertical'"
+            >大纲</button>
             <button
               type="button"
               role="tab"
@@ -221,13 +258,6 @@
               :class="{ 'is-active': outlineMapViewMode === 'board' }"
               @click="outlineMapViewMode = 'board'"
             >看板</button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="outlineMapViewMode === 'map'"
-              :class="{ 'is-active': outlineMapViewMode === 'map' }"
-              @click="outlineMapViewMode = 'map'"
-            >导图</button>
           </div>
           <button v-if="outlineItems.length > 0" type="button" class="btn-primary" @click="openOutlineAiExpand">
             AI 扩展大纲
@@ -242,20 +272,13 @@
         </Transition>
       </header>
 
-      <div v-if="outlineItems.length === 0 && outlineMapViewMode === 'map'" class="outline-map-empty-state">
-        <h2>先建立第一张情节导图</h2>
-        <p class="muted">创建第一个节点后，这里会直接呈现思维导图和右侧编辑区。</p>
-        <div class="outline-map-empty-state__actions">
-          <button type="button" class="btn-secondary" @click="openOutlineAiDesignerCreate">AI 设计大纲</button>
-          <button type="button" class="btn-primary" @click="openOutlineCreate">＋ 新增情节点</button>
-        </div>
-      </div>
-      <div v-else class="outline-map-workspace">
-        <OutlineBoardView
-          v-if="outlineMapViewMode === 'board'"
+      <div class="outline-map-workspace">
+        <OutlineVerticalView
+          v-if="outlineMapViewMode === 'vertical'"
           :tree="outlineTree"
           :active-id="activeOutlineMapId"
           :linked-count="getLinkedChaptersCount"
+          :chapter-label="getOutlineChapterLabel"
           :storylines="outlineStorylines"
           :dimmed-ids="dimmedOutlineIdSet"
           @select="selectOutlineMindMapNode"
@@ -265,20 +288,26 @@
           @cycle-status="cycleOutlineStatus"
           @toggle-storyline="toggleOutlineStoryline"
           @reorder="reorderOutlineNode"
+          @jump-chapter="jumpToWritingChapterFromOutline"
           @ai-design="openOutlineAiDesignerCreate"
         />
-        <OutlineMindMapCanvas
+        <OutlineBoardView
           v-else
-          :nodes="outlineMapNodes"
-          :edges="outlineMapEdges"
-          :scene-width="outlineMapSceneWidth"
-          :scene-height="outlineMapSceneHeight"
-          :active-outline-id="activeOutlineMapId"
-          mode="workspace"
-          @select-node="selectOutlineMindMapNode"
+          :tree="outlineTree"
+          :active-id="activeOutlineMapId"
+          :linked-count="getLinkedChaptersCount"
+          :chapter-label="getOutlineChapterLabel"
+          :storylines="outlineStorylines"
+          :dimmed-ids="dimmedOutlineIdSet"
+          @select="selectOutlineMindMapNode"
           @create-child="createOutlineNodeFromMindMap('child', $event)"
           @create-sibling="createOutlineNodeFromMindMap('sibling', $event)"
           @create-root="createOutlineNodeFromMindMap('root')"
+          @cycle-status="cycleOutlineStatus"
+          @toggle-storyline="toggleOutlineStoryline"
+          @reorder="reorderOutlineNode"
+          @jump-chapter="jumpToWritingChapterFromOutline"
+          @ai-design="openOutlineAiDesignerCreate"
         />
 
         <OutlineMindMapInspector
@@ -316,6 +345,8 @@
                           ? '先确认世界观就绪，再开始设计；点「开始设计」前不会调用 AI。'
                           : outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
                           ? '会结合全书设定、已有大纲与写作进度在后台整理上下文；你只需选位置、说一句方向。'
+                          : outlineAiDesignerStep === 'brief'
+                            ? '用一段话说说你想要的故事走向，AI 会据此直接给出几套大纲方案；不必答一堆问题。'
                           : outlineAiDesignerStep === 'interview'
                             ? '信息够用时可直接出方案，不必答完所有轮次。'
                             : outlineAiDesignerStep === 'options'
@@ -334,6 +365,8 @@
                           ? '准备'
                           : outlineAiMode === 'expand' && outlineAiDesignerStep === 'expand'
                           ? '扩展'
+                          : outlineAiDesignerStep === 'brief'
+                            ? '构想'
                           : outlineAiDesignerStep === 'interview'
                             ? `访谈中 · ${outlineAiInterviewTurnCount}`
                             : outlineAiDesignerStep === 'options'
@@ -387,10 +420,10 @@
                       <div class="workspace-outline-ai-gate__icon" aria-hidden="true">✦</div>
                       <h3 class="workspace-outline-ai-gate__title">开始 AI 设计大纲</h3>
                       <p class="workspace-outline-ai-gate__desc">
-                        AI 会结合你的世界观设定（已有 {{ worldSettings.length }} 条），通过几轮简短对话了解你的构想，
-                        再给出多套大纲方案。点击下方按钮开始，不会马上锁住界面。
+                        AI 会结合你的世界观设定（已有 {{ worldSettings.length }} 条），让你用一段话说说想要的故事走向，
+                        再据此给出多套大纲方案。点击下方按钮开始，不会马上锁住界面。
                       </p>
-                      <p class="muted workspace-outline-ai-gate__hint">每轮都可选预设答案或自己补充，随时能关闭。</p>
+                      <p class="muted workspace-outline-ai-gate__hint">只需写一段构想，几个引导项可填可不填，随时能关闭。</p>
                     </section>
                   </template>
 
@@ -427,68 +460,77 @@
                     </section>
                   </template>
 
-                  <template v-else-if="outlineAiDesignerStep === 'interview'">
+                  <template v-else-if="outlineAiDesignerStep === 'brief'">
                     <section class="workspace-outline-ai-panel">
-                      <div class="workspace-outline-ai-panel__summary">
-                        <strong>已确认 {{ outlineAiInterviewHistory.length }} 轮</strong>
-                        <span class="muted">AI 会根据你的回答决定下一问，不再走固定问卷。</span>
-                      </div>
-                      <div class="workspace-outline-ai-dimensions">
-                        <span v-for="(dim, idx) in ['核心概念','角色深度','世界规则','冲突结构','气质与结局']" :key="dim"
-                          class="workspace-outline-ai-dim-tag"
-                          :class="{ 'workspace-outline-ai-dim-tag--done': outlineAiCoveredDimensions.includes(String(idx + 1)) }">
-                          {{ dim }}
-                        </span>
-                      </div>
-                      <div v-if="outlineAiInterviewHistory.length > 0" class="workspace-outline-ai-followup-history">
-                        <article v-for="(turn, index) in outlineAiInterviewHistory" :key="`${turn.label}-${index}`" class="workspace-outline-ai-followup-turn">
-                          <span class="workspace-outline-ai-followup-turn__index">已确认 {{ index + 1 }}</span>
-                          <strong>{{ turn.label }}</strong>
-                          <p>{{ turn.prompt }}</p>
-                          <div class="workspace-outline-ai-followup-turn__answer">{{ turn.answer }}</div>
-                        </article>
-                      </div>
-                      <p v-if="outlineAiDesignerRationale" class="workspace-outline-ai-brief">{{ outlineAiDesignerRationale }}</p>
-                      <article v-if="outlineAiCurrentQuestion" class="workspace-outline-ai-question workspace-outline-ai-question--followup">
-                        <div class="workspace-outline-ai-question__head">
-                          <strong>{{ outlineAiCurrentQuestion.label }}</strong>
-                          <span class="muted">第 {{ outlineAiInterviewHistory.length + 1 }} 轮</span>
-                        </div>
-                        <p class="workspace-outline-ai-followup-prompt">{{ outlineAiCurrentQuestion.prompt }}</p>
-                        <div class="workspace-outline-ai-question__options">
-                          <button
-                            v-for="option in outlineAiCurrentQuestion.options"
-                            :key="option"
-                            type="button"
-                            class="workspace-outline-ai-option"
-                            :class="{ 'workspace-outline-ai-option--active': outlineAiCurrentAnswer === option }"
-                            @click="outlineAiCurrentAnswer = option"
-                          >
-                            {{ option }}
-                          </button>
-                          <button
-                            type="button"
-                            class="workspace-outline-ai-option"
-                            :class="{ 'workspace-outline-ai-option--active': outlineAiCurrentAnswer === '__custom__' }"
-                            @click="outlineAiCurrentAnswer = '__custom__'"
-                          >
-                            自己输入
-                          </button>
-                        </div>
+                      <p class="muted workspace-outline-ai-brief-intro">
+                        全部留空也行——直接点下面的按钮，AI 会基于你的世界观自由构思大纲。想给方向就在下面写，AI 会更贴合你的想法。
+                      </p>
+                      <label class="workspace-outline-ai-brief-field">
+                        <span class="workspace-outline-ai-brief-field__label">你想要一个什么样的故事？<em>（可选）</em></span>
                         <textarea
-                          v-model="outlineAiCurrentCustom"
-                          class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea"
-                          rows="4"
-                          maxlength="400"
-                          :placeholder="outlineAiInterviewCustomPlaceholder"
+                          v-model="outlineAiBrief"
+                          class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea workspace-outline-ai-brief-field__main"
+                          rows="8"
+                          placeholder="不想写就留空，AI 会基于世界观自由发挥。&#10;想给方向也可以，比如：&#10;主角是个落魄的制符师，意外捡到一枚能吞噬他人天赋的古印，从此一边被各大势力追杀，一边逐渐发现古印背后是上古封印……"
                         />
-                        <p class="muted workspace-outline-ai-question__hint">选中上方任一选项后，仍可在输入框补充想法，会一并交给 AI。</p>
-                      </article>
+                        <span class="muted workspace-outline-ai-question__hint">写不写都行。写了 AI 会据此出方案，留空则完全自由发挥。下面三项同样可选。</span>
+                      </label>
+
+                      <label class="ws-ai-checkbox">
+                        <input type="checkbox" v-model="outlineAiUseNovelInfo" />
+                        <span class="ws-ai-checkbox__box">{{ outlineAiUseNovelInfo ? '✓' : '' }}</span>
+                        <span class="ws-ai-checkbox__text">
+                          参考本书的书名《{{ novel?.title || '未命名' }}》和简介来设计
+                          <span class="ws-ai-checkbox__hint">不勾选则只按你上面写的内容和世界观来设计，忽略书名简介</span>
+                        </span>
+                      </label>
+
+                      <div class="workspace-outline-ai-brief-guides">
+                        <label class="workspace-outline-ai-brief-field">
+                          <span class="workspace-outline-ai-brief-field__label">核心冲突 / 主线矛盾<em>（可选）</em></span>
+                          <textarea
+                            v-model="outlineAiGuideConflict"
+                            class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea"
+                            rows="2"
+                            maxlength="200"
+                            placeholder="例如：旧秩序的守护者 vs 想打破规则的主角"
+                          />
+                        </label>
+                        <label class="workspace-outline-ai-brief-field">
+                          <span class="workspace-outline-ai-brief-field__label">主角目标 / 要克服什么<em>（可选）</em></span>
+                          <textarea
+                            v-model="outlineAiGuideProtagonist"
+                            class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea"
+                            rows="2"
+                            maxlength="200"
+                            placeholder="例如：找回失踪的妹妹，同时压制体内失控的力量"
+                          />
+                        </label>
+                        <label class="workspace-outline-ai-brief-field">
+                          <span class="workspace-outline-ai-brief-field__label">结局基调 / 期待走向<em>（可选）</em></span>
+                          <textarea
+                            v-model="outlineAiGuideEnding"
+                            class="workspace-outline-ai-question__input workspace-outline-ai-question__textarea"
+                            rows="2"
+                            maxlength="200"
+                            placeholder="例如：苦尽甘来的圆满 / 略带遗憾的开放结局"
+                          />
+                        </label>
+                      </div>
                     </section>
                   </template>
 
                   <template v-else-if="outlineAiDesignerStep === 'options'">
                     <section class="workspace-outline-ai-panel">
+                      <div v-if="outlineAiDesignerLoading && outlineAiDesignerStreaming" class="workspace-outline-ai-stream">
+                        <p class="workspace-outline-ai-stream__hint">AI 正在构思完整大纲结构…</p>
+                        <div class="workspace-outline-ai-stream__lines">
+                          <p v-for="(line, idx) in outlineAiDesignerStreamLines" :key="idx" :class="'workspace-outline-ai-stream__line workspace-outline-ai-stream__line--' + line.level">
+                            {{ line.text }}
+                          </p>
+                          <span class="workspace-outline-ai-stream__cursor" aria-hidden="true"></span>
+                        </div>
+                      </div>
                       <p v-if="outlineAiDesignerBrief" class="workspace-outline-ai-brief">{{ outlineAiDesignerBrief }}</p>
                       <div class="workspace-outline-ai-plan-list">
                         <article
@@ -541,6 +583,15 @@
 
                   <template v-else-if="outlineAiDesignerStep === 'skeleton' && outlineAiDesignerDraft">
                     <section class="workspace-outline-ai-panel">
+                      <div
+                        v-if="outlineAiDraftLintIssues.length > 0 && !outlineAiLintDismissed"
+                        class="workspace-outline-ai-lint"
+                      >
+                        <p v-for="(issue, index) in outlineAiDraftLintIssues" :key="index" :class="`workspace-outline-ai-lint--${issue.severity}`">
+                          {{ issue.message }}
+                        </p>
+                        <button type="button" class="workspace-outline-ai-lint__dismiss" @click="outlineAiLintDismissed = true">知道了</button>
+                      </div>
                       <p class="workspace-outline-ai-brief">
                         当前是<strong>章节骨架</strong>（{{ outlineAiSkeletonItemCount }} 个结构节点）。可先写入，或继续让 AI 补充场景节拍。
                       </p>
@@ -651,6 +702,15 @@
                     </button>
                   </template>
                   <button
+                    v-else-if="outlineAiDesignerStep === 'brief'"
+                    type="button"
+                    class="btn-primary"
+                    :disabled="outlineAiDesignerLoading"
+                    @click="submitOutlineAiBrief"
+                  >
+                    {{ outlineAiDesignerLoading ? '生成中…' : (outlineAiBriefReady ? '生成大纲方案' : '直接生成（AI 自由发挥）') }}
+                  </button>
+                  <button
                     v-else-if="outlineAiDesignerStep === 'interview'"
                     type="button"
                     class="btn-secondary"
@@ -669,7 +729,7 @@
                     {{ outlineAiDesignerLoading ? '处理中…' : '回答这一轮' }}
                   </button>
                   <template v-else-if="outlineAiDesignerStep === 'options'">
-                    <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading" @click="backToOutlineAiInterview">返回继续访谈</button>
+                    <button type="button" class="btn-secondary" :disabled="outlineAiDesignerLoading" @click="backToOutlineAiInterview">返回改构想</button>
                     <button
                       type="button"
                       class="btn-secondary"
@@ -681,6 +741,12 @@
                     <button type="button" class="btn-primary" :disabled="outlineAiDesignerLoading || !selectedOutlineAiOption" @click="generateOutlineAiDraft">
                       {{ outlineAiDesignerLoading ? '生成中…' : '生成完整大纲' }}
                     </button>
+                    <button
+                      v-if="outlineAiDesignerLoading && outlineAiDesignerStreaming"
+                      type="button"
+                      class="btn-secondary"
+                      @click="stopOutlineAiDesignerGeneration"
+                    >停止</button>
                     <button
                       type="button"
                       class="btn-secondary workspace-outline-ai-dialog__link-btn"
@@ -1057,11 +1123,25 @@
           >{{ cat.name }}</button>
         </div>
       </div>
-      <section class="panel characters-empty" v-if="filteredCharacters.length === 0">
-        <h2>角色</h2>
-        <p class="muted">暂无角色</p>
-        <div class="action-row">
-          <button type="button" class="btn-primary workspace-character__add-btn" @click="openCharacterCreate">新增角色</button>
+      <section class="ws-empty" v-if="filteredCharacters.length === 0">
+        <div class="ws-empty__glow" aria-hidden="true"></div>
+        <div class="ws-empty__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
+          </svg>
+        </div>
+        <h3 class="ws-empty__title">还没有角色</h3>
+        <p class="ws-empty__desc">
+          记录主角、配角与反派的画像与关系。角色越完整，AI 续写时越能贴合每个人的性格与处境。
+        </p>
+        <div class="ws-empty__hints">
+          <span class="ws-empty__hint">外貌与性格</span>
+          <span class="ws-empty__hint">身份与目标</span>
+          <span class="ws-empty__hint">人物关系</span>
+        </div>
+        <div class="ws-empty__actions">
+          <button type="button" class="btn-primary ws-empty__cta" @click="openCharacterCreate">新增第一个角色</button>
         </div>
       </section>
 
@@ -1433,11 +1513,26 @@
         </div>
       </div>
 
-      <section v-if="items.length === 0" class="panel workspace-items-empty">
-        <p class="workspace-items-empty__mark">◇</p>
-        <h3>暂无物品</h3>
-        <p class="muted">先记录主角手里的信物、关键钥匙或任何会影响剧情推进的东西。</p>
-        <button type="button" class="btn-primary" @click="openItemCreate">添加第一个物品</button>
+      <section v-if="items.length === 0" class="ws-empty">
+        <div class="ws-empty__glow" aria-hidden="true"></div>
+        <div class="ws-empty__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2l8 4.5v9L12 20 4 15.5v-9L12 2z" />
+            <path d="M4 6.5L12 11l8-4.5M12 11v9" />
+          </svg>
+        </div>
+        <h3 class="ws-empty__title">还没有物品</h3>
+        <p class="ws-empty__desc">
+          记录信物、法宝、关键钥匙或任何会推动剧情的东西。绑定持有者后，物品的流转也会更清晰。
+        </p>
+        <div class="ws-empty__hints">
+          <span class="ws-empty__hint">信物 / 法宝</span>
+          <span class="ws-empty__hint">关键道具</span>
+          <span class="ws-empty__hint">持有者归属</span>
+        </div>
+        <div class="ws-empty__actions">
+          <button type="button" class="btn-primary ws-empty__cta" @click="openItemCreate">添加第一个物品</button>
+        </div>
       </section>
       <p v-else-if="filteredItems.length === 0" class="muted workspace-items-no-result">没有符合条件的物品</p>
 
@@ -1695,7 +1790,27 @@
         <button type="button" class="btn-primary" @click="openFactionCreate">新增势力</button>
       </div>
 
-      <p v-if="filteredFactions.length === 0 && !factionKeywordFilter && !selectedCategoryFilterId" class="muted">暂无势力</p>
+      <section v-if="filteredFactions.length === 0 && !factionKeywordFilter && !selectedCategoryFilterId" class="ws-empty">
+        <div class="ws-empty__glow" aria-hidden="true"></div>
+        <div class="ws-empty__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 21V8l9-5 9 5v13" />
+            <path d="M3 21h18M9 21v-6h6v6M9 11h.01M15 11h.01" />
+          </svg>
+        </div>
+        <h3 class="ws-empty__title">还没有势力</h3>
+        <p class="ws-empty__desc">
+          建立门派、家族、组织或国家，理清谁与谁结盟、谁与谁对立。势力关系是大世界冲突的骨架。
+        </p>
+        <div class="ws-empty__hints">
+          <span class="ws-empty__hint">门派 / 家族</span>
+          <span class="ws-empty__hint">成员与归属</span>
+          <span class="ws-empty__hint">结盟与敌对</span>
+        </div>
+        <div class="ws-empty__actions">
+          <button type="button" class="btn-primary ws-empty__cta" @click="openFactionCreate">新增第一个势力</button>
+        </div>
+      </section>
       <template v-else>
         <div class="faction-filter-block">
           <h3 class="workspace-subsection-title workspace-subsection-title--spaced">已存在势力</h3>
@@ -1997,11 +2112,28 @@
         <button type="button" class="btn-primary workspace-items-hero__btn" @click="openCategoryCreate">添加分类</button>
       </div>
 
-      <section v-if="categories.length === 0" class="panel workspace-items-empty">
-        <p class="workspace-items-empty__mark">⊞</p>
-        <h3>暂无分类</h3>
-        <p class="muted">先建几个分类（如「主角阵营」「反派」「地理」），再到角色或势力上绑定。</p>
-        <button type="button" class="btn-primary" @click="openCategoryCreate">添加第一个分类</button>
+      <section v-if="categories.length === 0" class="ws-empty">
+        <div class="ws-empty__glow" aria-hidden="true"></div>
+        <div class="ws-empty__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="8" height="8" rx="2" />
+            <rect x="13" y="3" width="8" height="8" rx="2" />
+            <rect x="3" y="13" width="8" height="8" rx="2" />
+            <rect x="13" y="13" width="8" height="8" rx="2" />
+          </svg>
+        </div>
+        <h3 class="ws-empty__title">还没有分类</h3>
+        <p class="ws-empty__desc">
+          先建几个分类，再到角色或势力上绑定，就能按阵营、地域或类型快速筛选与归档。
+        </p>
+        <div class="ws-empty__hints">
+          <span class="ws-empty__hint">主角阵营</span>
+          <span class="ws-empty__hint">反派势力</span>
+          <span class="ws-empty__hint">地理区域</span>
+        </div>
+        <div class="ws-empty__actions">
+          <button type="button" class="btn-primary ws-empty__cta" @click="openCategoryCreate">添加第一个分类</button>
+        </div>
       </section>
 
       <template v-else>
@@ -2303,9 +2435,22 @@
         </button>
       </div>
 
-      <p v-if="foreshadows.length === 0" class="muted">
-        暂无伏笔记录。在正文区选中文字后，通过右键菜单「设为伏笔」添加。
-      </p>
+      <section v-if="foreshadows.length === 0" class="ws-empty">
+        <div class="ws-empty__glow" aria-hidden="true"></div>
+        <div class="ws-empty__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18h6M10 21h4" />
+            <path d="M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.4 1 2.5h6c0-1.1.3-1.8 1-2.5A6 6 0 0 0 12 3z" />
+          </svg>
+        </div>
+        <h3 class="ws-empty__title">还没有伏笔</h3>
+        <p class="ws-empty__desc">
+          埋下的线索、未解的悬念都可以记成伏笔，回收时一目了然，避免写到后面忘了前面挖的坑。
+        </p>
+        <div class="ws-empty__hints ws-empty__hints--howto">
+          <span class="ws-empty__howto">在写作页正文中选中一段文字，右键选择「设为伏笔」即可添加。</span>
+        </div>
+      </section>
       <p v-else-if="filteredForeshadows.length === 0" class="muted">没有符合条件的伏笔</p>
 
       <ul v-else class="fsw-plant-list">
@@ -2490,13 +2635,28 @@
         </div>
       </div>
 
-      <section v-if="worldSettings.length === 0" class="panel workspace-items-empty">
-        <p class="workspace-items-empty__mark">◍</p>
-        <h3>暂无世界观设定</h3>
-        <p class="muted">先写下世界的核心规则或背景，再让 AI 据此设计贴合的大纲。</p>
-        <div class="action-row">
-          <button type="button" class="btn-primary" @click="openWorldSettingCreate">新增第一条设定</button>
-          <button type="button" class="btn-secondary" @click="openWorldSettingAiCreate">AI 生成</button>
+      <section v-if="worldSettings.length === 0" class="ws-empty">
+        <div class="ws-empty__glow" aria-hidden="true"></div>
+        <div class="ws-empty__icon ws-empty__icon--spin" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18" />
+            <path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9z" />
+          </svg>
+        </div>
+        <h3 class="ws-empty__title">搭建你的世界观</h3>
+        <p class="ws-empty__desc">
+          先写下世界的核心规则、力量体系或历史背景。设定越清晰，AI 设计的大纲与剧情就越贴合你的世界。
+        </p>
+        <div class="ws-empty__hints">
+          <span class="ws-empty__hint">修炼境界体系</span>
+          <span class="ws-empty__hint">地理与势力分布</span>
+          <span class="ws-empty__hint">世界历史与传说</span>
+          <span class="ws-empty__hint">特殊规则 / 禁忌</span>
+        </div>
+        <div class="ws-empty__actions">
+          <button type="button" class="btn-primary ws-empty__cta" @click="openWorldSettingCreate">新增第一条设定</button>
+          <button type="button" class="btn-secondary ws-empty__cta" @click="openWorldSettingAiCreate">✦ 让 AI 帮我生成</button>
         </div>
       </section>
 
@@ -2583,13 +2743,13 @@
                   {{ card.key || '未命名' }}
                 </p>
                 <p v-if="card.status === 'changed'" class="ws-subcard__old">{{ card.oldValue }}</p>
-                <p class="ws-subcard__body">{{ card.value }}</p>
+                <div class="ws-subcard__body ws-ai-md" v-html="renderMarkdown(card.value)"></div>
               </div>
             </div>
             <div v-else-if="(ws.attributes ?? []).length > 0" class="ws-subcards scrollbar-paper">
               <div v-for="card in ws.attributes" :key="card.id" class="ws-subcard">
                 <p class="ws-subcard__title">{{ card.key || '未命名' }}</p>
-                <p class="ws-subcard__body">{{ card.value }}</p>
+                <div class="ws-subcard__body ws-ai-md" v-html="renderMarkdown(card.value)"></div>
               </div>
             </div>
             <p v-else class="workspace-item-card__summary muted">暂无内容</p>
@@ -2615,7 +2775,7 @@
             <div v-if="phantom.attributes.length > 0" class="ws-subcards scrollbar-paper">
               <div v-for="card in phantom.attributes" :key="card.id" class="ws-subcard">
                 <p class="ws-subcard__title">{{ card.key || '未命名' }}</p>
-                <p class="ws-subcard__body">{{ card.value }}</p>
+                <div class="ws-subcard__body ws-ai-md" v-html="renderMarkdown(card.value)"></div>
               </div>
             </div>
           </article>
@@ -2643,7 +2803,7 @@
           <div v-if="phantom.attributes.length > 0" class="ws-subcards scrollbar-paper">
             <div v-for="card in phantom.attributes" :key="card.id" class="ws-subcard">
               <p class="ws-subcard__title">{{ card.key || '未命名' }}</p>
-              <p class="ws-subcard__body">{{ card.value }}</p>
+              <div class="ws-subcard__body ws-ai-md" v-html="renderMarkdown(card.value)"></div>
             </div>
           </div>
         </article>
@@ -2823,25 +2983,25 @@
                 <div>
                   <h2 class="ws-ai-dialog__title">AI 世界观构建</h2>
                   <p class="ws-ai-dialog__subtitle">
-                    {{ worldSettingAiStep === 'interview'
-                      ? '通过对话完善你的世界观构想'
-                      : '审阅并编辑 AI 生成的设定草案'
+                    {{ worldSettingAiStep === 'input'
+                      ? '用一句话或一段话，说说你想要一个什么样的世界'
+                      : '看看 AI 写的世界观，不满意就告诉它怎么改'
                     }}
                   </p>
                 </div>
               </div>
               <div class="ws-ai-dialog__header-right">
                 <div class="ws-ai-step-indicator">
-                  <span class="ws-ai-step-indicator__dot" :class="{ 'ws-ai-step-indicator__dot--done': worldSettingAiStep === 'draft' }">1</span>
-                  <span class="ws-ai-step-indicator__line" :class="{ 'ws-ai-step-indicator__line--done': worldSettingAiStep === 'draft' }"></span>
-                  <span class="ws-ai-step-indicator__dot" :class="{ 'ws-ai-step-indicator__dot--active': worldSettingAiStep === 'draft' }">2</span>
+                  <span class="ws-ai-step-indicator__dot" :class="{ 'ws-ai-step-indicator__dot--done': worldSettingAiStep === 'result' }">1</span>
+                  <span class="ws-ai-step-indicator__line" :class="{ 'ws-ai-step-indicator__line--done': worldSettingAiStep === 'result' }"></span>
+                  <span class="ws-ai-step-indicator__dot" :class="{ 'ws-ai-step-indicator__dot--active': worldSettingAiStep === 'result' }">2</span>
                 </div>
                 <button type="button" class="ws-ai-dialog__close" aria-label="关闭" @click="worldSettingAiOpen = false">&times;</button>
               </div>
             </div>
 
             <!-- Body -->
-            <div class="ws-ai-dialog__body scrollbar-paper">
+            <div ref="worldSettingAiBodyRef" class="ws-ai-dialog__body scrollbar-paper">
 
               <!-- Loading overlay -->
               <Transition name="ws-ai-fade">
@@ -2851,138 +3011,58 @@
                   </div>
                   <span class="ws-ai-loading-bar__text">
                     <span class="ws-ai-loading-dot"></span>
-                    {{ worldSettingAiStep === 'interview' ? 'AI 正在构思问题…' : 'AI 正在生成设定草案…' }}
+                    {{ worldSettingAiVersion > 0 ? 'AI 正在按你的意见重写…' : 'AI 正在创作世界观…' }}
                   </span>
+                  <button type="button" class="btn-secondary ws-ai-loading-bar__stop" @click="stopWorldSettingAiDraft">停止</button>
                 </div>
               </Transition>
 
-              <!-- Step 1: Interview -->
-              <template v-if="worldSettingAiStep === 'interview'">
-                <!-- Dimensions -->
-                <div class="ws-ai-dimensions">
-                  <span
-                    v-for="(dim, idx) in [
-                      { label: '力量体系', icon: '01' },
-                      { label: '世界结构', icon: '02' },
-                      { label: '社会规则', icon: '03' },
-                      { label: '历史脉络', icon: '04' },
-                      { label: '核心设定', icon: '05' },
-                    ]"
-                    :key="dim.label"
-                    class="ws-ai-dim-tag"
-                    :class="{ 'ws-ai-dim-tag--done': worldSettingAiCoveredDimensions.includes(String(idx + 1)) }"
-                  >
-                    <span class="ws-ai-dim-tag__icon">{{ dim.icon }}</span>
-                    {{ dim.label }}
+              <!-- 生成中：实时流式预览 -->
+              <div v-if="worldSettingAiLoading && worldSettingAiStreaming" class="ws-ai-stream">
+                <div class="ws-ai-md" v-html="renderMarkdown(worldSettingAiStreaming)"></div>
+              </div>
+
+              <!-- Step 1: 填表（一段话描述你想要的世界） -->
+              <template v-if="worldSettingAiStep === 'input' && !worldSettingAiLoading">
+                <div class="ws-ai-field">
+                  <span class="ws-ai-field__label">你想要一个什么样的世界？</span>
+                  <textarea
+                    v-model="worldSettingAiBrief"
+                    class="ws-ai-textarea ws-ai-textarea--tall"
+                    rows="10"
+                    placeholder="用你自己的话随便说，比如：&#10;一个修仙者其实是在改写世界源代码的世界，灵气是算力，渡劫是系统在查杀越权进程……&#10;&#10;说得越具体，AI 写得越贴近你的想法；只写一句话也行，AI 会替你补全。"
+                  />
+                  <p class="ws-ai-question__hint">不限字数，想到什么写什么。AI 会据此创作一份完整的世界观，生成后你还能继续让它改。</p>
+                </div>
+
+                <label class="ws-ai-checkbox">
+                  <input type="checkbox" v-model="worldSettingAiUseNovelInfo" />
+                  <span class="ws-ai-checkbox__box">{{ worldSettingAiUseNovelInfo ? '✓' : '' }}</span>
+                  <span class="ws-ai-checkbox__text">
+                    参考本书的书名《{{ novel?.title || '未命名' }}》和简介来生成
+                    <span class="ws-ai-checkbox__hint">不勾选则只按你上面写的内容来写，忽略书名简介</span>
                   </span>
-                </div>
+                </label>
 
-                <!-- History -->
-                <div v-if="worldSettingAiInterviewHistory.length > 0" class="ws-ai-history">
-                  <div class="ws-ai-history__header">
-                    <span class="ws-ai-history__count">已完成 {{ worldSettingAiInterviewHistory.length }} 轮对话</span>
-                  </div>
-                  <div class="ws-ai-history__list">
-                    <article
-                      v-for="(turn, index) in worldSettingAiInterviewHistory"
-                      :key="`${turn.label}-${index}`"
-                      class="ws-ai-history__turn"
-                    >
-                      <div class="ws-ai-history__turn-head">
-                        <span class="ws-ai-history__turn-badge">Q{{ index + 1 }}</span>
-                        <span class="ws-ai-history__turn-label">{{ turn.label }}</span>
-                      </div>
-                      <p class="ws-ai-history__turn-question">{{ turn.prompt }}</p>
-                      <div class="ws-ai-history__turn-answer">
-                        <span class="ws-ai-history__turn-answer-icon">A</span>
-                        {{ turn.answer }}
-                      </div>
-                    </article>
-                  </div>
-                </div>
-
-                <!-- Rationale -->
-                <p v-if="worldSettingAiRationale && !worldSettingAiLoading" class="ws-ai-rationale">
-                  <span class="ws-ai-rationale__icon">—</span>
-                  {{ worldSettingAiRationale }}
-                </p>
-
-                <!-- Current question -->
-                <article v-if="worldSettingAiCurrentQuestion && !worldSettingAiLoading" class="ws-ai-question">
-                  <div class="ws-ai-question__header">
-                    <span class="ws-ai-question__round">第 {{ worldSettingAiInterviewHistory.length + 1 }} 轮</span>
-                    <span class="ws-ai-question__label">{{ worldSettingAiCurrentQuestion.label }}</span>
-                  </div>
-                  <p class="ws-ai-question__prompt">{{ worldSettingAiCurrentQuestion.prompt }}</p>
-
-                  <div class="ws-ai-question__options">
-                    <button
-                      v-for="option in worldSettingAiCurrentQuestion.options"
-                      :key="option"
-                      type="button"
-                      class="ws-ai-option-btn"
-                      :class="{ 'ws-ai-option-btn--active': worldSettingAiCurrentAnswer === option }"
-                      @click="worldSettingAiCurrentAnswer = option"
-                    >
-                      <span class="ws-ai-option-btn__check">{{ worldSettingAiCurrentAnswer === option ? '✓' : '' }}</span>
-                      {{ option }}
-                    </button>
-                    <button
-                      type="button"
-                      class="ws-ai-option-btn ws-ai-option-btn--custom"
-                      :class="{ 'ws-ai-option-btn--active': worldSettingAiCurrentAnswer === '__custom__' }"
-                      @click="worldSettingAiCurrentAnswer = '__custom__'"
-                    >
-                      <span class="ws-ai-option-btn__check">{{ worldSettingAiCurrentAnswer === '__custom__' ? '✓' : '' }}</span>
-                      自己输入
-                    </button>
-                  </div>
-
-                  <div class="ws-ai-question__input-area">
-                    <textarea
-                      v-model="worldSettingAiCurrentCustom"
-                      class="ws-ai-textarea"
-                      rows="3"
-                      maxlength="400"
-                      :placeholder="worldSettingAiInterviewCustomPlaceholder"
-                    />
-                    <span class="ws-ai-textarea__counter">{{ worldSettingAiCurrentCustom.length }}/400</span>
-                  </div>
-
-                  <p class="ws-ai-question__hint">选中选项后仍可补充想法，会一并交给 AI。</p>
-                </article>
-
-                <!-- Actions -->
-                <div v-if="worldSettingAiCurrentQuestion && !worldSettingAiLoading" class="ws-ai-actions">
-                  <button
-                    type="button"
-                    class="ws-ai-btn ws-ai-btn--ghost"
-                    @click="generateWorldSettingAiDraft"
-                  >
-                    跳过，直接生成
+                <div class="ws-ai-actions ws-ai-actions--spread">
+                  <button type="button" class="ws-ai-btn ws-ai-btn--ghost" @click="worldSettingAiOpen = false">
+                    取消
                   </button>
                   <button
                     type="button"
                     class="ws-ai-btn ws-ai-btn--primary"
-                    :disabled="!worldSettingAiResolvedAnswer"
-                    @click="submitWorldSettingAiInterviewAnswer"
+                    @click="generateWorldSettingAiDraft"
                   >
-                    确认回答
+                    开始生成
                   </button>
-                </div>
-
-                <!-- Empty state -->
-                <div v-if="!worldSettingAiCurrentQuestion && !worldSettingAiLoading && worldSettingAiInterviewHistory.length === 0" class="ws-ai-empty">
-                  <span class="ws-ai-empty__icon">~</span>
-                  <p>AI 正在准备第一个问题…</p>
                 </div>
               </template>
 
-              <!-- Step 2: Draft -->
-              <template v-else-if="worldSettingAiStep === 'draft'">
+              <!-- Step 2: 结果（看长文 + 提修改意见 + 保存） -->
+              <template v-else-if="worldSettingAiStep === 'result' && !worldSettingAiLoading">
                 <div class="ws-ai-draft-header">
                   <p class="ws-ai-draft-header__text">
-                    AI 已根据 {{ worldSettingAiInterviewHistory.length }} 轮对话生成了世界观设定草案，你可以自由修改后再保存。
+                    {{ worldSettingAiVersion > 1 ? `这是第 ${worldSettingAiVersion} 版。` : '' }}下面是 AI 写的世界观，满意就保存；不满意在最下方说说哪里要改，让它重写。
                   </p>
                 </div>
 
@@ -2997,16 +3077,42 @@
                     />
                   </label>
 
+                  <!-- 完整长文预览 -->
                   <div class="ws-ai-field">
-                    <span class="ws-ai-field__label">设定卡片（可逐张修改、增删）</span>
+                    <span class="ws-ai-field__label">世界观全文</span>
+                    <div class="ws-ai-longread ws-ai-md" v-html="renderMarkdown(worldSettingAiDraftContent)"></div>
+                  </div>
+
+                  <!-- 自动切分出的卡片（可逐张修改、增删） -->
+                  <div class="ws-ai-field">
+                    <span class="ws-ai-field__label">设定卡片（自动按维度拆分，可逐张修改、增删）</span>
                     <div class="ws-cards-editor">
                       <div v-for="card in worldSettingAiDraftCards" :key="card.id" class="ws-card-row">
                         <input v-model="card.key" class="ws-card-row__title" maxlength="40" placeholder="卡片标题（如 力量体系）" />
-                        <textarea v-model="card.value" class="ws-card-row__body" rows="3" maxlength="2000" placeholder="这一块的具体内容…"></textarea>
+                        <textarea v-model="card.value" class="ws-card-row__body" rows="3" placeholder="这一块的具体内容…"></textarea>
                         <button type="button" class="ws-card-row__remove" @click="removeWorldSettingAiDraftCard(card.id)">删除</button>
                       </div>
                       <button type="button" class="btn-primary" @click="addWorldSettingAiDraftCard">＋ 添加卡片</button>
                     </div>
+                  </div>
+
+                  <!-- 修改意见 → 让 AI 重写 -->
+                  <div class="ws-ai-field ws-ai-revise">
+                    <span class="ws-ai-field__label">哪里不满意？想怎么改？</span>
+                    <textarea
+                      v-model="worldSettingAiFeedback"
+                      class="ws-ai-textarea"
+                      rows="3"
+                      placeholder="比如：力量体系再硬核一些，加入明确的等级；历史部分太长了精简一下；整体氛围改成更压抑黑暗……"
+                    />
+                    <button
+                      type="button"
+                      class="ws-ai-btn ws-ai-btn--revise"
+                      :disabled="!worldSettingAiFeedback.trim()"
+                      @click="reviseWorldSettingAiDraft"
+                    >
+                      按意见重写
+                    </button>
                   </div>
 
                   <div class="ws-ai-field">
@@ -3036,9 +3142,9 @@
                   <button
                     type="button"
                     class="ws-ai-btn ws-ai-btn--ghost"
-                    @click="worldSettingAiStep = 'interview'"
+                    @click="worldSettingAiStep = 'input'"
                   >
-                    ← 返回问答
+                    ← 重新描述
                   </button>
                   <div class="ws-ai-actions__right">
                     <button type="button" class="ws-ai-btn ws-ai-btn--ghost" @click="worldSettingAiOpen = false">
@@ -3095,6 +3201,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+defineOptions({ name: 'NovelWorkspaceView' })
 import { useRoute, useRouter } from 'vue-router'
 import {
   createCategory,
@@ -3131,6 +3238,7 @@ import {
   getItemsByNovelId,
   getNovelById,
   getOutlineByNovelId,
+  migrateOutlineHierarchy,
   getTimelineByNovelId,
   moveTimelineEvent,
   normalizeCategoryIds,
@@ -3152,7 +3260,6 @@ import { characterMatchLabels, normalizeCharacterAliases, buildDisplayNameMap } 
 import {
   designOutlineInterviewTurnByAi,
   designOutlineOptionsByAi,
-  designWorldSettingInterviewTurnByAi,
   expandOutlineDesignByAi,
   expandOutlineItemByAi,
   expandOutlineFromExistingByAi,
@@ -3162,6 +3269,14 @@ import {
   refineOutlineOptionsByAi,
 } from '../../lib/localAi'
 import { lintOutlineDraftItems } from '../../lib/outlineDraftLint'
+import { renderMarkdown } from '../../lib/renderMarkdown'
+import {
+  childLevelOf,
+  levelRank,
+  levelText as outlineLevelTextFromLib,
+  canHaveChildren,
+  OUTLINE_LEVEL_ORDER,
+} from '../../lib/outlineHierarchy'
 import { syncAllNovelsWithCloud } from '../../lib/cloudSync'
 import { getCurrentSession } from '../../lib/auth'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
@@ -3197,13 +3312,23 @@ import CharacterProfilePanel from '../../components/character/CharacterProfilePa
 import CharacterChangeTimeline from '../../components/character/CharacterChangeTimeline.vue'
 import CharacterEditForm from '../../components/character/CharacterEditForm.vue'
 import { useCharacterEditor } from '../../composables/useCharacterEditor'
+import {
+  useWorkspaceGenAi,
+  type OutlineAiDraft,
+  type OutlineAiOption,
+  type OutlineAiFollowupTurn,
+  type OutlineAiInterviewQuestion,
+  type OutlineAiMode,
+  type OutlineAiExpandPreset,
+  type OutlineAiDesignerStep,
+  type WorldSettingAiStep,
+} from '../../composables/useWorkspaceGenAi'
 import ConfirmDialog from '../../components/ConfirmDialog.vue'
-import OutlineMindMapCanvas from './components/outline-map/OutlineMindMapCanvas.vue'
 import OutlineBoardView from './components/outline-map/OutlineBoardView.vue'
+import OutlineVerticalView from './components/outline-map/OutlineVerticalView.vue'
 import WorkspaceAiSidebar from './components/WorkspaceAiSidebar.vue'
 import OutlineMindMapInspector from './components/outline-map/OutlineMindMapInspector.vue'
 import { useOutlineChapterMapping } from '../../features/outline-map/composables/useOutlineChapterMapping'
-import { useOutlineMindMapLayout } from '../../features/outline-map/composables/useOutlineMindMapLayout'
 import { useOutlineStorylineFilter } from '../../features/outline-map/composables/useOutlineStorylineFilter'
 const route = useRoute()
 const router = useRouter()
@@ -3224,85 +3349,61 @@ type WorkspaceTab =
   | 'issues'
   | 'worldsettings'
 
-type OutlineAiInterviewQuestion = {
-  label: string
-  prompt: string
-  options: string[]
-  placeholder: string
-}
-
-type OutlineAiOption = {
-  id: string
-  title: string
-  premise: string
-  structure: string
-  narrativeShape?: string
-  coreQuestion?: string
-  forbiddenCliche?: string
-  highlights: string[]
-  endingTone: string
-  beats: string[]
-  characterRoster?: Array<{ name: string; role: string; hook: string }>
-}
-
-type OutlineAiFollowupTurn = {
-  label: string
-  prompt: string
-  answer: string
-}
-
-type OutlineAiDraft = {
-  title: string
-  summary: string
-  storylines?: Array<{
-    name: string
-    type: OutlineStorylineType
-    description: string
-    colorHint: string
-  }>
-  characterCast?: Array<{
-    name: string
-    role: string
-    voice: string
-    personality: string
-    desire: string
-    fear: string
-    secret: string
-    arc: string
-  }>
-  relationCast?: Array<{
-    fromName: string
-    toName: string
-    relationType: string
-    note: string
-    dynamic?: string
-  }>
-  items: Array<{
-    tempId: string
-    parentTempId: string
-    title: string
-    summary: string
-    level: 'volume' | 'act' | 'chapter' | 'scene'
-    goal: string
-    conflict: string
-    twist: string
-    result: string
-    suspense: string
-    plotStage: 'idea' | 'drafted' | 'written' | 'resolved'
-    storylineNames: string[]
-    tension: 1 | 2 | 3 | 4 | 5
-    location: string
-    timeLabel: string
-    characterNames?: string[]
-    povCharacterName?: string
-    emotionalTurn?: string
-    proseHint?: string
-  }>
-  critiqueNotes?: string
-}
-
 const novelId = computed(() => String(route.params.id ?? ''))
 const novel = computed(() => getNovelById(novelId.value))
+
+// 世界观生成 / 大纲设计器的进行中状态走模块级单例（按 novelId 分桶）：
+// 切到章节页（跨路由组件销毁）再切回来，生成不中断、结果不丢。下方所有 .value 用法保持不变。
+const wsGen = useWorkspaceGenAi(String(route.params.id ?? ''))
+const {
+  worldSettingAiOpen,
+  worldSettingAiStep,
+  worldSettingAiLoading,
+  worldSettingAiError,
+  worldSettingAiTargetId,
+  worldSettingAiBrief,
+  worldSettingAiUseNovelInfo,
+  worldSettingAiFeedback,
+  worldSettingAiStreaming,
+  worldSettingAiVersion,
+  worldSettingAiDraftName,
+  worldSettingAiDraftContent,
+  worldSettingAiDraftCards,
+  worldSettingAiDraftCategoryIds,
+  outlineAiDesignerOpen,
+  outlineAiMode,
+  outlineAiDesignerStep,
+  outlineAiDraftIsSkeletonOnly,
+  outlineAiAppendMode,
+  outlineAiLintDismissed,
+  outlineAiExpandAnchorId,
+  outlineAiExpandNote,
+  outlineAiExpandPreset,
+  outlineAiDesignerLoading,
+  outlineAiDesignerStreaming,
+  outlineAiDesignerWriting,
+  outlineAiDesignerError,
+  outlineAiDesignerRationale,
+  outlineAiDesignerBrief,
+  outlineAiDesignerOptions,
+  outlineAiDesignerSelectedOptionId,
+  outlineAiDesignerDraft,
+  outlineAiWriteToast,
+  outlineAiInterviewHistory,
+  outlineAiCurrentQuestion,
+  outlineAiBrief,
+  outlineAiUseNovelInfo,
+  outlineAiGuideConflict,
+  outlineAiGuideProtagonist,
+  outlineAiGuideEnding,
+  outlineAiCurrentAnswer,
+  outlineAiCurrentCustom,
+  outlineAiOptionNotes,
+  outlineAiOptionRevisionHistory,
+  outlineAiCoveredDimensions,
+  outlineAiLoadingById,
+} = wsGen
+const wsGenAborts = wsGen.aborts
 const activeTab = ref<WorkspaceTab>('write')
 const lastTabBeforeCharacters = ref<Exclude<WorkspaceTab, 'characters'> | ''>('')
 const chapters = ref<Chapter[]>([])
@@ -3315,37 +3416,13 @@ const { dimmedOutlineIdSet, matchedCount: storylineMatchedCount } = useOutlineSt
 })
 const expandedOutlineId = ref<string>('')
 const outlineCreateOpen = ref(false)
-const outlineAiDesignerOpen = ref(false)
-type OutlineAiDesignerStep = 'intro' | 'expand' | 'interview' | 'options' | 'skeleton' | 'preview'
-type OutlineAiMode = 'expand' | 'create'
-type OutlineAiExpandPreset = 'auto' | 'next_chapters' | 'split_scenes' | 'subplot'
-
-const outlineAiMode = ref<OutlineAiMode>('create')
-const outlineAiDesignerStep = ref<OutlineAiDesignerStep>('interview')
-const outlineAiDraftIsSkeletonOnly = ref(false)
-const outlineAiAppendMode = ref(false)
-const outlineAiLintDismissed = ref(false)
-const outlineAiExpandAnchorId = ref('')
-const outlineAiExpandNote = ref('')
-const outlineAiExpandPreset = ref<OutlineAiExpandPreset>('auto')
 const outlineAiExpandPresets: Array<{ id: OutlineAiExpandPreset; label: string }> = [
   { id: 'auto', label: '智能判断' },
   { id: 'next_chapters', label: '往后扩章' },
   { id: 'split_scenes', label: '细化场景' },
   { id: 'subplot', label: '补支线' },
 ]
-const outlineAiDesignerLoading = ref(false)
-const outlineAiDesignerWriting = ref(false)
-const outlineAiDesignerError = ref('')
-const outlineAiDesignerRationale = ref('')
-const outlineAiDesignerBrief = ref('')
-const outlineAiDesignerOptions = ref<OutlineAiOption[]>([])
-const outlineAiDesignerSelectedOptionId = ref('')
-const outlineAiDesignerDraft = ref<OutlineAiDraft | null>(null)
-const outlineAiWriteToast = ref('')
 let outlineAiWriteToastTimer: ReturnType<typeof setTimeout> | null = null
-const outlineAiInterviewHistory = ref<OutlineAiFollowupTurn[]>([])
-const outlineAiCurrentQuestion = ref<OutlineAiInterviewQuestion | null>(null)
 const outlineAiScrollRef = ref<HTMLElement | null>(null)
 // 访谈每弹出新问题时，弹窗滚动到底部跟随
 watch([outlineAiCurrentQuestion, () => outlineAiInterviewHistory.value.length], () => {
@@ -3354,16 +3431,10 @@ watch([outlineAiCurrentQuestion, () => outlineAiInterviewHistory.value.length], 
     if (el) el.scrollTop = el.scrollHeight
   })
 })
-const outlineAiCurrentAnswer = ref('')
-const outlineAiCurrentCustom = ref('')
-const outlineAiOptionNotes = ref<Record<string, string>>({})
-const outlineAiOptionRevisionHistory = ref<Array<{ selectedOptionId: string; selectedTitle: string; note: string }>>([])
-const outlineAiCoveredDimensions = ref<string[]>([])
 const outlineDetailOpenId = ref('')
 const activeOutlineDetailItem = computed(() =>
   outlineItems.value.find((item) => item.id === outlineDetailOpenId.value) ?? null,
 )
-const outlineAiLoadingById = reactive<Record<string, boolean>>({})
 const outlineFilter = reactive({
   keyword: '',
   stage: '' as '' | OutlinePlotStage,
@@ -3372,7 +3443,7 @@ const outlineFilter = reactive({
 })
 const outlineViewMode = ref<'console' | 'storyline' | 'structure' | 'rhythm'>('console')
 const activeOutlineMapId = ref('')
-const outlineMapViewMode = ref<'board' | 'map'>('board')
+const outlineMapViewMode = ref<'vertical' | 'board'>('vertical')
 
 // 删除情节点：使用自定义弹窗替代原生 confirm()
 const outlineDeleteOpen = ref(false)
@@ -3473,24 +3544,22 @@ const worldSettingEditId = ref('')
 const worldSettingEditDraft = reactive({ name: '', content: '', categoryIds: [] as string[], cards: [] as CharacterAttribute[] })
 const worldSettingDeleteOpen = ref(false)
 const worldSettingDeleteId = ref('')
-type WorldSettingAiStep = 'interview' | 'draft'
-type WorldSettingAiInterviewQuestion = { label: string; prompt: string; options: string[]; placeholder: string }
-type WorldSettingAiFollowupTurn = { label: string; prompt: string; answer: string }
-const worldSettingAiOpen = ref(false)
-const worldSettingAiStep = ref<WorldSettingAiStep>('interview')
-const worldSettingAiLoading = ref(false)
-const worldSettingAiError = ref('')
-const worldSettingAiTargetId = ref('')
-const worldSettingAiInterviewHistory = ref<WorldSettingAiFollowupTurn[]>([])
-const worldSettingAiCurrentQuestion = ref<WorldSettingAiInterviewQuestion | null>(null)
-const worldSettingAiCurrentAnswer = ref('')
-const worldSettingAiCurrentCustom = ref('')
-const worldSettingAiCoveredDimensions = ref<string[]>([])
-const worldSettingAiRationale = ref('')
-const worldSettingAiDraftName = ref('')
-const worldSettingAiDraftContent = ref('')
-const worldSettingAiDraftCards = ref<CharacterAttribute[]>([])
-const worldSettingAiDraftCategoryIds = ref<string[]>([])
+// 世界观弹窗滚动容器，用于流式输出时自动跟随到底部
+const worldSettingAiBodyRef = ref<HTMLElement | null>(null)
+// 流式输出跟随：生成中无条件跟随；否则仅当用户已贴近底部（<80px）时跟随，
+// 用户手动上滚后即暂停，滚回底部附近自动恢复。
+watch(
+  () => worldSettingAiStreaming.value,
+  () => {
+    const el = worldSettingAiBodyRef.value
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (!worldSettingAiLoading.value && !nearBottom) return
+    void nextTick(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior })
+    })
+  },
+)
 const timelineForm = reactive({
   storyLabel: '',
   title: '',
@@ -3532,13 +3601,17 @@ const canFillOutlineSummaryFromTemplate = computed(() =>
 )
 const filteredOutlineItems = computed(() => {
   const q = outlineFilter.keyword.trim().toLowerCase()
-  return outlineItems.value.filter((item) => {
-    if (outlineFilter.stage && (item.plotStage ?? 'idea') !== outlineFilter.stage) return false
-    if (outlineFilter.level && (item.level ?? 'scene') !== outlineFilter.level) return false
+  const all = outlineItems.value
+  const byId = new Map(all.map((i) => [i.id, i]))
+
+  const passStage = (item: OutlineItem): boolean =>
+    !outlineFilter.stage || (item.plotStage ?? 'idea') === outlineFilter.stage
+  const matchKeyword = (item: OutlineItem): boolean => {
     if (!q) return true
     const text = [
       item.title,
       item.summary,
+      item.proseSummary ?? '',
       item.goal ?? '',
       item.conflict ?? '',
       item.twist ?? '',
@@ -3551,7 +3624,31 @@ const filteredOutlineItems = computed(() => {
       .join(' ')
       .toLowerCase()
     return text.includes(q)
+  }
+
+  // 层级筛选 = 「展开到该层级为止」的 maxDepth 语义（不是精确匹配）。
+  // 选「章」→ 显示卷/幕/章、不展开场景；「全部」→ 不设上限。
+  const maxRank = outlineFilter.level ? levelRank(outlineFilter.level) : Infinity
+
+  // 搜索时忽略层级上限（保证深层场景也能被搜到）；无搜索时按上限折叠。
+  const baseKeep = all.filter((item) => {
+    if (!passStage(item)) return false
+    if (q) return matchKeyword(item)
+    return levelRank(item.level) <= maxRank
   })
+
+  if (!q) return baseKeep
+
+  // 搜索命中后，把命中节点的祖先链一并纳入，保证树不断裂、能看清归属。
+  const keepIds = new Set(baseKeep.map((i) => i.id))
+  for (const hit of baseKeep) {
+    let cur = hit.parentId ? byId.get(hit.parentId) : undefined
+    while (cur && !keepIds.has(cur.id)) {
+      keepIds.add(cur.id)
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
+    }
+  }
+  return all.filter((i) => keepIds.has(i.id))
 })
 const outlineLevelOrder: OutlineNodeLevel[] = ['volume', 'act', 'chapter', 'scene']
 function nextOutlineLevelDown(level: OutlineNodeLevel): OutlineNodeLevel {
@@ -3727,20 +3824,21 @@ const {
   chapters,
 })
 
-const {
-  nodes: outlineMapNodes,
-  edges: outlineMapEdges,
-  sceneWidth: outlineMapSceneWidth,
-  sceneHeight: outlineMapSceneHeight,
-} = useOutlineMindMapLayout({
-  outlineItems,
-  linkedChapterCountByOutlineId,
-  dimmedOutlineIdSet,
-})
+/** chapter 级大纲节点 → 绑定正文章节的「第N章 · 标题」标签（取最小章号那条）。 */
+function getOutlineChapterLabel(outlineId: string): string {
+  const linked = getLinkedChaptersForOutline(outlineId)
+  if (linked.length === 0) return ''
+  const primary = [...linked].sort((a, b) => a.chapterNo - b.chapterNo)[0]
+  const title = String(primary.title ?? '').trim()
+  const extra = linked.length > 1 ? ` +${linked.length - 1}` : ''
+  return `第${primary.chapterNo}章${title ? ` · ${title}` : ''}${extra}`
+}
 
 const outlineAiDraftLintIssues = computed(() => {
   const draft = outlineAiDesignerDraft.value
-  if (!draft || outlineAiDesignerStep.value !== 'preview') return []
+  if (!draft) return []
+  // 骨架步骤也校验：此时正好能查「每幕章节是否够」（场景尚未生成）。
+  if (outlineAiDesignerStep.value !== 'preview' && outlineAiDesignerStep.value !== 'skeleton') return []
   return lintOutlineDraftItems(draft.items)
 })
 
@@ -3882,8 +3980,12 @@ function reorderOutlineNode(payload: { draggedId: string; targetId: string; posi
   }
   if (isDescendant(draggedId, targetId)) return
 
+  // 拖成 target 的子节点时，target 必须能有子层（场景是末级，禁止）
+  if (position === 'child' && !canHaveChildren(target.level ?? 'volume')) return
+
   const newParentId = position === 'child' ? target.id : (target.parentId ?? null)
-  const newLevel = position === 'child' ? nextOutlineLevelDown(target.level ?? 'chapter') : (target.level ?? 'scene')
+  const newParent = newParentId ? items.find((i) => i.id === newParentId) : null
+  const newLevel = childLevelOf(newParent?.level ?? null)
 
   const siblings = items
     .filter((i) => (i.parentId ?? null) === newParentId && i.id !== draggedId)
@@ -3897,8 +3999,35 @@ function reorderOutlineNode(payload: { draggedId: string; targetId: string; posi
 
   updateOutlineItem({ id: dragged.id, parentId: newParentId, level: newLevel })
   siblings.forEach((sib, idx) => updateOutlineItem({ id: sib.id, order: idx }))
+  // 跨级拖动后，子孙的 level 需要按新深度逐层重算，否则层级错乱
+  recomputeSubtreeLevels(dragged.id)
   outlineItems.value = getOutlineByNovelId(novelId.value)
   activeOutlineMapId.value = dragged.id
+}
+
+/** DFS 重设某节点所有子孙的 level（按 parentId 推导），用于拖动子树后修正层级。 */
+function recomputeSubtreeLevels(rootId: string): void {
+  const all = getOutlineByNovelId(novelId.value)
+  const byParent = new Map<string, OutlineItem[]>()
+  for (const it of all) {
+    if (!it.parentId) continue
+    const list = byParent.get(it.parentId) ?? []
+    list.push(it)
+    byParent.set(it.parentId, list)
+  }
+  const root = all.find((i) => i.id === rootId)
+  if (!root) return
+  const walk = (node: OutlineItem): void => {
+    for (const child of byParent.get(node.id) ?? []) {
+      const expected = childLevelOf(node.level ?? null)
+      if ((child.level ?? null) !== expected) {
+        updateOutlineItem({ id: child.id, level: expected })
+        child.level = expected
+      }
+      walk(child)
+    }
+  }
+  walk(root)
 }
 
 function jumpToWritingChapterFromOutline(chapterId: string): void {
@@ -4414,6 +4543,7 @@ function onFocusSphereNodeSelect(id: string): void {
 
 function reloadWorkspaceEntities(id: string): void {
   chapters.value = getChaptersByNovelId(id)
+  migrateOutlineHierarchy(id)
   outlineItems.value = getOutlineByNovelId(id)
   outlineStorylines.value = getOutlineStorylinesByNovelId(id)
   characters.value = getCharactersByNovelId(id)
@@ -4684,7 +4814,7 @@ function openOutlineCreate(): void {
 
 function resetOutlineAiDesignerState(): void {
   outlineAiMode.value = outlineItems.value.length > 0 ? 'expand' : 'create'
-  outlineAiDesignerStep.value = outlineItems.value.length > 0 ? 'expand' : 'interview'
+  outlineAiDesignerStep.value = outlineItems.value.length > 0 ? 'expand' : 'brief'
   outlineAiDraftIsSkeletonOnly.value = false
   outlineAiAppendMode.value = false
   outlineAiLintDismissed.value = false
@@ -4703,6 +4833,11 @@ function resetOutlineAiDesignerState(): void {
   outlineAiCurrentQuestion.value = null
   outlineAiCurrentAnswer.value = ''
   outlineAiCurrentCustom.value = ''
+  outlineAiBrief.value = ''
+  outlineAiUseNovelInfo.value = true
+  outlineAiGuideConflict.value = ''
+  outlineAiGuideProtagonist.value = ''
+  outlineAiGuideEnding.value = ''
   outlineAiOptionNotes.value = {}
   outlineAiOptionRevisionHistory.value = []
   outlineAiCoveredDimensions.value = []
@@ -4729,8 +4864,8 @@ function switchOutlineAiMode(mode: OutlineAiMode): void {
     outlineAiDesignerStep.value = 'options'
     return
   }
-  // 从零规划尚未开始访谈时，先回到准备步骤（含世界观校验），不自动触发 AI
-  outlineAiDesignerStep.value = 'intro'
+  // 从零规划尚未开始时，进入「描述构想」步骤
+  outlineAiDesignerStep.value = 'brief'
 }
 
 function openOutlineAiExpand(): void {
@@ -4767,11 +4902,48 @@ function goCompleteWorldviewFromOutlineAi(): void {
 async function startOutlineAiInterview(): Promise<void> {
   if (outlineAiDesignerLoading.value) return
   if (!hasWorldviewForOutline.value) return
-  outlineAiDesignerStep.value = 'interview'
-  const hasNext = await requestNextOutlineAiQuestion()
-  if (!hasNext && !outlineAiDesignerError.value) {
-    await generateOutlineAiOptions()
+  // 不再走多轮问答，直接进入「一段话描述构想」步骤
+  outlineAiDesignerStep.value = 'brief'
+}
+
+/** 把构想描述+可选引导合成为一条访谈记录，交给既有的方案生成逻辑 */
+function buildOutlineAiBriefHistory(): OutlineAiFollowupTurn[] {
+  const brief = outlineAiBrief.value.trim()
+  const turns: OutlineAiFollowupTurn[] = []
+  if (brief) {
+    turns.push({ label: '故事构想', prompt: '你想要一个什么样的故事走向？', answer: brief })
   }
+  const conflict = outlineAiGuideConflict.value.trim()
+  if (conflict) turns.push({ label: '核心冲突', prompt: '故事的核心冲突/主线矛盾是什么？', answer: conflict })
+  const protagonist = outlineAiGuideProtagonist.value.trim()
+  if (protagonist) turns.push({ label: '主角目标', prompt: '主角想要什么、要克服什么？', answer: protagonist })
+  const ending = outlineAiGuideEnding.value.trim()
+  if (ending) turns.push({ label: '结局基调', prompt: '你期待的结局基调/走向？', answer: ending })
+  return turns
+}
+
+const outlineAiBriefReady = computed(() =>
+  Boolean(
+    outlineAiBrief.value.trim() ||
+    outlineAiGuideConflict.value.trim() ||
+    outlineAiGuideProtagonist.value.trim() ||
+    outlineAiGuideEnding.value.trim(),
+  ),
+)
+
+/** 提交构想，直接生成大纲方案（跳过多轮问答）；留空则让 AI 基于世界观自由发挥 */
+async function submitOutlineAiBrief(): Promise<void> {
+  if (outlineAiDesignerLoading.value) return
+  const history = buildOutlineAiBriefHistory()
+  if (history.length === 0) {
+    history.push({
+      label: '故事构想',
+      prompt: '你想要一个什么样的故事走向？',
+      answer: '（作者未指定具体方向）请完全基于已有的世界观设定自由发挥，构思 2-3 套贴合该世界观、彼此差异明显的大纲方向。',
+    })
+  }
+  outlineAiInterviewHistory.value = history
+  await generateOutlineAiOptions()
 }
 
 function backToOutlineAiExpand(): void {
@@ -4800,6 +4972,19 @@ function collectOutlineAiInterviewHistory(): Array<{ label: string; prompt: stri
   }))
 }
 
+/** 按「是否参考书名/简介」开关解析书名：不勾选则返回空串（题材/视角/基调仍由 novel 其余字段保留）。 */
+function outlineAiResolvedTitle(): string {
+  return outlineAiUseNovelInfo.value ? (novel.value?.title ?? '') : ''
+}
+/** 同上，解析简介。 */
+function outlineAiResolvedSummary(): string {
+  return outlineAiUseNovelInfo.value ? (novel.value?.summary ?? '') : ''
+}
+/** 传给大纲 AI 的 novel 对象：不勾选「参考书名/简介」时清空其 title/summary，其余字段（题材/视角/基调等）保留。 */
+function outlineAiResolvedNovel<T extends { title: string; summary?: string }>(n: T): T {
+  return outlineAiUseNovelInfo.value ? n : { ...n, title: '', summary: '' }
+}
+
 async function requestNextOutlineAiQuestion(): Promise<boolean> {
   if (!novel.value) return false
   outlineAiDesignerLoading.value = true
@@ -4808,11 +4993,11 @@ async function requestNextOutlineAiQuestion(): Promise<boolean> {
     const result = await designOutlineInterviewTurnByAi(
       buildNovelWorkspacePayload(novel.value.id),
       {
-        novelTitle: novel.value.title,
-        novelSummary: novel.value.summary,
+        novelTitle: outlineAiResolvedTitle(),
+        novelSummary: outlineAiResolvedSummary(),
         novel: {
-          title: novel.value.title,
-          summary: novel.value.summary,
+          title: outlineAiResolvedTitle(),
+          summary: outlineAiResolvedSummary(),
           continuityBrief: novel.value.continuityBrief,
           genre: novel.value.genre,
           perspective: novel.value.perspective,
@@ -4862,9 +5047,9 @@ async function generateOutlineAiOptions(): Promise<void> {
     const result = await designOutlineOptionsByAi(
       buildNovelWorkspacePayload(novel.value.id),
       {
-        novelTitle: novel.value.title,
-        novelSummary: novel.value.summary,
-        novel: novel.value,
+        novelTitle: outlineAiResolvedTitle(),
+        novelSummary: outlineAiResolvedSummary(),
+        novel: outlineAiResolvedNovel(novel.value),
         aiStylePrompt: novel.value.aiStylePrompt,
         history: collectOutlineAiInterviewHistory(),
       },
@@ -4921,9 +5106,9 @@ async function refineOutlineAiOptions(): Promise<void> {
     const result = await refineOutlineOptionsByAi(
       buildNovelWorkspacePayload(novel.value.id),
       {
-        novelTitle: novel.value.title,
-        novelSummary: novel.value.summary,
-        novel: novel.value,
+        novelTitle: outlineAiResolvedTitle(),
+        novelSummary: outlineAiResolvedSummary(),
+        novel: outlineAiResolvedNovel(novel.value),
         aiStylePrompt: novel.value.aiStylePrompt,
         history: collectOutlineAiInterviewHistory(),
         currentOptions: outlineAiDesignerOptions.value,
@@ -4953,9 +5138,9 @@ async function refineOutlineAiOptions(): Promise<void> {
 function buildOutlineAiDraftInput() {
   if (!novel.value || !selectedOutlineAiOption.value) return null
   return {
-    novelTitle: novel.value.title,
-    novelSummary: novel.value.summary,
-    novel: novel.value,
+    novelTitle: outlineAiResolvedTitle(),
+    novelSummary: outlineAiResolvedSummary(),
+    novel: outlineAiResolvedNovel(novel.value),
     aiStylePrompt: novel.value.aiStylePrompt,
     history: collectOutlineAiInterviewHistory(),
     selectedOption: selectedOutlineAiOption.value,
@@ -5043,17 +5228,62 @@ async function generateOutlineAiDraft(): Promise<void> {
   outlineAiDraftIsSkeletonOnly.value = false
   outlineAiAppendMode.value = false
   outlineAiLintDismissed.value = false
+  outlineAiDesignerStreaming.value = ''
+  wsGenAborts.outlineDesigner?.abort()
+  wsGenAborts.outlineDesigner = new AbortController()
   try {
-    const result = await expandOutlineDesignByAi(buildNovelWorkspacePayload(novel.value.id), input)
+    const result = await expandOutlineDesignByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      { ...input, onChunk: (d) => { outlineAiDesignerStreaming.value += d } },
+      wsGenAborts.outlineDesigner.signal,
+    )
     if (result.items.length === 0) throw new Error('AI 这次没有展开出可用的大纲节点。')
     outlineAiDesignerDraft.value = result
     outlineAiDesignerStep.value = 'preview'
   } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') return
     outlineAiDesignerError.value = error instanceof Error ? error.message : 'AI 展开大纲失败，请稍后重试。'
   } finally {
     outlineAiDesignerLoading.value = false
+    outlineAiDesignerStreaming.value = ''
+    wsGenAborts.outlineDesigner = null
   }
 }
+
+function stopOutlineAiDesignerGeneration(): void {
+  wsGenAborts.outlineDesigner?.abort()
+  outlineAiDesignerLoading.value = false
+  outlineAiDesignerStreaming.value = ''
+}
+
+const outlineAiDesignerStreamLines = computed(() => {
+  const raw = outlineAiDesignerStreaming.value
+  if (!raw) return []
+  const lines: Array<{ level: string; text: string }> = []
+  const levelLabels: Record<string, string> = { volume: '卷', act: '幕', chapter: '章', scene: '场景' }
+  const re = /"level"\s*:\s*"(volume|act|chapter|scene)"[^}]*?"title"\s*:\s*"([^"]*?)"/g
+  const reAlt = /"title"\s*:\s*"([^"]*?)"[^}]*?"level"\s*:\s*"(volume|act|chapter|scene)"/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(raw)) !== null) {
+    const level = match[1]
+    const title = match[2]
+    if (title) {
+      const prefix = level === 'volume' ? '◆' : level === 'act' ? '  ▸' : level === 'chapter' ? '    ·' : '      ○'
+      lines.push({ level, text: `${prefix} ${levelLabels[level]}：${title}` })
+    }
+  }
+  if (lines.length === 0) {
+    while ((match = reAlt.exec(raw)) !== null) {
+      const title = match[1]
+      const level = match[2]
+      if (title) {
+        const prefix = level === 'volume' ? '◆' : level === 'act' ? '  ▸' : level === 'chapter' ? '    ·' : '      ○'
+        lines.push({ level, text: `${prefix} ${levelLabels[level]}：${title}` })
+      }
+    }
+  }
+  return lines
+})
 
 async function generateOutlineAiSkeleton(): Promise<void> {
   const input = buildOutlineAiDraftInput()
@@ -5126,10 +5356,7 @@ async function generateOutlineAiScenesFromSkeleton(): Promise<void> {
 
 function backToOutlineAiInterview(): void {
   if (outlineAiDesignerLoading.value) return
-  outlineAiDesignerStep.value = 'interview'
-  if (!outlineAiCurrentQuestion.value) {
-    void requestNextOutlineAiQuestion()
-  }
+  outlineAiDesignerStep.value = 'brief'
 }
 
 function backToOutlineAiOptions(): void {
@@ -5159,6 +5386,7 @@ async function applyOutlineAiDraft(): Promise<void> {
     outlineAiDesignerError.value = '没有可写入的大纲草案，请先生成正式大纲。'
     return
   }
+  const writeNovelId = novel.value.id
   if (outlineAiDesignerDraft.value.items.length === 0) {
     outlineAiDesignerError.value = '大纲草案里没有节点，请返回重新生成。'
     return
@@ -5292,25 +5520,104 @@ async function applyOutlineAiDraft(): Promise<void> {
       return createdIdMap.get(key) ?? null
     }
 
-    for (const item of outlineAiDesignerDraft.value.items) {
+    // 拓扑安全：按 level 深度升序排序，保证父节点先于子节点入库；
+    // 数组内同级保持原序。否则子节点先建会找不到父→变成顶层孤儿。
+    const orderedDraftItems = [...outlineAiDesignerDraft.value.items]
+      .map((item, idx) => ({ item, idx }))
+      .sort((a, b) => {
+        const r = levelRank(a.item.level) - levelRank(b.item.level)
+        return r !== 0 ? r : a.idx - b.idx
+      })
+      .map((x) => x.item)
+
+    let fallbackVolumeId = ''
+    let orphanCount = 0
+    let bridgeCount = 0
+    const ensureFallbackVolume = (): string => {
+      if (fallbackVolumeId) return fallbackVolumeId
+      const created = createOutlineItem({
+        novelId: writeNovelId,
+        title: '未归类卷',
+        summary: 'AI 生成时父节点缺失，自动归集于此，可手动整理。',
+        level: 'volume',
+        parentId: null,
+      })
+      fallbackVolumeId = created.id
+      return fallbackVolumeId
+    }
+
+    // 缓存为「补层」自动插入的中间节点，使同一父下的多个子节点共用同一座桥（如同一卷下多个章共用一个自动幕）。
+    const bridgeCache = new Map<string, string>()
+    /**
+     * 在父节点与子 level 不相邻时，自动补齐缺失的中间层级（如章挂在卷下→在中间插入一个幕），
+     * 返回子节点真正应挂的父 id。信任 AI 声明的子 level，不再把子节点强行 relabel 成父的下一级。
+     */
+    const bridgeParentForLevel = (parentId: string | null, parentLevel: OutlineNodeLevel | null, childLevel: OutlineNodeLevel): string | null => {
+      let curParentId = parentId
+      let curParentLevel = parentLevel
+      // 逐级下探，直到父的下一级正好等于子 level
+      while (childLevelOf(curParentLevel) !== childLevel && levelRank(curParentLevel) < levelRank(childLevel) - 1) {
+        const midLevel = childLevelOf(curParentLevel)
+        const cacheKey = `${curParentId ?? 'root'}::${midLevel}`
+        const cached = bridgeCache.get(cacheKey)
+        if (cached) {
+          curParentId = cached
+          curParentLevel = midLevel
+          continue
+        }
+        const mid = createOutlineItem({
+          novelId: writeNovelId,
+          title: `（自动补充的${outlineLevelTextFromLib(midLevel)}）`,
+          summary: 'AI 大纲缺少该层级，已自动补充以保持卷→幕→章→场景的完整结构，可手动重命名或整理。',
+          level: midLevel,
+          parentId: curParentId,
+        })
+        bridgeCache.set(cacheKey, mid.id)
+        bridgeCount += 1
+        curParentId = mid.id
+        curParentLevel = midLevel
+      }
+      return curParentId
+    }
+
+    for (const item of orderedDraftItems) {
       const characterIds = (item.characterNames ?? [])
         .map((name) => nameToId.get(String(name).trim().toLowerCase()))
         .filter((id): id is string => Boolean(id))
       const povCharacterId = item.povCharacterName
         ? nameToId.get(String(item.povCharacterName).trim().toLowerCase()) ?? null
         : null
+      // 解析父；解析失败且本身不是顶层卷时，挂到「未归类卷」兜底，绝不留顶层孤儿
+      let parentId = resolveParentId(item.parentTempId)
+      if (!parentId && item.level !== 'volume') {
+        parentId = ensureFallbackVolume()
+        orphanCount += 1
+      }
+      // 信任 AI 声明的 level：若与父级不相邻（跳级，如章直接挂卷下），自动补齐中间层（插入幕），
+      // 而不是把本节点 relabel 成父的下一级——后者正是「章被改写成幕」的根源。
+      const initialParent = parentId ? getOutlineByNovelId(novel.value.id).find((i) => i.id === parentId) : null
+      const expectedChildLevel = childLevelOf(initialParent?.level ?? null)
+      const declaredLevel = OUTLINE_LEVEL_ORDER.includes(item.level as OutlineNodeLevel)
+        ? (item.level as OutlineNodeLevel)
+        : expectedChildLevel
+      // 子 level 必须比父更深；若声明的 level 不比父深（畸形，如幕挂幕下），回退为父的下一级
+      let itemLevel: OutlineNodeLevel =
+        levelRank(declaredLevel) > levelRank(initialParent?.level ?? null) ? declaredLevel : expectedChildLevel
+      if (parentId && initialParent && levelRank(initialParent.level) < levelRank(itemLevel) - 1) {
+        parentId = bridgeParentForLevel(parentId, initialParent.level ?? null, itemLevel)
+      }
       const created = createOutlineItem({
         novelId: novel.value.id,
         title: item.title,
         summary: item.summary,
-        level: item.level,
+        level: itemLevel,
         goal: item.goal,
         conflict: item.conflict,
         twist: item.twist,
         result: item.result,
         suspense: item.suspense,
         plotStage: item.plotStage,
-        parentId: resolveParentId(item.parentTempId),
+        parentId,
         location: item.location,
         timeLabel: item.timeLabel,
         povCharacterId,
@@ -5322,6 +5629,14 @@ async function applyOutlineAiDraft(): Promise<void> {
       })
       createdIdMap.set(item.tempId, created.id)
     }
+
+    if (orphanCount > 0) {
+      showOutlineAiWriteToast(`有 ${orphanCount} 个节点未能匹配父级，已归入「未归类卷」，请手动整理。`)
+    }
+    if (bridgeCount > 0) {
+      showOutlineAiWriteToast(`AI 大纲缺少中间层级，已自动补充 ${bridgeCount} 个节点以保持「卷→幕→章→场景」结构，可手动重命名。`)
+    }
+
 
     upsertNovelRecord({ ...novel.value, updatedAt: new Date().toISOString() })
 
@@ -5477,10 +5792,7 @@ function onOutlineTensionChange(id: string, event: Event): void {
 }
 
 function outlineLevelText(level?: OutlineNodeLevel): string {
-  if (level === 'volume') return '卷'
-  if (level === 'act') return '幕'
-  if (level === 'chapter') return '章'
-  return '场景'
+  return outlineLevelTextFromLib(level)
 }
 
 function plotStageText(stage?: OutlinePlotStage): string {
@@ -7366,180 +7678,148 @@ function confirmWorldSettingDelete(): void {
   worldSettingDeleteId.value = ''
 }
 
-// ── World Setting AI Interview ──────────────────────────────────────────────
-
-const worldSettingAiResolvedAnswer = computed(() => {
-  const selected = worldSettingAiCurrentAnswer.value
-  const custom = worldSettingAiCurrentCustom.value.trim()
-  if (!selected && !custom) return ''
-  if (selected === '__custom__') return custom || ''
-  if (!selected) return custom
-  return custom ? `${selected}（补充：${custom}）` : selected
-})
-
-const worldSettingAiInterviewCustomPlaceholder = computed(() => {
-  const selected = worldSettingAiCurrentAnswer.value
-  if (!selected || selected === '__custom__') return '直接用一句到几句话描述你的想法'
-  return `对「${selected}」有什么补充？留空则只用选项`
-})
+// ── World Setting AI（填表 → 生成 → 迭代修改）──────────────────────────────
 
 function resetWorldSettingAiState(): void {
-  worldSettingAiStep.value = 'interview'
+  worldSettingAiStep.value = 'input'
   worldSettingAiLoading.value = false
   worldSettingAiError.value = ''
   worldSettingAiTargetId.value = ''
-  worldSettingAiInterviewHistory.value = []
-  worldSettingAiCurrentQuestion.value = null
-  worldSettingAiCurrentAnswer.value = ''
-  worldSettingAiCurrentCustom.value = ''
-  worldSettingAiCoveredDimensions.value = []
-  worldSettingAiRationale.value = ''
+  worldSettingAiBrief.value = ''
+  worldSettingAiUseNovelInfo.value = true
+  worldSettingAiFeedback.value = ''
+  worldSettingAiStreaming.value = ''
+  worldSettingAiVersion.value = 0
   worldSettingAiDraftName.value = ''
   worldSettingAiDraftContent.value = ''
   worldSettingAiDraftCards.value = []
   worldSettingAiDraftCategoryIds.value = []
 }
 
-async function openWorldSettingAiCreate(): Promise<void> {
+function openWorldSettingAiCreate(): void {
   resetWorldSettingAiState()
   worldSettingAiOpen.value = true
-  const hasNext = await requestNextWorldSettingAiQuestion()
-  if (!hasNext && !worldSettingAiError.value) {
-    await generateWorldSettingAiDraft()
-  }
 }
 
-async function openWorldSettingAiEdit(id: string): Promise<void> {
+function openWorldSettingAiEdit(id: string): void {
   resetWorldSettingAiState()
   worldSettingAiTargetId.value = id
   const ws = worldSettings.value.find((w) => w.id === id)
   if (ws) {
     worldSettingAiDraftCategoryIds.value = [...(ws.categoryIds ?? [])]
+    worldSettingAiDraftName.value = ws.name
+    // 已有设定：把原内容作为「上一版」，进入结果步骤，用户可直接提修改意见
+    const existingContent = String(ws.content ?? '') || (ws.attributes ?? []).map((c) => `## ${String(c.key ?? '')}\n${String(c.value ?? '')}`).join('\n\n')
+    worldSettingAiDraftContent.value = existingContent
+    worldSettingAiDraftCards.value = (ws.attributes ?? []).map((c) => ({ id: uid(), key: String(c.key ?? ''), value: String(c.value ?? '') }))
+    worldSettingAiVersion.value = worldSettingAiDraftCards.value.length > 0 ? 1 : 0
+    worldSettingAiStep.value = worldSettingAiVersion.value > 0 ? 'result' : 'input'
   }
   worldSettingAiOpen.value = true
-  const hasNext = await requestNextWorldSettingAiQuestion()
-  if (!hasNext && !worldSettingAiError.value) {
-    await generateWorldSettingAiDraft()
-  }
 }
 
-function collectWorldSettingAiHistory(): Array<{ label: string; prompt: string; answer: string }> {
-  return worldSettingAiInterviewHistory.value.map((row) => ({
-    label: row.label,
-    prompt: row.prompt,
-    answer: row.answer,
-  }))
-}
-
-async function requestNextWorldSettingAiQuestion(): Promise<boolean> {
-  if (!novel.value) return false
-  worldSettingAiLoading.value = true
-  worldSettingAiError.value = ''
-  try {
-    const existing = worldSettingAiTargetId.value
-      ? worldSettings.value.find((w) => w.id === worldSettingAiTargetId.value)
-      : undefined
-    const result = await designWorldSettingInterviewTurnByAi(
-      buildNovelWorkspacePayload(novel.value.id),
-      {
-        novelTitle: novel.value.title,
-        novelSummary: novel.value.summary,
-        novel: {
-          title: novel.value.title,
-          summary: novel.value.summary,
-          genre: novel.value.genre,
-          perspective: novel.value.perspective,
-          tone: novel.value.tone,
-        },
-        aiStylePrompt: novel.value.aiStylePrompt,
-        existingSetting: existing ? { name: existing.name, content: existing.content } : undefined,
-        history: collectWorldSettingAiHistory(),
-        remainingRounds: Math.max(0, 12 - worldSettingAiInterviewHistory.value.length),
-      },
-    )
-    worldSettingAiRationale.value = result.rationale
-    const newDims = result.coveredDimensions ?? []
-    for (const d of newDims) {
-      if (!worldSettingAiCoveredDimensions.value.includes(d)) {
-        worldSettingAiCoveredDimensions.value.push(d)
-      }
-    }
-    if (result.shouldAsk && result.question) {
-      worldSettingAiCurrentQuestion.value = result.question
-      worldSettingAiCurrentAnswer.value = ''
-      worldSettingAiCurrentCustom.value = ''
-      worldSettingAiStep.value = 'interview'
-      return true
-    }
-    worldSettingAiCurrentQuestion.value = null
-    return false
-  } catch (error: unknown) {
-    worldSettingAiError.value = error instanceof Error ? error.message : 'AI 生成问题失败，请稍后重试。'
-    return true
-  } finally {
-    worldSettingAiLoading.value = false
-  }
-}
-
-async function submitWorldSettingAiInterviewAnswer(): Promise<void> {
-  const question = worldSettingAiCurrentQuestion.value
-  const answer = worldSettingAiResolvedAnswer.value
-  if (!question || !answer) return
-  worldSettingAiInterviewHistory.value = [
-    ...worldSettingAiInterviewHistory.value,
-    { label: question.label, prompt: question.prompt, answer },
-  ]
-  worldSettingAiCurrentQuestion.value = null
-  worldSettingAiCurrentAnswer.value = ''
-  worldSettingAiCurrentCustom.value = ''
-  if (worldSettingAiInterviewHistory.value.length >= 12) {
-    await generateWorldSettingAiDraft()
-    return
-  }
-  const hasNext = await requestNextWorldSettingAiQuestion()
-  if (!hasNext && !worldSettingAiError.value) {
-    await generateWorldSettingAiDraft()
-  }
-}
-
+/** 首次生成：根据用户的自由描述创作世界观 */
 async function generateWorldSettingAiDraft(): Promise<void> {
   if (!novel.value) return
   worldSettingAiLoading.value = true
   worldSettingAiError.value = ''
+  worldSettingAiStreaming.value = ''
+  wsGenAborts.worldSetting?.abort()
+  wsGenAborts.worldSetting = new AbortController()
   try {
-    const existing = worldSettingAiTargetId.value
-      ? worldSettings.value.find((w) => w.id === worldSettingAiTargetId.value)
-      : undefined
     const result = await generateWorldSettingDraftByAi(
       buildNovelWorkspacePayload(novel.value.id),
       {
-        novelTitle: novel.value.title,
-        novelSummary: novel.value.summary,
-        novel: {
-          title: novel.value.title,
-          summary: novel.value.summary,
-          genre: novel.value.genre,
-          perspective: novel.value.perspective,
-          tone: novel.value.tone,
-        },
+        ...worldSettingAiNovelInfo(),
         aiStylePrompt: novel.value.aiStylePrompt,
-        existingSetting: existing ? { name: existing.name, content: existing.content } : undefined,
-        history: collectWorldSettingAiHistory(),
+        userBrief: worldSettingAiBrief.value,
+        onChunk: (d) => { worldSettingAiStreaming.value += d },
       },
+      wsGenAborts.worldSetting.signal,
     )
-    worldSettingAiDraftName.value = result.name
-    worldSettingAiDraftCards.value = (result.cards ?? []).map((c) => ({ id: uid(), key: c.key, value: c.value }))
-    if (worldSettingAiDraftCards.value.length === 0) {
-      const fallback = String(result.content ?? '').trim()
-      worldSettingAiDraftCards.value = fallback ? [{ id: uid(), key: '概述', value: fallback }] : [{ id: uid(), key: '', value: '' }]
-    }
-    worldSettingAiDraftContent.value = result.content
-    worldSettingAiStep.value = 'draft'
+    applyWorldSettingAiResult(result)
   } catch (error: unknown) {
-    worldSettingAiError.value = error instanceof Error ? error.message : 'AI 生成设定草案失败，请稍后重试。'
+    if (error instanceof Error && error.name === 'AbortError') return
+    worldSettingAiError.value = error instanceof Error ? error.message : 'AI 生成世界观失败，请稍后重试。'
   } finally {
     worldSettingAiLoading.value = false
+    worldSettingAiStreaming.value = ''
+    wsGenAborts.worldSetting = null
   }
+}
+
+/** 停止正在进行的世界观生成（用户主动点停止时调用） */
+function stopWorldSettingAiDraft(): void {
+  wsGenAborts.worldSetting?.abort()
+  worldSettingAiLoading.value = false
+}
+
+/** 根据「是否参考书名/简介」开关，组装传给 AI 的作品信息 */
+function worldSettingAiNovelInfo(): {
+  novelTitle: string
+  novelSummary?: string
+  novel?: { title: string; summary?: string; genre?: string; perspective?: string; tone?: string }
+} {
+  const n = novel.value
+  if (!n) return { novelTitle: '' }
+  if (!worldSettingAiUseNovelInfo.value) {
+    // 不参考书名/简介：题材仍保留（它决定世界观大方向），但不传书名与简介
+    return { novelTitle: '', novelSummary: '', novel: { title: '', summary: '', genre: n.genre, perspective: n.perspective, tone: n.tone } }
+  }
+  return {
+    novelTitle: n.title,
+    novelSummary: n.summary,
+    novel: { title: n.title, summary: n.summary, genre: n.genre, perspective: n.perspective, tone: n.tone },
+  }
+}
+
+/** 迭代修订：基于上一版 + 修改意见重新生成 */
+async function reviseWorldSettingAiDraft(): Promise<void> {
+  if (!novel.value) return
+  if (!worldSettingAiDraftContent.value.trim()) return
+  worldSettingAiLoading.value = true
+  worldSettingAiError.value = ''
+  worldSettingAiStreaming.value = ''
+  wsGenAborts.worldSetting?.abort()
+  wsGenAborts.worldSetting = new AbortController()
+  try {
+    const result = await generateWorldSettingDraftByAi(
+      buildNovelWorkspacePayload(novel.value.id),
+      {
+        ...worldSettingAiNovelInfo(),
+        aiStylePrompt: novel.value.aiStylePrompt,
+        userBrief: worldSettingAiBrief.value,
+        revise: {
+          previousName: worldSettingAiDraftName.value,
+          previousContent: worldSettingAiDraftContent.value,
+          feedback: worldSettingAiFeedback.value,
+        },
+        onChunk: (d) => { worldSettingAiStreaming.value += d },
+      },
+      wsGenAborts.worldSetting.signal,
+    )
+    applyWorldSettingAiResult(result)
+    worldSettingAiFeedback.value = ''
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') return
+    worldSettingAiError.value = error instanceof Error ? error.message : 'AI 修改世界观失败，请稍后重试。'
+  } finally {
+    worldSettingAiLoading.value = false
+    worldSettingAiStreaming.value = ''
+    wsGenAborts.worldSetting = null
+  }
+}
+
+function applyWorldSettingAiResult(result: { name: string; content: string; cards: Array<{ key: string; value: string }> }): void {
+  worldSettingAiDraftName.value = result.name
+  worldSettingAiDraftContent.value = result.content
+  worldSettingAiDraftCards.value = (result.cards ?? []).map((c) => ({ id: uid(), key: c.key, value: c.value }))
+  if (worldSettingAiDraftCards.value.length === 0) {
+    const fallback = String(result.content ?? '').trim()
+    worldSettingAiDraftCards.value = fallback ? [{ id: uid(), key: '概述', value: fallback }] : [{ id: uid(), key: '', value: '' }]
+  }
+  worldSettingAiVersion.value += 1
+  worldSettingAiStep.value = 'result'
 }
 
 function addWorldSettingAiDraftCard(): void {
@@ -7556,7 +7836,7 @@ function saveWorldSettingAiDraft(): void {
     updateWorldSetting({
       id: worldSettingAiTargetId.value,
       name: worldSettingAiDraftName.value.trim(),
-      content: '',
+      content: worldSettingAiDraftContent.value,
       attributes: worldSettingAiDraftCards.value,
       categoryIds: worldSettingAiDraftCategoryIds.value,
     })
@@ -7564,7 +7844,7 @@ function saveWorldSettingAiDraft(): void {
     createWorldSetting({
       novelId: novel.value.id,
       name: worldSettingAiDraftName.value.trim(),
-      content: '',
+      content: worldSettingAiDraftContent.value,
       attributes: worldSettingAiDraftCards.value,
       categoryIds: worldSettingAiDraftCategoryIds.value,
     })
@@ -7995,6 +8275,144 @@ onUnmounted(() => {
   animation: ws-tab-panel-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
+/* 世界观空状态 */
+.ws-empty {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  margin: 8px auto 0;
+  padding: 48px 28px 44px;
+  max-width: 560px;
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--color-primary-soft) 40%, transparent) 0%, transparent 60%),
+    color-mix(in srgb, var(--color-surface) 92%, transparent);
+  overflow: hidden;
+  animation: ws-empty-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.ws-empty__glow {
+  position: absolute;
+  top: -40%;
+  left: 50%;
+  width: 320px;
+  height: 320px;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-primary) 18%, transparent) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.ws-empty__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-soft) 56%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.ws-empty__icon--spin svg {
+  animation: ws-empty-spin 26s linear infinite;
+}
+
+.ws-empty__title {
+  position: relative;
+  margin: 4px 0 0;
+  font-size: 1.32rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: var(--color-text);
+}
+
+.ws-empty__desc {
+  position: relative;
+  margin: 0;
+  max-width: 40rem;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: var(--color-text-muted);
+}
+
+.ws-empty__hints {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ws-empty__hint {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--color-text) 72%, var(--color-primary) 28%);
+  background: color-mix(in srgb, var(--color-surface-muted) 50%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+}
+
+.ws-empty__hints--howto {
+  margin-top: 6px;
+}
+
+.ws-empty__howto {
+  padding: 9px 16px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-primary-soft) 28%, var(--color-surface));
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+}
+
+.ws-empty__actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ws-empty__cta {
+  min-width: 148px;
+}
+
+@keyframes ws-empty-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ws-empty-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-empty {
+    animation: none;
+  }
+
+  .ws-empty__icon--spin svg {
+    animation: none;
+  }
+}
+
 @keyframes ws-tab-panel-in {
   from {
     opacity: 0;
@@ -8233,6 +8651,60 @@ onUnmounted(() => {
   gap: 10px;
 }
 
+.outline-level-filter {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+}
+.outline-level-filter button {
+  font-size: 0.74rem;
+  padding: 4px 11px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.outline-level-filter button.is-active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 10%, transparent);
+}
+.outline-view-toggle {
+  display: inline-flex;
+  border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.outline-view-toggle button {
+  border: 0;
+  background: transparent;
+  padding: 5px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--color-text-muted, #6b7280);
+}
+.outline-view-toggle button.is-active {
+  background: var(--color-primary, #0d9488);
+  color: var(--btn-on-primary, #fff);
+}
+.outline-search-input {
+  font-size: 0.78rem;
+  padding: 5px 11px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+  background: var(--color-surface);
+  color: var(--color-text);
+  min-width: 160px;
+}
+.outline-search-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
 .outline-map-hero__storyline-filter {
   grid-area: filter;
   display: flex;
@@ -8371,6 +8843,53 @@ onUnmounted(() => {
 .workspace-outline-ai-panel {
   display: grid;
   gap: 14px;
+}
+
+.workspace-outline-ai-stream {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.workspace-outline-ai-stream__hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+.workspace-outline-ai-stream__lines {
+  display: grid;
+  gap: 2px;
+}
+.workspace-outline-ai-stream__line {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: pre;
+  color: var(--color-text);
+}
+.workspace-outline-ai-stream__line--volume {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+.workspace-outline-ai-stream__line--act {
+  font-weight: 600;
+}
+.workspace-outline-ai-stream__cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background: var(--color-primary);
+  border-radius: 1px;
+  animation: outline-ai-blink 0.8s step-end infinite;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+}
+@keyframes outline-ai-blink {
+  50% { opacity: 0; }
 }
 
 .workspace-outline-ai-gate {
@@ -8523,7 +9042,42 @@ onUnmounted(() => {
 
 .workspace-outline-ai-question__textarea {
   min-height: 112px;
-  resize: vertical;
+  resize: none;
+}
+
+.workspace-outline-ai-brief-field {
+  display: grid;
+  gap: 6px;
+}
+.workspace-outline-ai-brief-intro {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary-soft) 22%, var(--color-surface));
+}
+.workspace-outline-ai-brief-field__label {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--color-text);
+}
+.workspace-outline-ai-brief-field__label em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.workspace-outline-ai-brief-field__main {
+  min-height: 180px;
+}
+.workspace-outline-ai-brief-guides {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+.workspace-outline-ai-brief-guides .workspace-outline-ai-question__textarea {
+  min-height: 56px;
 }
 
 .workspace-outline-ai-question--followup {
@@ -9177,7 +9731,7 @@ onUnmounted(() => {
 /* Textarea */
 .ws-ai-textarea {
   width: 100%;
-  resize: vertical;
+  resize: none;
   min-height: 80px;
   padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--color-border-strong) 40%, transparent);
@@ -9211,6 +9765,227 @@ onUnmounted(() => {
     ),
     linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, rgba(255,255,255,0.6)), var(--color-surface));
   background-attachment: local;
+}
+
+.ws-ai-textarea--tall {
+  min-height: 220px;
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+/* 生成中的流式预览 */
+.ws-ai-stream {
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface-muted) 30%, var(--color-surface));
+  margin-bottom: 8px;
+}
+
+/* 世界观全文只读预览（不独立滚动，跟随弹窗整体滚动） */
+.ws-ai-longread {
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, rgba(255,255,255,0.6)), var(--color-surface));
+  word-break: break-word;
+  color: var(--color-text);
+}
+
+/* Markdown 渲染样式：标题分级、段落、列表、强调 */
+.ws-ai-md {
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--color-text);
+}
+.ws-ai-md h1 {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 0 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  color: var(--color-text);
+}
+.ws-ai-md h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 20px 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--color-primary);
+  color: var(--color-text);
+}
+.ws-ai-md h3 {
+  font-size: 14.5px;
+  font-weight: 600;
+  margin: 14px 0 6px;
+  color: color-mix(in srgb, var(--color-text) 85%, var(--color-primary));
+}
+.ws-ai-md h4 {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin: 12px 0 5px;
+  color: var(--color-text);
+}
+.ws-ai-md p {
+  margin: 0 0 9px;
+}
+.ws-ai-md ul {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.ws-ai-md li {
+  margin: 2px 0;
+}
+.ws-ai-md strong {
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-text) 80%, var(--color-primary));
+}
+.ws-ai-md em {
+  font-style: italic;
+}
+.ws-ai-md code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-border) 35%, transparent);
+}
+.ws-ai-md h1:first-child,
+.ws-ai-md h2:first-child,
+.ws-ai-md p:first-child {
+  margin-top: 0;
+}
+
+/* 「参考书名」勾选框 */
+.ws-ai-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.ws-ai-checkbox input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.ws-ai-checkbox__box {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 1.5px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ws-ai-checkbox input:checked + .ws-ai-checkbox__box {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.ws-ai-checkbox__text {
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+.ws-ai-checkbox__hint {
+  display: block;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* 卡片编辑器：去掉默认拖动柄 */
+.ws-cards-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ws-card-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-muted) 22%, var(--color-surface));
+}
+.ws-card-row__title {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 35%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  outline: none;
+}
+.ws-card-row__body {
+  width: 100%;
+  resize: none;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 30%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  outline: none;
+}
+.ws-card-row__title:focus,
+.ws-card-row__body:focus {
+  border-color: var(--color-primary);
+}
+.ws-card-row__remove {
+  align-self: flex-end;
+  padding: 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-danger, #d9534f) 40%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-danger, #d9534f);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* 修改意见区 */
+.ws-ai-revise {
+  padding: 14px;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+}
+.ws-ai-btn--revise {
+  align-self: flex-start;
+  margin-top: 10px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 10px;
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.ws-ai-btn--revise:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.ws-ai-btn--revise:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .ws-ai-textarea__counter {
