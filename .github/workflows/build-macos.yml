@@ -28,12 +28,16 @@ jobs:
         run: npx tauri build --target universal-apple-darwin
 
       - name: List build output
-        run: find frontend/src-tauri/target -name "*.dmg" -o -name "*.app" | head -20
+        run: find frontend/src-tauri/target -type f \( -name "*.dmg" -o -name "*.app" \) 2>/dev/null || echo "no dmg/app found"
+
+      - name: Find and copy artifacts
+        run: |
+          mkdir -p macos-artifacts
+          find frontend/src-tauri/target -name "*.dmg" -exec cp {} macos-artifacts/ \;
+          ls -lh macos-artifacts/ || echo "empty"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: lumen-macos
-          path: |
-            frontend/src-tauri/target/**/bundle/dmg/*.dmg
-            frontend/src-tauri/target/**/bundle/macos/*.app
+          path: macos-artifacts/
