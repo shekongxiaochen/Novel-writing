@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
     let wallet = Arc::new(WalletService::new(db.clone()));
-    let card_keys = Arc::new(CardKeyService::new(db.clone(), (*wallet).clone()));
+    let card_keys = Arc::new(CardKeyService::new(db.clone(), (*wallet).clone(), cache_service.clone()));
     let providers = Arc::new(AiProviderService::new(db.clone()));
     let embedding_index = Arc::new(EmbeddingIndexService::new(
         db.clone(),
@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.clone(),
             (*wallet).clone(),
         )),
-        novels: Arc::new(NovelService::new(db.clone(), cache_service)),
+        novels: Arc::new(NovelService::new(db.clone(), cache_service.clone())),
         settings: settings.clone(),
         wallet: wallet.clone(),
         card_keys,
@@ -176,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &config.deepseek_api_key,
             &config.deepseek_base_url,
             (*providers).clone(),
+            cache_service.clone(),
         )
         .await?;
         app = app.merge(admin_router);

@@ -1,5 +1,5 @@
 use axum::response::Html;
-use minijinja::{AutoEscape, Environment, Value};
+use minijinja::{Environment, Value};
 
 pub const ADMIN_TITLE: &str = "Novel 管理后台";
 
@@ -7,10 +7,11 @@ pub const ADMIN_TITLE: &str = "Novel 管理后台";
 /// 让各管理页能 `{% extends "shell.html" %}`，统一左侧导航 + 右侧内容布局。
 pub fn shell_env() -> Environment<'static> {
     let mut env = Environment::new();
-    // 关闭自动转义：保持与改造前 `template_from_str`（匿名模板，不转义）一致。
-    // 否则 minijinja 对 `.html` 结尾的模板名默认启用 HTML 转义，会把注入的
-    // JSON（const rows = ...）和提示词正文里的引号转成 &quot;，导致前端脚本语法错误、页面空白。
-    env.set_auto_escape_callback(|_name| AutoEscape::None);
+    // 保留 minijinja 对 `.html` 模板的默认 HTML 自动转义（防存储型 XSS）：
+    // 任何 `{{ value }}` 默认转义，杜绝用户可控数据（如伪造的 X-Forwarded-For
+    // 写入的 registration_ip、display_name 等）在 admin 后台执行脚本。
+    // 需要原样注入的 JSON（const rows = {{ rows_json|safe }}）已在模板内显式用
+    // `|safe` / `|tojson` 声明，不依赖全局关闭转义。
     env.add_template("shell.html", include_str!("../../admin-templates/shell.html"))
         .expect("register shell.html");
     env.add_template(

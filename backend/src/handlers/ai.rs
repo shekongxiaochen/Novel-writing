@@ -59,7 +59,7 @@ pub async fn prompt_chat(
 
     // 3. 语义检索：续写类调用且带 novel_id 时，检索相关旧文拼进上下文（失败则静默跳过）
     let mut effective_context = req.context_prompt.clone();
-    if req.prompt_type == "continue" {
+    if matches!(req.prompt_type.as_str(), "continue" | "rewrite") {
         if let Some(nid) = req.novel_id.as_deref() {
             // 隔离：先校验该 novel 归属当前用户，越权直接跳过（不报错、不检索）
             if state.novels.get_novel(nid, &user.id).await.is_ok() {

@@ -65,8 +65,8 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
         dotenvy::dotenv().ok();
-        
-        Ok(Config {
+
+        let config = Config {
             database_url: env::var("DATABASE_URL")?,
             redis_url: env::var("REDIS_URL")?,
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
@@ -120,13 +120,29 @@ impl Config {
                 .unwrap_or_else(|_| "15".to_string())
                 .parse()?,
             admin_username: env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string()),
-            admin_password: env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "change-me-admin".to_string()),
+            admin_password: env::var("ADMIN_PASSWORD").unwrap_or_default(),
             admin_sync_password: env::var("ADMIN_SYNC_PASSWORD")
                 .unwrap_or_else(|_| "true".to_string())
                 .parse()?,
             admin_enabled: env::var("ADMIN_ENABLED")
                 .unwrap_or_else(|_| "true".to_string())
                 .parse()?,
-        })
+        };
+
+        // 安全校验：管理后台启用时，ADMIN_PASSWORD 必须显式设置且足够强，
+        // 拒绝空值与历史弱口令兜底，避免后台被默认密码接管（发卡密/改余额）。
+        if config.admin_enabled {
+            let pw = config.admin_password.trim();
+            const WEAK: &[&str] = &["", "change-me-admin", "admin", "password", "123456"];
+            if WEAK.contains(&pw) || pw.len() < 8 {
+                return Err(
+                    "ADMIN_ENABLED=true 时必须设置强 ADMIN_PASSWORD（至少 8 位，且不能为默认弱口令）。\
+                     若无需管理后台，请设置 ADMIN_ENABLED=false。"
+                        .into(),
+                );
+            }
+        }
+
+        Ok(config)
     }
 }

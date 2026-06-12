@@ -942,8 +942,8 @@
         >
           <header class="chapter-hub-ai-card__head">
             <div class="chapter-hub-ai-card__title-wrap">
-              <h4 class="chapter-hub-ai-card__title">续写草稿</h4>
-              <p class="chapter-hub-ai-card__subtitle">采用后写入稿纸，并自动更新章总结与人物档案</p>
+              <h4 class="chapter-hub-ai-card__title">{{ continueDraft.position === 'replace' ? '重写草稿' : '续写草稿' }}</h4>
+              <p class="chapter-hub-ai-card__subtitle">{{ continueDraft.position === 'replace' ? '采用后整章替换本章正文，并自动做重写体检' : '采用后写入稿纸，并自动更新章总结与人物档案' }}</p>
             </div>
             <span v-if="continueDraft.status === 'applied'" class="chapter-hub-ai-card__state">已采用</span>
             <span v-else-if="continueDraft.status === 'ignored'" class="chapter-hub-ai-card__state">已忽略</span>
@@ -954,10 +954,14 @@
                 <span></span><span></span><span></span>
               </div>
               <p class="chapter-hub-ai-streaming__title">
-                {{ continueThinkingText ? '正在思考并准备正文…' : '正在生成续写草稿…' }}
+                {{ continueWaitTitle }}
+                <span class="chapter-hub-ai-streaming__elapsed">已等待 {{ continueElapsedText }}</span>
               </p>
               <p v-if="continueThinkingText" class="chapter-hub-ai-streaming__desc chapter-hub-ai-continue__thinking">
                 {{ continueThinkingExcerpt }}
+              </p>
+              <p v-else class="chapter-hub-ai-streaming__desc">
+                正文较长、模型需要构思，通常需要十几秒到一两分钟。生成会在下方实时显示，请耐心等待。
               </p>
             </div>
           </div>
@@ -1348,6 +1352,38 @@ const lastContinueDirection = ref('')
 const busy = computed(() => props.loading || props.chatLoading || props.chatThinking || props.continueDraft.loading)
 const askComposerBusy = computed(() => props.chatLoading || props.chatThinking)
 const writeComposerBusy = computed(() => props.continueDraft.loading)
+
+// 续写等待计时：模型“思考”阶段可能长达 1-2 分钟无任何输出，
+// 用一个每秒递增的计时器让用户确信任务在进行、未卡死。
+const continueElapsedSec = ref(0)
+let continueTimer: ReturnType<typeof setInterval> | null = null
+watch(
+  () => props.continueDraft.loading,
+  (loading) => {
+    if (continueTimer) {
+      clearInterval(continueTimer)
+      continueTimer = null
+    }
+    if (loading) {
+      continueElapsedSec.value = 0
+      continueTimer = setInterval(() => {
+        continueElapsedSec.value += 1
+      }, 1000)
+    }
+  },
+)
+const continueElapsedText = computed(() => {
+  const s = continueElapsedSec.value
+  if (s < 60) return `${s} 秒`
+  return `${Math.floor(s / 60)} 分 ${s % 60} 秒`
+})
+const continueWaitTitle = computed(() => {
+  if (props.continueThinkingText) return '正在思考并准备正文…'
+  // 超过约 8 秒还没有内容，明确告诉用户模型在思考、可能较久
+  if (continueElapsedSec.value >= 8) return '模型正在构思本章，请稍候…'
+  return '正在生成续写草稿…'
+})
+
 const composerHint = computed(() => {
   if (props.deskMode === 'write') {
     return writeComposerBusy.value ? 'Enter 终止，Shift+Enter 换行' : 'Enter 生成，Shift+Enter 换行'
@@ -1503,6 +1539,16 @@ watch(
   },
 )
 
+// 续写开始（loading 置真）时滚动到加载卡，确保等待提示对用户可见
+watch(
+  () => props.continueDraft.loading,
+  (loading) => {
+    if (loading) {
+      void nextTick(() => scrollToBottom(true))
+    }
+  },
+)
+
 watch(
   () => {
     const msgs = props.chatMessages
@@ -1574,6 +1620,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('novel-writing:changed', onAccountChanged)
+  if (continueTimer) {
+    clearInterval(continueTimer)
+    continueTimer = null
+  }
 })
 
 function formatRunMode(mode: 'current' | 'recent' | 'all' | null): string {
@@ -2453,6 +2503,14 @@ function relationSummary(item: ExtractedRelation): string {
   font-size: 0.7rem;
   font-weight: 700;
   color: var(--color-text);
+}
+
+.chapter-hub-ai-streaming__elapsed {
+  margin-left: 8px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .chapter-hub-ai-streaming__desc {

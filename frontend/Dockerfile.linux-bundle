@@ -1,0 +1,97 @@
+# Tauri Linux 打包专用镜像（国内网络优化版）
+# 在 Ubuntu 22.04 容器内完整编译前端 + Rust，产出 .deb 与 .AppImage
+#
+# 用法见 scripts/build-linux.sh
+# 基础镜像走 daocloud 加速，避免 Docker Hub 拉取超时。
+FROM docker.m.daocloud.io/library/ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# apt 换阿里云源，加速系统依赖安装
+RUN sed -i 's@//.*archive.ubuntu.com@//mirrors.aliyun.com@g; s@//.*security.ubuntu.com@//mirrors.aliyun.com@g' /etc/apt/sources.list
+
+# Tauri v2 在 Linux 上所需的系统依赖（webkit2gtk 4.1 / appimage 工具链等）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    file \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    libsoup-3.0-dev \
+    libjavascriptcoregtk-4.1-dev \
+    desktop-file-utils \
+    xdg-utils \
+    ca-certificates \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 20 —— 从 npmmirror 下载官方二进制（vite 8 需 node 20+）
+RUN curl -fsSL https://registry.npmmirror.com/-/binary/node/v20.18.0/node-v20.18.0-linux-x64.tar.xz -o /tmp/node.tar.xz \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+    && rm /tmp/node.tar.xz \
+    && node -v && npm -v \
+    && npm config set registry https://registry.npmmirror.com
+
+# Rust (stable) —— rustup 与 crates 全部走国内 rsproxy 镜像
+ENV RUSTUP_DIST_SERVER="https://rsproxy.cn" \
+    RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# cargo 换 rsproxy 源（加速 crates 拉取，cargo install 与项目依赖都受益）
+RUN mkdir -p /root/.cargo && printf '%s\n' \
+    '[source.crates-io]' \
+    'replace-with = "rsproxy-sparse"' \
+    '[source.rsproxy]' \
+    'registry = "https://rsproxy.cn/crates.io-index"' \
+    '[source.rsproxy-sparse]' \
+    'registry = "sparse+https://rsproxy.cn/index/"' \
+    '[registries.rsproxy]' \
+    'index = "https://rsproxy.cn/crates.io-index"' \
+    '[net]' \
+    'git-fetch-with-cli = true' \
+    > /root/.cargo/config.toml
+
+# Tauri CLI
+RUN cargo install tauri-cli --version "^2" --locked
+
+# 预下载 AppImage 打包所需的工具到 tauri 缓存目录，避免运行时从 github 下载超时。
+# Tauri 检测这些文件已存在即跳过下载（见 tauri-bundler appimage/linuxdeploy.rs）。
+ENV GH="https://ghproxy.net/https://github.com"
+RUN mkdir -p /root/.cache/tauri && cd /root/.cache/tauri \
+    && curl -fSL "${GH}/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64" -o AppRun-x86_64 \
+    && curl -fSL "${GH}/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage" -o linuxdeploy-x86_64.AppImage \
+    && curl -fSL "https://ghproxy.net/https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh" -o linuxdeploy-plugin-gtk.sh \
+    && curl -fSL "https://ghproxy.net/https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh" -o linuxdeploy-plugin-gstreamer.sh \
+    && (curl -fSL "${GH}/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage" -o linuxdeploy-plugin-appimage.AppImage || echo "appimage plugin optional, skip") \
+    && chmod +x AppRun-x86_64 linuxdeploy-x86_64.AppImage *.sh linuxdeploy-plugin-appimage.AppImage 2>/dev/null || true \
+    && ls -la /root/.cache/tauri
+
+WORKDIR /app
+
+# 容器内无 FUSE，AppImage 工具需以解压方式运行
+ENV APPIMAGE_EXTRACT_AND_RUN=1 \
+    NO_STRIP="true"
+
+# 构建在容器启动时执行（源码通过 volume 挂载，产物落到 /out 挂载目录）
+CMD ["bash", "-lc", "\
+    set -e; \
+    echo '==> 清理可能残留的宿主 node_modules，确保安装 Linux 原生依赖'; \
+    rm -rf node_modules/.package-lock.json node_modules/rolldown node_modules/@rolldown 2>/dev/null || true; \
+    echo '==> 安装前端依赖（Linux 平台）'; \
+    npm install --no-audit --no-fund; \
+    echo '==> 校验 rolldown linux 原生包'; \
+    npm install @rolldown/binding-linux-x64-gnu --no-save --no-audit --no-fund 2>/dev/null || true; \
+    echo '==> Tauri 构建 (deb + appimage)'; \
+    cargo tauri build --bundles deb,appimage; \
+    echo '==> 拷贝产物到挂载的输出目录 /out'; \
+    mkdir -p /out/deb /out/appimage; \
+    cp -v src-tauri/target/release/bundle/deb/*.deb /out/deb/ 2>/dev/null || true; \
+    cp -v src-tauri/target/release/bundle/appimage/*.AppImage /out/appimage/ 2>/dev/null || true; \
+    echo '==> 构建完成' \
+"]

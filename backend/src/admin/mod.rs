@@ -192,6 +192,7 @@ pub async fn build_router(
     env_deepseek_api_key: &str,
     env_deepseek_base_url: &str,
     providers_service: AiProviderService,
+    cache_service: crate::services::CacheService,
 ) -> Result<Router, Box<dyn std::error::Error>> {
     let db = Database::connect(database_url).await?;
 
@@ -267,7 +268,7 @@ pub async fn build_router(
     });
 
     let wallet_service = WalletService::new(sqlx_pool.clone());
-    let card_key_service = CardKeyService::new(sqlx_pool.clone(), wallet_service.clone());
+    let card_key_service = CardKeyService::new(sqlx_pool.clone(), wallet_service.clone(), cache_service);
     let auth_for_admin: Arc<dyn axum_admin::auth::AdminAuth> =
         Arc::new(axum_admin::SeaOrmAdminAuth::new(db.clone()).await?);
 

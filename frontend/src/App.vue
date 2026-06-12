@@ -1,12 +1,9 @@
 <template>
   <main v-if="!isNovelContext" class="cursor-shell-home">
     <header class="cursor-shell-home__head" data-tauri-drag-region>
-      <h1 class="cursor-shell-home__title">小说工作台</h1>
+      <h1 class="cursor-shell-home__title">Lumen 流明</h1>
       <div class="cursor-shell-home__head-actions">
         <template v-if="isLoggedIn">
-          <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" :disabled="syncing" @click="handleCloudSync">
-            <span class="cursor-shell__menu-title">{{ syncing ? '同步中' : '同步' }}</span>
-          </button>
           <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="handleLogout">
             <span class="cursor-shell__menu-title">退出</span>
           </button>
@@ -58,15 +55,6 @@
       <div class="cursor-shell__auth-actions">
         <button type="button" class="cursor-shell__menu-item cursor-shell__menu-item--utility" @click="handleThemePickerClick">
           <span class="cursor-shell__menu-title">主题</span>
-        </button>
-        <button
-          v-if="isLoggedIn"
-          type="button"
-          class="cursor-shell__menu-item cursor-shell__menu-item--utility"
-          :disabled="syncing"
-          @click="handleCloudSync"
-        >
-          <span class="cursor-shell__menu-title">{{ syncing ? '同步中' : '同步' }}</span>
         </button>
         <button
           v-if="isLoggedIn"
@@ -162,7 +150,9 @@
     <div class="cursor-shell__resize-handle" @mousedown.prevent="startResizeSidebar"></div>
     <div class="cursor-shell__content" :class="{ 'cursor-shell__content--writing': route.name === 'novel-chapter-writing' }">
       <RouterView v-slot="{ Component }">
-        <component :is="Component" v-bind="chapterWritingViewProps" />
+        <keep-alive :include="['NovelChapterHubView', 'NovelWorkspaceView']" :max="6">
+          <component :is="Component" :key="`${String(route.name ?? '')}:${currentNovelId || ''}`" v-bind="chapterWritingViewProps" />
+        </keep-alive>
       </RouterView>
     </div>
 
@@ -603,7 +593,7 @@ import WindowControls from './components/WindowControls.vue'
 const route = useRoute()
 const router = useRouter()
 const { user, isLoggedIn, displayName, logout } = useAuth()
-const { syncing, lastSummary, syncError, syncNow, clearSyncState } = useCloudSync()
+const { syncNow, clearSyncState } = useCloudSync()
 const currentNovel = ref<Novel | null>(null)
 const chapterList = ref<Chapter[]>([])
 const chapterMenuOpen = ref(false)
@@ -663,6 +653,8 @@ function handleAuthSuccess(): void {
   if (route.name === 'login' || route.name === 'register' || route.name === 'reset-password') {
     void router.replace('/')
   }
+  // 实际的"登录后拉云端书架"由下方 watch(isLoggedIn) 统一处理，
+  // 这样冷启动 restoreSession、登录弹窗、设备注册三条路径行为一致。
 }
 
 function handleNovelCreated(novelId: string): void {
@@ -721,6 +713,40 @@ async function handleCloudSync(): Promise<void> {
     /* state already captured in composable */
   }
 }
+
+let autoSyncTimer: number | null = null
+
+function scheduleAutoSync(): void {
+  if (!isLoggedIn.value || typeof window === 'undefined') return
+  if (autoSyncTimer != null) window.clearTimeout(autoSyncTimer)
+  autoSyncTimer = window.setTimeout(() => {
+    autoSyncTimer = null
+    if (!isLoggedIn.value) return
+    void handleCloudSync()
+  }, 2500)
+}
+
+// 登录态变为已登录时，从云端拉一次完整书架。
+// 覆盖三条入口：登录弹窗、设备注册、冷启动 restoreSession 自动续登。
+// 否则换设备登录或重装客户端后，本地 scope (user:<id>) 是空的，
+// 用户会看到空书架，但后台显示该账号名下其实有书。
+//
+// immediate=true 用于冷启动场景：useAuth 同步从 localStorage 读 token，
+// isLoggedIn 在挂载时就可能已是 true（旧 session 续登），watch 不会触发
+// false→true 跳变。wasLoggedIn === undefined 表示首次回调。
+watch(
+  isLoggedIn,
+  async (loggedIn, wasLoggedIn) => {
+    if (!loggedIn) return
+    if (wasLoggedIn === true) return
+    try {
+      await handleCloudSync()
+    } finally {
+      refreshNovelRecords()
+    }
+  },
+  { immediate: true },
+)
 
 function openThemePicker(returnFocusEl: HTMLElement | null): void {
   themePickerReturnFocusEl.value = returnFocusEl
@@ -1777,6 +1803,7 @@ function onStorage(): void {
 function onNovelDataChanged(): void {
   refreshNovelRecords()
   reloadNovelContext()
+  scheduleAutoSync()
 }
 
 function startResizeSidebar(e: MouseEvent): void {
@@ -1897,6 +1924,8 @@ onUnmounted(() => {
   document.body.style.userSelect = ''
   if (chapterSummarySaveToastTimer != null) window.clearTimeout(chapterSummarySaveToastTimer)
   chapterSummarySaveToastTimer = null
+  if (autoSyncTimer != null) window.clearTimeout(autoSyncTimer)
+  autoSyncTimer = null
 })
 watch(currentNovelId, reloadNovelContext, { immediate: true })
 
