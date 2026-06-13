@@ -48,3 +48,8 @@ C盘垃圾文件扫描报告.txt
 dist-linux/
 dist-windows/
 dist-macos/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
