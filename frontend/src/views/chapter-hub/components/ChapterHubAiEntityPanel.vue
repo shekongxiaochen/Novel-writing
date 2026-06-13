@@ -23,7 +23,7 @@
             >
               <span aria-hidden="true">＋</span>
             </button>
-            <button type="button" class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--primary" :disabled="busy || !targetChapter" @click="$emit('run')">
+            <button type="button" class="chapter-hub-ai-panel__toolbtn chapter-hub-ai-panel__toolbtn--primary" :disabled="busy || !targetChapter" @click="$emit('organize-chapter')">
               {{ loading ? '整理中...' : '整理' }}
             </button>
             <div class="chapter-hub-ai-panel__mode" role="tablist" aria-label="AI 模式">
@@ -1049,7 +1049,7 @@
         </article>
 
         <article
-          v-if="deskMode === 'ask' && pendingToolActions.length > 0"
+          v-if="pendingToolActions.length > 0"
           class="chapter-hub-ai-card chapter-hub-ai-card--pending-tools"
         >
           <header class="chapter-hub-ai-card__head">
@@ -1078,6 +1078,24 @@
         </article>
 
       </div>
+
+      <!-- 一致性检查折叠区 -->
+      <section v-if="(conflicts ?? []).length > 0 || consistencyResult" class="chapter-hub-ai-panel__conflict-section">
+        <button type="button" class="chapter-hub-ai-panel__conflict-toggle" @click="conflictSectionOpen = !conflictSectionOpen">
+          <span>一致性检查</span>
+          <span v-if="consistencyErrorCount > 0" class="chapter-hub-ai-panel__conflict-badge chapter-hub-ai-panel__conflict-badge--error">{{ consistencyErrorCount }}</span>
+          <span v-if="consistencyWarningCount > 0" class="chapter-hub-ai-panel__conflict-badge chapter-hub-ai-panel__conflict-badge--warning">{{ consistencyWarningCount }}</span>
+          <span v-if="consistencyInfoCount > 0" class="chapter-hub-ai-panel__conflict-badge chapter-hub-ai-panel__conflict-badge--info">{{ consistencyInfoCount }}</span>
+          <span class="chapter-hub-ai-panel__conflict-arrow" :class="{ 'is-open': conflictSectionOpen }">▾</span>
+        </button>
+        <div v-show="conflictSectionOpen" class="chapter-hub-ai-panel__conflict-body">
+          <ChapterHubConflictPanel
+            :conflicts="conflicts ?? []"
+            :consistency-result="consistencyResult ?? null"
+            @resolve="(id, resolution) => $emit('resolve-conflict', id, resolution)"
+          />
+        </div>
+      </section>
 
       <footer class="chapter-hub-ai-panel__composer">
         <div class="chapter-hub-ai-panel__composer-shell">
@@ -1166,6 +1184,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import CardKeyRedeemDialog from '../../../components/CardKeyRedeemDialog.vue'
+import ChapterHubConflictPanel from './ChapterHubConflictPanel.vue'
+import type { ConflictItem } from '../../../lib/autoApply/conflictDetect'
+import type { ConsistencyCheckResult } from '../../../lib/localAi'
 import { requestAiAccess } from '../../../composables/useAiAccess'
 import { useAuth } from '../../../composables/useAuth'
 import { formatBalanceYuan } from '../../../lib/balanceFormat'
@@ -1235,6 +1256,8 @@ const props = defineProps<{
     status: 'pending' | 'applied' | 'ignored'
   }>
   autoApplyLog?: AutoApplyLogEntry[]
+  conflicts?: ConflictItem[]
+  consistencyResult?: ConsistencyCheckResult | null
 }>()
 
 const emit = defineEmits<{
@@ -1262,10 +1285,23 @@ const emit = defineEmits<{
   'pending-tool-ignore-all': []
   'undo-auto': [logId: string]
   'undo-auto-all': []
+  'organize-chapter': []
+  'resolve-conflict': [id: string, resolution: 'keep_existing' | 'accept_incoming' | 'ignored']
 }>()
 
 const { balance, refresh: refreshAuth } = useAuth()
 const redeemOpen = ref(false)
+const conflictSectionOpen = ref(false)
+const unresolvedConflictCount = computed(() => (props.conflicts ?? []).filter((c) => !c.resolved).length)
+
+const allConsistencyIssues = computed(() => {
+  const r = props.consistencyResult
+  if (!r) return []
+  return [...(r.characterIssues ?? []), ...(r.timelineIssues ?? []), ...(r.foreshadowIssues ?? []), ...(r.settingIssues ?? [])]
+})
+const consistencyErrorCount = computed(() => allConsistencyIssues.value.filter((i) => i.severity === 'error').length + unresolvedConflictCount.value)
+const consistencyWarningCount = computed(() => allConsistencyIssues.value.filter((i) => i.severity === 'warning').length)
+const consistencyInfoCount = computed(() => allConsistencyIssues.value.filter((i) => i.severity !== 'error' && i.severity !== 'warning').length)
 const balanceRefreshing = ref(false)
 
 const balanceLabel = computed(() => formatBalanceYuan(balance.value))
@@ -1525,7 +1561,6 @@ const extractUiFingerprint = computed(() => {
 watch(
   () => props.chatMessages.length,
   () => {
-    if (!shouldAutoScrollToBottom()) return
     void nextTick(() => scrollToBottom())
   },
 )
@@ -2352,7 +2387,7 @@ function relationSummary(item: ExtractedRelation): string {
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 18px;
 }
 
 .chapter-hub-ai-panel__results-rail {
@@ -2396,6 +2431,13 @@ function relationSummary(item: ExtractedRelation): string {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 30%, transparent);
+}
+
+.chapter-hub-ai-message:first-child {
+  padding-top: 0;
+  border-top: none;
 }
 
 .chapter-hub-ai-message--user {

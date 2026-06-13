@@ -109,13 +109,43 @@
                   v-model="sample"
                   class="ai-settings-textarea"
                   rows="6"
-                  maxlength="2000"
+                  maxlength="10000"
                   placeholder="粘贴一段你认可的文字（你自己写的、或喜欢的作品片段）。&#10;AI 会模仿它的语感、句式、节奏和用词习惯来续写——比纯文字描述更精准。&#10;&#10;注意：AI 只学“怎么写”，不会照抄这段的情节或句子。"
                 ></textarea>
                 <div class="ai-settings-textarea__footer">
-                  <span class="ai-settings-textarea__count" :class="{ 'ai-settings-textarea__count--warn': sample.length > 1900 }">
-                    {{ sample.length }}/2000
+                  <span class="ai-settings-textarea__count" :class="{ 'ai-settings-textarea__count--warn': sample.length > 9000 }">
+                    {{ sample.length }}/10000
                   </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 风格蒸馏 -->
+            <div v-if="canAnalyze" class="ai-settings-section">
+              <button
+                type="button"
+                class="ai-settings-btn ai-settings-btn--distill"
+                :disabled="analyzing"
+                @click="analyzeStyle"
+              >
+                {{ analyzing ? '分析中…' : '分析风格' }}
+              </button>
+
+              <div v-if="analysisResult" class="ai-settings-distill">
+                <div class="ai-settings-distill__title">风格分析结果</div>
+                <dl class="ai-settings-distill__list">
+                  <div v-for="dim in analysisResult.dimensions" :key="dim.label" class="ai-settings-distill__item">
+                    <dt class="ai-settings-distill__label">{{ dim.label }}</dt>
+                    <dd class="ai-settings-distill__value">{{ dim.summary }}</dd>
+                  </div>
+                </dl>
+                <div class="ai-settings-distill__prompt-preview">
+                  <div class="ai-settings-distill__prompt-title">生成的风格指令</div>
+                  <p class="ai-settings-distill__prompt-text">{{ analysisResult.stylePrompt }}</p>
+                </div>
+                <div class="ai-settings-distill__actions">
+                  <button type="button" class="ai-settings-btn ai-settings-btn--primary" @click="adoptAnalysis">采用此分析</button>
+                  <button type="button" class="ai-settings-btn" @click="analyzeStyle">重新分析</button>
                 </div>
               </div>
             </div>
@@ -161,8 +191,9 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { getCurrentSession } from '../lib/auth'
+import { postAiPrompt } from '../lib/backendAi'
 import { upsertNovelRecord } from '../lib/storage'
 import type { Novel } from '../types'
 
@@ -222,6 +253,9 @@ const sample = ref('')
 const saving = ref(false)
 const saved = ref(false)
 const activePresetId = ref('')
+const analyzing = ref(false)
+const analysisResult = ref<{ dimensions: { label: string; summary: string }[]; stylePrompt: string } | null>(null)
+const canAnalyze = computed(() => sample.value.trim().length >= 200)
 
 // 用一个用户几乎不可能输入的分隔标记，把「风格指令」与「风格范文」拼进同一个 aiStylePrompt 字段，
 // 这样无需改数据库 schema 和后端，复用现有注入链路。
@@ -304,6 +338,41 @@ async function handleSave(): Promise<void> {
   } finally {
     saving.value = false
   }
+}
+
+async function analyzeStyle(): Promise<void> {
+  if (!sample.value.trim() || analyzing.value) return
+  analyzing.value = true
+  analysisResult.value = null
+  try {
+    const prompt = '你是写作风格分析专家。分析以下文本的写作风格特征，输出结构化总结。\n\n文本：\n' + sample.value.trim() + '\n\n请从以下维度分析，每项用1-2句话概括：\n1. 叙事视角与节奏\n2. 句式偏好（长短句比例、句式变化）\n3. 修辞与用词（常用修辞手法、用词倾向）\n4. 对话风格（口语化程度、潜台词密度）\n5. 描写侧重（环境/心理/动作/感官的比重）\n6. 整体语感（用3-5个关键词概括）\n\n最后输出一段完整的"风格指令"（100-200字），可以直接作为AI续写的风格参考。\n\n输出JSON格式：\n{"dimensions": [{"label":"叙事视角与节奏","summary":"..."},{"label":"句式偏好","summary":"..."},{"label":"修辞与用词","summary":"..."},{"label":"对话风格","summary":"..."},{"label":"描写侧重","summary":"..."},{"label":"整体语感","summary":"..."}],"stylePrompt":"完整风格指令文本"}'
+    const result = await postAiPrompt({
+      prompt_type: 'qa',
+      user_prompt: prompt,
+      temperature: 0.3,
+      max_tokens: 2048,
+      response_format: 'json',
+    })
+    const content = result.content
+    if (!content) throw new Error('AI 未返回内容')
+    const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    const parsed = JSON.parse(cleaned)
+    if (Array.isArray(parsed.dimensions) && parsed.stylePrompt) {
+      analysisResult.value = parsed
+    }
+  } catch (e) {
+    console.warn('风格分析失败:', e)
+  } finally {
+    analyzing.value = false
+  }
+}
+
+function adoptAnalysis(): void {
+  if (!analysisResult.value) return
+  draft.value = analysisResult.value.stylePrompt
+  activePresetId.value = ''
+  analysisResult.value = null
+  nextTick(() => textareaRef.value?.focus())
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -768,5 +837,77 @@ function onKeydown(event: KeyboardEvent): void {
   .ai-settings-preset__desc {
     white-space: normal;
   }
+}
+.ai-settings-btn--distill {
+  margin-top: 8px;
+  font-size: 13px;
+  padding: 5px 14px;
+  border: 1px solid var(--color-primary, #1976d2);
+  color: var(--color-primary, #1976d2);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.ai-settings-btn--distill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary, #1976d2) 8%, transparent);
+}
+.ai-settings-btn--distill:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ai-settings-distill {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e0e0e0);
+  background: var(--color-bg-surface, #fafafa);
+}
+.ai-settings-distill__title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.ai-settings-distill__list {
+  margin: 0;
+  padding: 0;
+}
+.ai-settings-distill__item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ai-settings-distill__label {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--color-text-secondary, #555);
+  min-width: 100px;
+}
+.ai-settings-distill__value {
+  margin: 0;
+  color: var(--color-text, #333);
+}
+.ai-settings-distill__prompt-preview {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-light, #eee);
+}
+.ai-settings-distill__prompt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted, #888);
+  margin-bottom: 4px;
+}
+.ai-settings-distill__prompt-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text, #333);
+}
+.ai-settings-distill__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }
 </style>

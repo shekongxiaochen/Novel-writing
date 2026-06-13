@@ -25,7 +25,12 @@ import type {
 
 export function useChapterHubData() {
   const route = useRoute()
-  const novelId = computed(() => String(route.params.novelId ?? ''))
+  let cachedNovelId = String(route.params.novelId ?? '')
+  const novelId = computed(() => {
+    const id = String(route.params.novelId ?? '')
+    if (id) cachedNovelId = id
+    return cachedNovelId
+  })
 
   const novel = computed<Novel | null>(() => getNovelById(novelId.value) ?? null)
   const chapters = ref<Chapter[]>([])

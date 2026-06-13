@@ -257,7 +257,7 @@ export function useChapterHubTextareaEditor(deps: {
     const end = ta.selectionEnd ?? start
     const current = selectedChapter.value.content ?? ''
 
-    const insert = `\n\n${INDENT}`
+    const insert = '\n\n'
     const nextValue = current.slice(0, start) + insert + current.slice(end)
 
     e.preventDefault()
