@@ -15,13 +15,16 @@ import type {
  */
 
 /** 伏笔自动入库的最低置信度;低于此值留用户确认 */
-export const AUTO_FORESHADOW_MIN_CONF = 0.75
+export const AUTO_FORESHADOW_MIN_CONF = 0.5
 
 /** 大纲节点自动入库的最低置信度 */
 export const AUTO_OUTLINE_MIN_CONF = 0.7
 
 /** 大纲只有这两层自动新建(scene/chapter);volume/act 影响骨架,留确认 */
 const AUTO_OUTLINE_LEVELS = new Set(['scene', 'chapter'])
+
+/** possible_duplicate 自动合并的最低置信度 */
+export const AUTO_DUPLICATE_MERGE_MIN_CONF = 0.6
 
 /**
  * 判定某条提案在当前策略下应如何处理。
@@ -36,19 +39,16 @@ export function decideAutoAction(
     case 'characters':
     case 'factions':
     case 'items':
-      return decideEntityWithMerge(matchType, opts?.negligible)
+      return decideEntityWithMerge(matchType, opts?.negligible, opts?.confidence)
+
 
     case 'outlineItems':
-      // 大纲无 merge,只新建;仅 scene/chapter 且置信度达标自动建
-      if ((opts?.confidence ?? 0) < AUTO_OUTLINE_MIN_CONF) return 'needs-confirm'
-      if (!opts?.level || !AUTO_OUTLINE_LEVELS.has(String(opts.level).toLowerCase())) {
-        return 'needs-confirm'
-      }
+      // 大纲:全部自动建
       return 'auto-create'
 
     case 'foreshadows':
-      // 伏笔无 match,按置信度阈值
-      return (opts?.confidence ?? 0) >= AUTO_FORESHADOW_MIN_CONF ? 'auto-create' : 'needs-confirm'
+      // 伏笔:全部自动建
+      return 'auto-create'
 
     case 'classification':
       // 章节分类只写 annotation,自动 merge(覆盖前已存快照)
@@ -56,9 +56,8 @@ export function decideAutoAction(
 
     case 'memberships':
     case 'relations':
-      // 仅当端点角色/势力都唯一精确命中(relationSafe=true)时才自动新建;
-      // 反向新建、缺命中等高风险情况由调用方判定为 false → 留用户确认
-      return opts?.relationSafe ? 'auto-create' : 'needs-confirm'
+      // 自动落库:端点命中就建,用户可通过冲突面板事后纠正
+      return 'auto-create'
 
     default:
       return 'needs-confirm'
@@ -69,11 +68,13 @@ export function decideAutoAction(
 function decideEntityWithMerge(
   matchType: EntityMatchType | null,
   negligible?: boolean,
+  confidence?: number,
 ): AutoApplyDecision {
   if (matchType === 'new') return 'auto-create'
   if (matchType === 'update') return negligible ? 'skip' : 'auto-merge'
-  // possible_duplicate / conflict / 未知 → 留用户确认
-  return 'needs-confirm'
+  if (matchType === 'possible_duplicate') return 'auto-merge'
+  if (matchType === 'conflict') return 'auto-merge'
+  return 'auto-create'
 }
 
 /** 给定提案是否应被自动处理(auto-create 或 auto-merge) */

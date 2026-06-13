@@ -7,7 +7,7 @@
   >
     <header ref="workspaceChromeAnchorRef" class="header-row">
       <div>
-        <h1>{{ novel.title }}</h1>
+        <h1>{{ novel.title }} <button type="button" class="ws-edit-novel-btn" title="编辑书籍信息" @click="editNovelOpen = true">✎</button></h1>
         <p class="muted workspace-sub one-line">{{ novel.summary || '暂无简介' }}</p>
         <nav class="tabs">
           <button type="button" class="tab" :class="{ active: activeTab === 'write' }" @click="switchTab('write')">
@@ -3197,6 +3197,8 @@
       <button type="button" class="link-back btn-as-link" @click="backFromPage">返回</button>
     </div>
   </section>
+
+  <EditNovelDialog :open="editNovelOpen" :novel="novel" @close="editNovelOpen = false" @saved="onNovelSaved" />
 </template>
 
 <script setup lang="ts">
@@ -3310,6 +3312,7 @@ import CharacterRelationSphere from '../../components/CharacterRelationSphere.vu
 import CharacterRelationFocusSphere from '../../components/CharacterRelationFocusSphere.vue'
 import CharacterProfilePanel from '../../components/character/CharacterProfilePanel.vue'
 import CharacterChangeTimeline from '../../components/character/CharacterChangeTimeline.vue'
+import EditNovelDialog from '../../components/EditNovelDialog.vue'
 import CharacterEditForm from '../../components/character/CharacterEditForm.vue'
 import { useCharacterEditor } from '../../composables/useCharacterEditor'
 import {
@@ -3351,6 +3354,11 @@ type WorkspaceTab =
 
 const novelId = computed(() => String(route.params.id ?? ''))
 const novel = computed(() => getNovelById(novelId.value))
+const editNovelOpen = ref(false)
+
+function onNovelSaved(): void {
+  editNovelOpen.value = false
+}
 
 // 世界观生成 / 大纲设计器的进行中状态走模块级单例（按 novelId 分桶）：
 // 切到章节页（跨路由组件销毁）再切回来，生成不中断、结果不丢。下方所有 .value 用法保持不变。
@@ -8271,6 +8279,28 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.ws-edit-novel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin-left: 6px;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted, #888);
+  font-size: 14px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.15s, color 0.15s;
+}
+.ws-edit-novel-btn:hover {
+  background: var(--color-bg-hover, #f5f5f5);
+  color: var(--color-text, #333);
+}
+
 .ws-tab-panel {
   animation: ws-tab-panel-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }

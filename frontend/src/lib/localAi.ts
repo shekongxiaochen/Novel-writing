@@ -2753,6 +2753,74 @@ export async function checkChapterConsistencyFromWorkspaceStream(
   }
 }
 
+export type AiFixResult = {
+  fixedContent: string
+  explanation: string
+}
+
+export async function fixConsistencyIssueByAi(
+  payload: WorkspaceSnapshotPayload,
+  chapterId: string,
+  issue: { issue: string; characterName?: string; foreshadowTitle?: string; suggestion?: string },
+): Promise<AiFixResult> {
+  assertAiReady()
+  const chapters = (payload.chapters ?? []).map((c) => ({
+    id: String(c.id ?? ''),
+    chapterNo: Number(c.chapterNo ?? 0),
+    title: String(c.title ?? ''),
+    content: String(c.content ?? ''),
+  }))
+  const chapter = chapters.find((c) => c.id === chapterId)
+  if (!chapter || !chapter.content) throw new Error('找不到要修复的章节')
+
+  const characters = (payload.characters ?? []).filter((c) => {
+    if (!issue.characterName) return false
+    return String(c.name ?? '').includes(issue.characterName)
+  }).map((c) => ({
+    name: String(c.name ?? ''),
+    aliases: Array.isArray(c.aliases) ? c.aliases : [],
+    age: c.age,
+    gender: c.gender,
+    personality: c.personality,
+    goal: c.goal,
+    secret: c.secret,
+    notes: c.notes,
+  }))
+
+  const prompt = [
+    '你是小说一致性修复助手。以下是一个一致性问题：',
+    `问题描述：${issue.issue}`,
+    issue.characterName ? `涉及角色：${issue.characterName}` : '',
+    issue.foreshadowTitle ? `涉及伏笔：${issue.foreshadowTitle}` : '',
+    issue.suggestion ? `建议方向：${issue.suggestion}` : '',
+    '',
+    characters.length > 0 ? `相关角色档案 JSON：${stableStringify(characters)}` : '',
+    '',
+    `当前章节（第${chapter.chapterNo}章《${chapter.title || '未命名'}》）正文：`,
+    chapter.content,
+    '',
+    '请修改正文中与此问题相关的段落，使其符合角色档案设定和逻辑一致性。',
+    '只修改必要部分，保持其余正文不变。',
+    '输出 JSON 格式：{"fixedContent": "完整修改后的章节正文", "explanation": "简要说明修改了什么"}',
+  ].filter(Boolean).join('\n')
+
+  const result = await postAiPrompt({
+    prompt_type: 'qa',
+    user_prompt: prompt,
+    temperature: 0.3,
+    max_tokens: 16384,
+    response_format: 'json',
+  })
+
+  const content = result.content
+  if (!content) throw new Error('AI 未返回有效内容')
+  const parsed = parseAiJsonContent(content)
+  return {
+    fixedContent: String(parsed.fixedContent ?? ''),
+    explanation: String(parsed.explanation ?? '修改完成'),
+  }
+}
+
 export async function askAiAboutWorkspace(
   payload: WorkspaceSnapshotPayload,
   input: {
