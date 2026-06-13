@@ -150,6 +150,8 @@
                 @go-character="openHubCharacterGraph"
                 @go-faction="openHubFactionModal"
                 @go-item="openWorkspaceItem"
+                :diff-segments="chapterDiffSegments"
+                @clear-diff="clearChapterDiff"
               />
             </section>
           </section>
@@ -232,6 +234,10 @@
             :auto-apply-log="aiAutoApplyLog"
             @undo-auto="undoAutoApplyEntryById"
             @undo-auto-all="undoAllAutoApplyForChapter"
+            @organize-chapter="organizeCurrentChapter"
+            :conflicts="conflictPanelConflicts"
+            :consistency-result="aiConsistencyResult"
+            @resolve-conflict="resolveConflictItem"
           />
         </aside>
       </div>
@@ -413,7 +419,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 defineOptions({ name: 'NovelChapterHubView' })
 import { requestAiAccess } from '../../composables/useAiAccess'
 import { focusMode } from '../../composables/useFocusMode'
@@ -486,6 +492,9 @@ import { putRemoteCharacterStates, getRemoteCharacterStates, putRemoteAutoApplyL
 import { decideAutoAction, foreshadowPolicyOpts, outlinePolicyOpts } from '../../lib/autoApply/policy'
 import { appendAutoApplyLog, getAutoApplyLogByChapter, getAutoApplyLogByNovel, replaceAutoApplyLogForNovel } from '../../lib/autoApply/log'
 import { undoAutoApplyEntry } from '../../lib/autoApply/undo'
+import { detectCharacterConflicts, detectFactionConflicts, detectItemConflicts } from '../../lib/autoApply/conflictDetect'
+import { appendConflicts, getUnresolvedConflicts, getUnresolvedConflictCount, resolveConflict } from '../../lib/autoApply/conflictStore'
+import type { ConflictItem } from '../../lib/autoApply/conflictDetect'
 import type { AutoApplyModule, AutoApplyLogEntry } from '../../types'
 import {
   analyzeNovelForeshadowsFromWorkspace,
@@ -503,6 +512,8 @@ import {
   runCharacterStateExtract,
   type ConsistencyCheckResult,
 } from '../../lib/localAi'
+import { computeLineDiff } from '../../lib/textDiff'
+import type { DiffSegment } from '../../lib/textDiff'
 import { executeToolCall } from '../../lib/aiTools'
 import { formatChapterSummaryText } from '../../lib/chapterSummary'
 import { copyText } from '../../lib/clipboard'
@@ -548,6 +559,7 @@ import ChapterHubFactionDetailModal from './components/ChapterHubFactionDetailMo
 import ChapterHubForeshadowModal from './components/ChapterHubForeshadowModal.vue'
 import ChapterHubForeshadowTooltip from './components/ChapterHubForeshadowTooltip.vue'
 import ChapterHubAiEntityPanel from './components/ChapterHubAiEntityPanel.vue'
+import ChapterHubConflictPanel from './components/ChapterHubConflictPanel.vue'
 import ChapterHubEmptyChaptersCard from './components/ChapterHubEmptyChaptersCard.vue'
 import ChapterHubEntityTooltipTeleport from './components/ChapterHubEntityTooltipTeleport.vue'
 import ChapterHubNameSuggestTeleport from './components/ChapterHubNameSuggestTeleport.vue'
@@ -624,6 +636,9 @@ const aiForeshadowResult = ref<NovelForeshadowAnalysisResult>(emptyAiForeshadowR
 const aiOutlineRewriteResult = ref<OutlineRewriteResult>({ revisions: [], additions: [], warnings: [] })
 const aiClassificationResult = ref<NovelChapterClassificationResult>(emptyAiClassificationResult())
 const aiConsistencyResult = ref<ConsistencyCheckResult | null>(null)
+const chapterDirtySinceLastOrganize = ref(false)
+const conflictCount = ref(0)
+const chapterDiffSegments = ref<DiffSegment[]>([])
 const aiConsistencyLoading = ref(false)
 const aiAppliedActions = ref<Array<{ id: string; text: string; tone: 'applied' | 'ignored' }>>([])
 type AiExtractRun = {
@@ -2009,14 +2024,16 @@ function logAutoApply(
 /**
  * 自动入库编排:写完章/整理后,高置信提案自动采用并记可撤销日志。
  * 复用现有 applyXSuggestion(它们已做 preferExisting 保护与去重),不重写入库。
- * 保守策略:只有 new 新实体、非 negligible 的 update 字段补全自动;
- * possible_duplicate/conflict/关系/势力归属一律留 pending 等用户确认。
+ * 合并前做冲突检测:发现矛盾字段不落库,写入冲突面板供用户裁决。
  */
 function autoApplyExtractResult(): void {
   const result = aiExtractResult.value
   if (!result) return
+  const pendingConflicts: ConflictItem[] = []
+  const chapterId = selectedChapterId.value
+  const chapterNo = selectedChapter.value?.chapterNo ?? null
 
-  // 角色:new→自动建,update(非negligible)→自动合并空字段
+  // 角色:new→自动建,update(非negligible)→冲突检测后自动合并空字段
   if (Array.isArray(result.characters)) {
     for (let i = 0; i < result.characters.length; i++) {
       const item = result.characters[i]
@@ -2025,12 +2042,19 @@ function autoApplyExtractResult(): void {
       const existing = targetId ? characters.value.find((c) => c.id === targetId) : undefined
       const negligible =
         item.match?.type === 'update' && existing ? isNegligibleCharacterUpdate(existing, item) : false
-      const decision = decideAutoAction('characters', item.match?.type ?? null, { negligible })
+      const confidence = item.confidence ?? 0
+      const decision = decideAutoAction('characters', item.match?.type ?? null, { negligible, confidence })
       if (decision === 'skip') {
         setAiSuggestionState('characters', i, 'ignored', 'ignore')
         continue
       }
       if (decision !== 'auto-create' && decision !== 'auto-merge') continue
+      if (decision === 'auto-merge' && existing) {
+        const conflicts = detectCharacterConflicts(existing as any, item as any, { novelId: novelId.value, chapterId, chapterNo })
+        if (conflicts.length > 0) {
+          pendingConflicts.push(...conflicts)
+        }
+      }
       try {
         const before = decision === 'auto-merge' && existing ? snapshotEntity(existing) : null
         const action = decision === 'auto-create' ? 'create' : 'merge'
@@ -2044,23 +2068,31 @@ function autoApplyExtractResult(): void {
       }
     }
   }
-  autoApplyEntitySection('factions', result.factions)
-  autoApplyEntitySection('items', result.items)
+  autoApplyEntitySection('factions', result.factions, pendingConflicts)
+  autoApplyEntitySection('items', result.items, pendingConflicts)
   autoApplyOutlineSection(result.outlineItems)
   autoApplyForeshadowSection()
   autoApplyClassificationSection()
   autoApplyMembershipSection()
   autoApplyRelationSection()
+  if (pendingConflicts.length > 0) {
+    appendConflicts(pendingConflicts)
+    appendAiSystemNote(`发现 ${pendingConflicts.length} 处档案冲突，请在一致性面板查看并裁决。`)
+  }
+  refreshConflictCount()
   refreshAutoApplyLog()
   pushAutoApplyLogToBackend()
 }
 
-/** 势力/物品共用:与角色同构,merge 有 preferExisting 保护 */
+/** 势力/物品共用:与角色同构,merge 前做冲突检测 */
 function autoApplyEntitySection(
   section: 'factions' | 'items',
   list: { name: string; match: { type: string; targetId?: string | null }; uiState?: { status?: string } }[] | undefined,
+  pendingConflicts: ConflictItem[],
 ): void {
   if (!Array.isArray(list)) return
+  const chapterId = selectedChapterId.value
+  const chapterNo = selectedChapter.value?.chapterNo ?? null
   for (let i = 0; i < list.length; i++) {
     const item = list[i]
     if (item.uiState?.status) continue
@@ -2073,12 +2105,19 @@ function autoApplyEntitySection(
       item.match?.type === 'update' && existing && section === 'factions'
         ? isNegligibleFactionUpdate(existing as any, item as any)
         : false
-    const decision = decideAutoAction(section, (item.match?.type as any) ?? null, { negligible })
+    const confidence = (item as any).confidence ?? 0
+    const decision = decideAutoAction(section, (item.match?.type as any) ?? null, { negligible, confidence })
     if (decision === 'skip') {
       setAiSuggestionState(section, i, 'ignored', 'ignore')
       continue
     }
     if (decision !== 'auto-create' && decision !== 'auto-merge') continue
+    if (decision === 'auto-merge' && existing) {
+      const conflicts = section === 'factions'
+        ? detectFactionConflicts(existing as any, item as any, { novelId: novelId.value, chapterId, chapterNo })
+        : detectItemConflicts(existing as any, item as any, { novelId: novelId.value, chapterId, chapterNo })
+      if (conflicts.length > 0) pendingConflicts.push(...conflicts)
+    }
     try {
       const before = decision === 'auto-merge' && existing ? snapshotEntity(existing) : null
       const action = decision === 'auto-create' ? 'create' : 'merge'
@@ -2472,7 +2511,7 @@ function applyCharacterSuggestion(index: number, action: 'create' | 'merge' | 'i
       notes: item.notes,
       attributes: item.attributes,
       aliases: item.aliases,
-    })
+    }, { autoGenerated: true })
     nextCharacterId = created.id
     const _content = selectedChapter.value?.content ?? ''
     const _ev = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
@@ -2536,7 +2575,7 @@ function applyFactionSuggestion(index: number, action: 'create' | 'merge' | 'ign
       leader: item.leader,
       notes: item.notes,
       attributes: item.attributes ?? [],
-    })
+    }, { autoGenerated: true })
     nextFactionId = created.id
     const _fc = selectedChapter.value?.content ?? ''
     const _fev = (item.evidences ?? []).filter((e) => e.chapterId === selectedChapterId.value || !e.chapterId)
@@ -2593,7 +2632,7 @@ function applyItemSuggestion(index: number, action: 'create' | 'merge' | 'ignore
       summary: item.summary,
       ownerType: owner.ownerType,
       ownerId: owner.ownerId,
-    })
+    }, { autoGenerated: true })
     nextItemId = created.id
     appendAiSystemNote(`已确认添加物品：${item.name}`)
   } else {
@@ -3023,6 +3062,45 @@ function resetAiExtractState(): void {
   persistActiveAiSessionState()
 }
 
+async function organizeCurrentChapter(): Promise<void> {
+  if (!selectedChapter.value) return
+  chapterDirtySinceLastOrganize.value = false
+  appendAiSystemNote('正在整理本章…')
+  await Promise.all([
+    runAiExtract('current'),
+    runConsistencyCheckAfterContinue(selectedChapter.value.id),
+  ])
+  void runCharacterStateAfterContinue(selectedChapter.value.id)
+  void runSceneSummaryAfterContinue(selectedChapter.value.id)
+  void runChapterSummaryAfterContinue(selectedChapter.value.id, { autoApply: true })
+  refreshConflictCount()
+}
+
+function refreshConflictCount(): void {
+  conflictCount.value = novelId.value ? getUnresolvedConflictCount(novelId.value) : 0
+}
+
+const conflictPanelConflicts = computed(() => {
+  void conflictCount.value
+  return novelId.value ? getUnresolvedConflicts(novelId.value) : []
+})
+
+function resolveConflictItem(id: string, resolution: 'keep_existing' | 'accept_incoming' | 'ignored'): void {
+  const item = resolveConflict(id, resolution)
+  if (!item) return
+  if (resolution === 'accept_incoming') {
+    const { module, entityId, field, incomingValue } = item
+    if (module === 'characters') {
+      updateCharacter({ id: entityId, [field]: incomingValue })
+    } else if (module === 'factions') {
+      updateFaction({ id: entityId, [field]: incomingValue })
+    } else if (module === 'items') {
+      updateItem({ id: entityId, [field]: incomingValue })
+    }
+  }
+  refreshConflictCount()
+}
+
 async function runAiExtract(mode: AiExtractMode): Promise<void> {
   const id = novelId.value
   if (!id) return
@@ -3254,9 +3332,26 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
       },
       {
         onChunk: (text: string) => {
-          aiContinueDraft.value = {
-            ...aiContinueDraft.value,
-            text: aiContinueDraft.value.text + text,
+          if (position === 'replace') {
+            aiContinueDraft.value = {
+              ...aiContinueDraft.value,
+              text: aiContinueDraft.value.text + text,
+            }
+          } else {
+            aiContinueDraft.value = {
+              ...aiContinueDraft.value,
+              text: aiContinueDraft.value.text + text,
+            }
+            const ch = selectedChapter.value
+            if (ch) {
+              const prev = ch.content ?? ''
+              const sep = aiContinueDraft.value.text.length === text.length
+                ? (prev.length > 0 && !prev.endsWith('\n\n') ? '\n\n' : '')
+                : ''
+              const nextContent = prev + sep + text
+              updateChapter({ id: ch.id, content: nextContent })
+              chapters.value = chapters.value.map((item) => (item.id === ch.id ? { ...item, content: nextContent } : item))
+            }
           }
         },
         onReasoningChunk: (text: string) => {
@@ -3294,12 +3389,20 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
       ...aiContinueDraft.value,
       loading: false,
       text: finalText,
-      status: 'ready',
+      status: 'applied',
       warnings: result.warnings,
       droppedLayers: result.droppedLayers,
       usedLayers: result.usedLayers,
       usedChars: result.usedChars,
       ragHits: result.ragHits,
+    }
+
+    if (position === 'replace') {
+      autoApplyRewriteWithDiff(chapter, finalText)
+    } else {
+      appendAiSystemNote(`续写完成（约 ${finalText.replace(/\s/g, '').length} 字），已写入正文。`)
+      appendAiChatMessage('assistant', `【续写完成】${finalText.slice(0, 80)}${finalText.length > 80 ? '…' : ''}`, 'current')
+      runPostContinueWorkflows(chapter.id, false)
     }
   } catch (e: unknown) {
     if (e instanceof Error && e.name === 'AbortError') {
@@ -3320,6 +3423,43 @@ async function runAiContinue(payload: { direction: string }): Promise<void> {
       /* ignore */
     })
   }
+}
+
+function autoApplyRewriteWithDiff(chapter: { id: string; content?: string | null; chapterNo?: number | null }, finalText: string): void {
+  const oldContent = chapter.content ?? ''
+  const lines = finalText.split('\n')
+  const firstLine = (lines.find((l) => l.trim().length > 0) ?? '').trim()
+  const firstIdx = lines.findIndex((l) => l.trim().length > 0)
+  const rest = lines.slice(firstIdx + 1).join('\n').trim()
+  const looksLikeTitle = firstLine.length <= 30 && !/[。！？.!?]$/.test(firstLine) && rest.length > 0
+  const newContent = looksLikeTitle ? rest : finalText
+
+  updateChapter({ id: chapter.id, content: newContent })
+  chapters.value = chapters.value.map((item) => (item.id === chapter.id ? { ...item, content: newContent } : item))
+
+  const diff = computeLineDiff(oldContent, newContent)
+  chapterDiffSegments.value = diff
+
+  appendAiSystemNote(`重写完成（约 ${newContent.replace(/\s/g, '').length} 字），已写入正文。点击正文区域可关闭 diff 高亮。`)
+  appendAiChatMessage('assistant', `【重写完成】已更新正文。`, 'current')
+  runPostContinueWorkflows(chapter.id, true)
+}
+
+function runPostContinueWorkflows(chapterId: string, isRewrite: boolean): void {
+  void runChapterSummaryAfterContinue(chapterId, { autoApply: true })
+  switchToAiDeskMode('ask')
+  void runAiExtract('current')
+  void runSceneSummaryAfterContinue(chapterId)
+  void runCharacterStateAfterContinue(chapterId)
+  autoAlignOutlineAfterContinue(chapterId)
+  void maybeGenerateChapterTitleAfterContinue(chapterId)
+  void runConsistencyCheckAfterContinue(chapterId)
+  if (isRewrite) void runRewriteHealthCheck(chapterId)
+  if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+}
+
+function clearChapterDiff(): void {
+  chapterDiffSegments.value = []
 }
 
 async function applyContinueDraft(): Promise<void> {
@@ -3387,6 +3527,7 @@ async function applyContinueDraft(): Promise<void> {
   void runCharacterStateAfterContinue(chapter.id)
   autoAlignOutlineAfterContinue(chapter.id)
   void maybeGenerateChapterTitleAfterContinue(chapter.id)
+  void runConsistencyCheckAfterContinue(chapter.id)
 }
 
 /**
@@ -3415,6 +3556,29 @@ async function runRewriteHealthCheck(chapterId: string): Promise<void> {
     if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
   } catch (e: unknown) {
     if (e instanceof Error && e.name !== 'AbortError') console.warn('重写体检失败:', e.message)
+  }
+}
+
+async function runConsistencyCheckAfterContinue(chapterId: string): Promise<void> {
+  const id = novelId.value
+  if (!id || !requestAiAccess()) return
+  try {
+    const snapshot = buildNovelWorkspacePayload(id)
+    const result = await checkChapterConsistencyFromWorkspaceStream(snapshot, chapterId, {
+      onChunk: () => {},
+      onError: (err: Error) => {
+        if (err.name !== 'AbortError') console.warn('续写一致性检查失败:', err.message)
+      },
+    })
+    aiConsistencyResult.value = result
+    const issueCount =
+      result.characterIssues.length + result.timelineIssues.length + result.foreshadowIssues.length + result.settingIssues.length
+    if (issueCount > 0) {
+      appendAiSystemNote(`一致性检查：发现 ${issueCount} 处潜在问题，已在「一致性检查」面板列出。`)
+    }
+    if (novelId.value) persistAiChatMessages(novelId.value, aiChatMessages.value)
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name !== 'AbortError') console.warn('续写一致性检查失败:', e.message)
   }
 }
 
@@ -5028,9 +5192,24 @@ watch(aiStudioOpen, (open) => {
   persistAiStudioOpen(open)
 })
 
+let lastRestoredNovelId = ''
+let isDeactivated = false
+
+onActivated(() => {
+  isDeactivated = false
+})
+
+onDeactivated(() => {
+  isDeactivated = true
+  flushActiveSessionUiState()
+})
+
 watch(
   novelId,
   (id) => {
+    if (isDeactivated) return
+    if (id === lastRestoredNovelId) return
+    lastRestoredNovelId = id
     const sessions = ensureDeskModeSessions(
       id ? loadAiChatSessions(id) : [createAiChatSession('新提问', 'ask'), createAiChatSession('新写作', 'write')],
     )

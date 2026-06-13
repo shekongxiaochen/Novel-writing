@@ -14,6 +14,7 @@
               'chapter-hub__textarea-wrap--has-selection': textareaHasSelection,
             }"
             @pointerdown.capture="onWrapPointerDownCapture"
+            @wheel="onWrapWheel"
           >
             <div
               ref="overlayRef"
@@ -133,6 +134,22 @@
                 </template>
               </div>
             </div>
+            <div
+              v-if="diffSegments && diffSegments.length > 0"
+              ref="diffOverlayRef"
+              class="chapter-hub__diff-overlay"
+              @click="emit('clearDiff')"
+              @wheel="onEntityWheel"
+            >
+              <div class="chapter-hub__diff-overlay-inner">
+                <template v-for="(seg, idx) in diffSegments" :key="idx">
+                  <span v-if="seg.op === 'delete'" class="chapter-hub__diff-deleted">{{ seg.text }}</span>
+                  <span v-else-if="seg.op === 'insert'" class="chapter-hub__diff-inserted">{{ seg.text }}</span>
+                  <span v-else>{{ seg.text }}</span>
+                  <br v-if="idx < diffSegments.length - 1 && seg.text.endsWith('\n')" />
+                </template>
+              </div>
+            </div>
             <textarea
               ref="textareaRef"
               class="textarea textarea-paper textarea-paper--hub chapter-hub__textarea"
@@ -162,6 +179,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { DiffSegment } from '../../../lib/textDiff'
 import type { EntityToken } from '../../../features/chapter-hub/types'
 import {
   tokenOverlapsQuoteSelection,
@@ -185,6 +203,7 @@ const props = defineProps<{
   readonly?: boolean
   searchQuery?: string
   searchActiveMatchIndex?: number
+  diffSegments?: DiffSegment[]
 }>()
 
 const showPreviewEntityOverlay = computed(
@@ -594,18 +613,20 @@ const emit = defineEmits<{
   goFaction: [faction: Faction, textRange: { start: number; end: number } | null]
   goItem: [item: Item, textRange: { start: number; end: number } | null]
   contextmenu: [event: MouseEvent]
+  clearDiff: []
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const overlayRef = ref<HTMLElement | null>(null)
 const overlayInnerRef = ref<HTMLElement | null>(null)
+const diffOverlayRef = ref<HTMLElement | null>(null)
 
 function syncEntityOverlayScroll(): void {
   const ta = textareaRef.value
   const overlay = overlayRef.value
   if (!ta || !overlay) return
-  // 用原生 scrollTop 同步，比 translateY 更稳（可自动 clamped 到底部，避免底部空白）
   overlay.scrollTop = ta.scrollTop
+  if (diffOverlayRef.value) diffOverlayRef.value.scrollTop = ta.scrollTop
 }
 
 function onTextareaScroll(e: Event): void {
@@ -630,6 +651,14 @@ function onEntityWheel(e: WheelEvent): void {
   if (!ta) return
   ta.scrollTop += e.deltaY
   e.preventDefault()
+  syncEntityOverlayScroll()
+}
+
+function onWrapWheel(e: WheelEvent): void {
+  const ta = textareaRef.value
+  if (!ta) return
+  if (e.defaultPrevented) return
+  ta.scrollTop += e.deltaY
   syncEntityOverlayScroll()
 }
 
