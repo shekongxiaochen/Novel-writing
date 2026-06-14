@@ -73,7 +73,7 @@
       </div>
     </header>
 
-    <section class="ws-overview ws-tab-panel" v-if="activeTab === 'write'">
+    <section class="ws-overview ws-tab-panel" v-show="activeTab === 'write'">
       <!-- ① 故事核心 hero -->
       <header class="ws-ov-hero">
         <div class="ws-ov-hero__main">
@@ -163,7 +163,7 @@
       </div>
     </section>
 
-    <section class="card outline-console-card outline-console-card--map-only ws-tab-panel" v-if="activeTab === 'outline'">
+    <section class="card outline-console-card outline-console-card--map-only ws-tab-panel" v-show="activeTab === 'outline'">
       <header class="outline-map-hero">
         <div class="outline-map-hero__copy">
           <h2>大纲</h2>
@@ -1100,7 +1100,7 @@
       />
     </section>
 
-    <section class="card ws-tab-panel" v-if="activeTab === 'characters'">
+    <section class="card ws-tab-panel" v-show="activeTab === 'characters'">
       <div class="faction-filter-block">
         <label class="faction-filter-label">
           <span>关键字筛选</span>
@@ -1496,7 +1496,7 @@
       </Teleport>
     </section>
 
-    <section class="card workspace-items-card ws-tab-panel" v-if="activeTab === 'items'">
+    <section class="card workspace-items-card ws-tab-panel" v-show="activeTab === 'items'">
       <div class="workspace-items-hero">
         <h2>物品</h2>
         <button type="button" class="btn-primary workspace-items-hero__btn" @click="openItemCreate">新增物品</button>
@@ -1781,7 +1781,7 @@
       @cancel="itemEditCancelConfirmOpen = false"
     />
 
-    <section class="card ws-tab-panel" v-if="activeTab === 'factions'">
+    <section class="card ws-tab-panel" v-show="activeTab === 'factions'">
       <h2>势力</h2>
 
       <h3 class="workspace-subsection-title">新建势力</h3>
@@ -2106,7 +2106,7 @@
       </Transition>
     </Teleport>
 
-    <section class="card workspace-items-card ws-tab-panel" v-if="activeTab === 'categories'">
+    <section class="card workspace-items-card ws-tab-panel" v-show="activeTab === 'categories'">
       <div class="workspace-items-hero">
         <h2>分类</h2>
         <button type="button" class="btn-primary workspace-items-hero__btn" @click="openCategoryCreate">添加分类</button>
@@ -2414,7 +2414,7 @@
       </Transition>
     </Teleport>
 
-    <section class="card ws-tab-panel" v-if="activeTab === 'issues'">
+    <section class="card ws-tab-panel" v-show="activeTab === 'issues'">
 
       <!-- ══════════ 伏笔追踪 ══════════ -->
       <div class="section-header">
@@ -2626,7 +2626,7 @@
     </Teleport>
     </section>
 
-    <section class="card workspace-items-card ws-tab-panel" v-if="activeTab === 'worldsettings'">
+    <section class="card workspace-items-card ws-tab-panel" v-show="activeTab === 'worldsettings'">
       <div class="workspace-items-hero">
         <h2>世界观设定</h2>
         <div class="workspace-items-hero__actions">

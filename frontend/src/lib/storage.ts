@@ -1261,6 +1261,30 @@ export function createOutlineItem(input: NewOutlineInput): OutlineItem {
   const maxOrder = novelItems.reduce((max, i) => Math.max(max, i.order), 0)
   const now = nowIso()
   const parentId = String(input.parentId ?? '').trim() || null
+  const afterId = String(input.afterId ?? '').trim() || null
+
+  let order = maxOrder + 1
+  if (afterId) {
+    const afterItem = novelItems.find((i) => i.id === afterId)
+    if (afterItem) {
+      const siblings = novelItems.filter((i) => i.parentId === parentId).sort((a, b) => a.order - b.order)
+      const afterIdx = siblings.findIndex((i) => i.id === afterId)
+      if (afterIdx >= 0) {
+        const nextSibling = siblings[afterIdx + 1]
+        if (nextSibling) {
+          order = Math.floor((afterItem.order + nextSibling.order) / 2)
+          if (order === afterItem.order) order = afterItem.order + 1
+        } else {
+          order = afterItem.order + 1
+        }
+      }
+    }
+  } else if (parentId) {
+    const siblings = novelItems.filter((i) => i.parentId === parentId)
+    const siblingMaxOrder = siblings.reduce((max, i) => Math.max(max, i.order), 0)
+    order = siblingMaxOrder + 1
+  }
+
   // level 优先用显式传入；否则按父节点推导（无父→卷）。杜绝「无 level → 顶层孤儿场景」。
   const parent = parentId ? all.find((i) => i.id === parentId) : null
   const level: OutlineNodeLevel = input.level ?? childLevelOf(parent?.level ?? null)

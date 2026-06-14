@@ -204,6 +204,7 @@ export function buildOutlineRewriteToolCalls(result: OutlineRewriteResult): AiTo
       level: add.level,
     }
     if (add.parentOutlineId) args.parentId = add.parentOutlineId
+    if (add.afterOutlineId) args.afterId = add.afterOutlineId
     for (const field of ['goal', 'conflict', 'twist', 'result', 'suspense'] as const) {
       if (add[field] !== undefined && n(add[field] as string)) args[field] = add[field]
     }
