@@ -253,6 +253,21 @@ ComicRenderJob（渲染任务，追踪 agent 流水线进度）
 - **成本预估与预扣**：开工前给用户算"这一集大概多少钱/多少额度"，确认后再跑。
 - **失败重试**：作画监督触发的重生成要有上限和降级策略。
 
+### 6.1 Provider 配置必须后台可管，严禁写死（硬约束）
+
+生图 / 生视频的 `base_url / api_key / model / 价格 / 倍率` 等**一律不得硬编码**，必须做进**后台管理界面**，运营可在线增删改、切换激活，与现有 AI 模型配置一致。
+
+**复用现有模式**（已验证）：
+- 参照 `backend/src/admin/ai_config.rs`（AI 模型后台）与 `embedding_config.rs`（嵌入模型后台）
+- 服务层参照 `backend/src/services/ai_provider_service.rs`（DB 存储 provider + 激活项）
+- 新增两类 provider 表与后台页：
+  - **图像 provider**（`image_providers`）：文生图 / 图生图 / 多视图生成
+  - **视频 provider**（`video_providers`）：图文生视频
+- 每类支持：多条配置、标记激活项、价格/倍率字段（接入现有钱包计费）、在线测试连通性
+- 前端只调用后端统一接口（如 `/comic/gen-image`、`/comic/gen-video`），**前端不出现任何厂商 URL / Key**
+
+> 原则：换厂商、改 Key、调价格，全部后台点几下完成，不需要改代码、不需要重新打包。
+
 ---
 
 ## 7. 分阶段实施建议
