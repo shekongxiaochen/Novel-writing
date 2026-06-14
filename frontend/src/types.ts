@@ -162,6 +162,7 @@ export type NewOutlineInput = {
   plotStage?: OutlinePlotStage
   storylineIds?: string[]
   parentId?: string | null
+  afterId?: string | null
   location?: string
   timeLabel?: string
   povCharacterId?: string | null

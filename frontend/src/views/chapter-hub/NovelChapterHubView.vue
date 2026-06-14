@@ -2777,11 +2777,21 @@ function applyOutlineItemSuggestion(index: number, action: 'create' | 'ignore'):
   }
   const allowedLevels = ['volume', 'act', 'chapter', 'scene']
   const level = allowedLevels.includes(item.level) ? (item.level as 'volume' | 'act' | 'chapter' | 'scene') : 'scene'
+
+  let parentId: string | undefined
+  if (level === 'scene' && selectedChapter.value) {
+    const chapterOutlineIds = selectedChapter.value.outlineItemIds ?? []
+    const allOutline = getOutlineByNovelId(novelId.value)
+    const chapterNode = allOutline.find((o) => chapterOutlineIds.includes(o.id) && o.level === 'chapter')
+    if (chapterNode) parentId = chapterNode.id
+  }
+
   const created = createOutlineItem({
     novelId: novelId.value,
     title: item.title,
     summary: item.summary,
     level,
+    parentId,
   })
   // 整理当前章模式下，把新大纲节点自动绑定到来源章节，让“已写正文”与结构对齐
   let boundNote = ''

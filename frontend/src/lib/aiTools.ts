@@ -316,13 +316,14 @@ export const AI_WRITE_TOOLS: AiToolDefinition[] = [
     function: {
       name: 'update_chapter_content',
       description:
-        '修改当前或指定章节的正文。mode=replace_selection 只替换作者当前选中的片段（作者选中了一段文字并要求改写/润色时，必须用这个，绝不能整章替换）；mode=append 在章末追加 text；mode=replace 用 text 替换整章正文（仅在作者明确要求重写整章时使用，慎用）。未传 chapterId 时使用作者当前正在编辑的章节。',
+        '修改当前或指定章节的正文。mode=replace_selection 只替换作者当前选中的片段；mode=replace_search 搜索 search 指定的原文片段并替换为 text（作者未选中文字但要求修改某段时使用）；mode=append 在章末追加 text；mode=replace 用 text 替换整章正文（仅在作者明确要求重写整章时使用，慎用）。未传 chapterId 时使用作者当前正在编辑的章节。',
       parameters: {
         type: 'object',
         properties: {
           chapterId: { type: 'string', description: '章节 ID，可省略则使用当前章' },
-          mode: { type: 'string', enum: ['append', 'replace', 'replace_selection'], description: 'replace_selection 只改选中片段（首选）；append 追加；replace 整章替换（慎用）' },
+          mode: { type: 'string', enum: ['append', 'replace', 'replace_selection', 'replace_search'], description: 'replace_selection 只改选中片段；replace_search 搜索替换（需提供 search）；append 追加；replace 整章替换（慎用）' },
           text: { type: 'string', description: '要写入的正文片段' },
+          search: { type: 'string', description: '要被替换的原文片段（仅 replace_search 模式需要）' },
         },
         required: ['text'],
       },
@@ -663,12 +664,42 @@ function execUpdateChapterContent(
   const text = n(args.text)
   if (!text) return { success: false, message: '正文内容不能为空' }
   const rawMode = n(args.mode)
-  const mode = rawMode === 'replace' ? 'replace' : rawMode === 'replace_selection' ? 'replace_selection' : 'append'
+  const mode = rawMode === 'replace' ? 'replace' : rawMode === 'replace_selection' ? 'replace_selection' : rawMode === 'replace_search' ? 'replace_search' : 'append'
+
+  if (mode === 'replace_search') {
+    const search = n(args.search)
+    const content = chapter.content ?? ''
+    if (!search) return { success: false, message: 'replace_search 模式需要提供 search 参数（要替换的原文）' }
+    const idx = content.indexOf(search)
+    if (idx < 0) return { success: false, message: `未在正文中找到要替换的片段，请确认 search 内容与正文完全一致` }
+    const nextContent = content.slice(0, idx) + text + content.slice(idx + search.length)
+    const updated = updateChapter({ id: chapter.id, content: nextContent })
+    if (!updated) return { success: false, message: '更新章节正文失败' }
+    return {
+      success: true,
+      message: `已替换第 ${updated.chapterNo} 章中的片段（${search.length} 字 → ${text.length} 字）`,
+      data: { chapterId: updated.id, chapterNo: updated.chapterNo },
+    }
+  }
 
   if (mode === 'replace_selection') {
     const sel = ctx.selectionRange
     const content = chapter.content ?? ''
     if (!sel || sel.chapterId !== chapter.id || sel.end <= sel.start || sel.end > content.length) {
+      const search = n(args.search)
+      if (search) {
+        const idx = content.indexOf(search)
+        if (idx >= 0) {
+          const nextContent = content.slice(0, idx) + text + content.slice(idx + search.length)
+          const updated = updateChapter({ id: chapter.id, content: nextContent })
+          if (!updated) return { success: false, message: '更新章节正文失败' }
+          return {
+            success: true,
+            message: `已替换第 ${updated.chapterNo} 章中的片段（${search.length} 字 → ${text.length} 字）`,
+            data: { chapterId: updated.id, chapterNo: updated.chapterNo },
+          }
+        }
+      }
       return { success: false, message: '没有有效的选中片段，无法定向替换。请先在正文中选中要修改的文字。' }
     }
     const nextContent = content.slice(0, sel.start) + text + content.slice(sel.end)
@@ -719,6 +750,7 @@ function execCreateOutlineItem(novelId: string, args: Record<string, any>): AiTo
     summary: n(args.summary),
     level: args.level,
     parentId: typeof args.parentId === 'string' && args.parentId ? args.parentId : undefined,
+    afterId: typeof args.afterId === 'string' && args.afterId ? args.afterId : undefined,
     goal: n(args.goal),
     conflict: n(args.conflict),
     twist: n(args.twist),
