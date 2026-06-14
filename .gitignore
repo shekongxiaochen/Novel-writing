@@ -54,3 +54,8 @@ _backup_重装前/
 novel_db.sql
 *_dump.sql
 *.dump.sql
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
