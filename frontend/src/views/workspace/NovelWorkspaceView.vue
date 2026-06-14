@@ -3176,6 +3176,40 @@
       </Transition>
     </Teleport>
 
+    <section class="card workspace-items-card ws-tab-panel" v-show="activeTab === 'scenes'">
+      <div class="workspace-items-hero">
+        <h2>场景</h2>
+        <div class="workspace-items-hero__actions">
+          <button type="button" class="btn-primary workspace-items-hero__btn" @click="openSceneCreate">新增场景</button>
+        </div>
+      </div>
+
+      <p class="muted" style="margin: 0 0 16px;">
+        场景是漫剧素材的一部分：描述每个地点的环境、氛围与外观。后续生成漫剧时，AI 会按剧情调用对应场景。
+      </p>
+
+      <section v-if="scenes.length === 0" class="ws-empty">
+        <h3 class="ws-empty__title">还没有场景</h3>
+        <p class="ws-empty__desc">添加故事里的关键地点（书院、街道、宫殿…），写清它长什么样，方便后续生成画面。</p>
+        <div class="ws-empty__actions">
+          <button type="button" class="btn-primary ws-empty__cta" @click="openSceneCreate">新增第一个场景</button>
+        </div>
+      </section>
+
+      <div v-else class="ws-scene-grid">
+        <article v-for="scene in scenes" :key="scene.id" class="ws-scene-card">
+          <header class="ws-scene-card__head">
+            <h3 class="ws-scene-card__name">{{ scene.name }}</h3>
+            <div class="ws-scene-card__actions">
+              <button type="button" class="btn-as-link" @click="openSceneEdit(scene)">编辑</button>
+              <button type="button" class="btn-as-link ws-scene-card__del" @click="removeScene(scene)">删除</button>
+            </div>
+          </header>
+          <p class="ws-scene-card__desc">{{ scene.description || '暂无描述' }}</p>
+        </article>
+      </div>
+    </section>
+
     <WorkspaceAiSidebar
       ref="workspaceAiSidebarRef"
       v-if="activeTab !== 'write'"
@@ -3199,6 +3233,32 @@
   </section>
 
   <EditNovelDialog :open="editNovelOpen" :novel="novel" @close="editNovelOpen = false" @saved="onNovelSaved" />
+
+  <Teleport to="body">
+    <Transition name="confirm">
+      <div v-if="sceneFormOpen" class="confirm-overlay" @pointerdown.self="closeSceneForm">
+        <div class="confirm-dialog" role="dialog" aria-modal="true" @pointerdown.stop style="width: min(520px, calc(100vw - 28px));">
+          <div class="confirm-dialog__body" style="padding: 22px;">
+            <h2 class="confirm-dialog__title" style="margin: 0 0 16px;">{{ sceneEditId ? '编辑场景' : '新增场景' }}</h2>
+            <form @submit.prevent="saveSceneForm" style="display: grid; gap: 14px;">
+              <label style="display: grid; gap: 6px; font-size: 0.85rem; color: var(--color-text-muted);">
+                场景名称
+                <input v-model="sceneFormName" required maxlength="40" placeholder="如：青云书院" style="min-height: 40px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--color-border-strong); background: var(--color-surface); color: var(--color-text);" />
+              </label>
+              <label style="display: grid; gap: 6px; font-size: 0.85rem; color: var(--color-text-muted);">
+                场景描述
+                <textarea v-model="sceneFormDescription" rows="5" maxlength="2000" placeholder="环境、时代背景、氛围、外观特征…描述越清楚，后续生成画面越贴合" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--color-border-strong); background: var(--color-surface); color: var(--color-text); resize: vertical; line-height: 1.6;"></textarea>
+              </label>
+              <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px;">
+                <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeSceneForm">取消</button>
+                <button type="submit" class="btn-primary" :disabled="!sceneFormName.trim()" style="min-width: 96px;">保存</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -3257,6 +3317,10 @@ import {
   createWorldSetting,
   updateWorldSetting,
   deleteWorldSetting,
+  getScenesByNovelId,
+  createScene,
+  updateScene,
+  deleteScene,
 } from '../../lib/storage'
 import { characterMatchLabels, normalizeCharacterAliases, buildDisplayNameMap } from '../../lib/characterLabels'
 import {
@@ -3297,6 +3361,7 @@ import type {
   ForeshadowPlant,
   NewCharacterInput,
   NewItemInput,
+  Scene,
   OutlineItem,
   OutlineNodeLevel,
   OutlinePlotStage,
@@ -3351,6 +3416,7 @@ type WorkspaceTab =
   | 'categories'
   | 'issues'
   | 'worldsettings'
+  | 'scenes'
 
 const novelId = computed(() => String(route.params.id ?? ''))
 const novel = computed(() => getNovelById(novelId.value))
@@ -3461,6 +3527,11 @@ const characters = ref<Character[]>([])
 const characterRelations = ref<CharacterRelation[]>([])
 const factions = ref<Faction[]>([])
 const items = ref<Item[]>([])
+const scenes = ref<Scene[]>([])
+const sceneFormOpen = ref(false)
+const sceneEditId = ref<string>('')
+const sceneFormName = ref('')
+const sceneFormDescription = ref('')
 const categories = ref<Category[]>([])
 const categoryCreateName = ref('')
 const categoryCreateNotes = ref('')
@@ -4558,6 +4629,7 @@ function reloadWorkspaceEntities(id: string): void {
   characterRelations.value = getCharacterRelationsByNovelId(id)
   factions.value = getFactionsByNovelId(id)
   items.value = getItemsByNovelId(id)
+  scenes.value = getScenesByNovelId(id)
   categories.value = getCategoriesByNovelId(id)
   characterFactionMemberships.value = getCharacterFactionMembershipsByNovelId(id)
   timelineEvents.value = getTimelineByNovelId(id)
@@ -4567,6 +4639,48 @@ function reloadWorkspaceEntities(id: string): void {
 
 function reloadWorkspaceFromAi(): void {
   if (novelId.value) reloadWorkspaceEntities(novelId.value)
+}
+
+function openSceneCreate(): void {
+  sceneEditId.value = ''
+  sceneFormName.value = ''
+  sceneFormDescription.value = ''
+  sceneFormOpen.value = true
+}
+
+function openSceneEdit(scene: Scene): void {
+  sceneEditId.value = scene.id
+  sceneFormName.value = scene.name
+  sceneFormDescription.value = scene.description
+  sceneFormOpen.value = true
+}
+
+function closeSceneForm(): void {
+  sceneFormOpen.value = false
+  sceneEditId.value = ''
+  sceneFormName.value = ''
+  sceneFormDescription.value = ''
+}
+
+function saveSceneForm(): void {
+  const id = novelId.value
+  if (!id) return
+  const name = sceneFormName.value.trim()
+  if (!name) return
+  const description = sceneFormDescription.value.trim()
+  if (sceneEditId.value) {
+    updateScene({ id: sceneEditId.value, name, description })
+  } else {
+    createScene({ novelId: id, name, description })
+  }
+  scenes.value = getScenesByNovelId(id)
+  closeSceneForm()
+}
+
+function removeScene(scene: Scene): void {
+  if (!window.confirm(`确认删除场景「${scene.name}」？`)) return
+  deleteScene(scene.id)
+  if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
 }
 
 // ── AI 待采用修改：原位 diff 预览 ──────────────────────────────────────────
@@ -8079,7 +8193,8 @@ function applyRoutePrefill(): void {
     tab === 'factions' ||
     tab === 'categories' ||
     tab === 'issues' ||
-    tab === 'worldsettings'
+    tab === 'worldsettings' ||
+    tab === 'scenes'
   ) {
     activeTab.value = tab
   }
@@ -10282,5 +10397,47 @@ onUnmounted(() => {
   .ws-ai-actions__right {
     justify-content: flex-end;
   }
+}
+
+.ws-scene-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+.ws-scene-card {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ws-scene-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-scene-card__name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.ws-scene-card__actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.ws-scene-card__del {
+  color: var(--color-danger, #e53935);
+}
+.ws-scene-card__desc {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>
