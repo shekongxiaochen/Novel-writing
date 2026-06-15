@@ -3247,21 +3247,26 @@
   <Teleport to="body">
     <Transition name="confirm">
       <div v-if="sceneFormOpen" class="confirm-overlay" @pointerdown.self="closeSceneForm">
-        <div class="confirm-dialog" role="dialog" aria-modal="true" @pointerdown.stop style="width: min(520px, calc(100vw - 28px));">
-          <div class="confirm-dialog__body" style="padding: 22px;">
-            <h2 class="confirm-dialog__title" style="margin: 0 0 16px;">{{ sceneEditId ? '编辑场景' : '新增场景' }}</h2>
-            <form @submit.prevent="saveSceneForm" style="display: grid; gap: 14px;">
-              <label style="display: grid; gap: 6px; font-size: 0.85rem; color: var(--color-text-muted);">
-                场景名称
-                <input v-model="sceneFormName" required maxlength="40" placeholder="如：青云书院" style="min-height: 40px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--color-border-strong); background: var(--color-surface); color: var(--color-text);" />
+        <div class="confirm-dialog ws-scene-form" role="dialog" aria-modal="true" @pointerdown.stop>
+          <div class="confirm-dialog__accent" aria-hidden="true"></div>
+          <div class="ws-scene-form__body">
+            <div class="ws-scene-form__head">
+              <h2 class="ws-scene-form__title">{{ sceneEditId ? '编辑场景' : '新增场景' }}</h2>
+              <button type="button" class="ws-scene-form__close" aria-label="关闭" @click="closeSceneForm">&times;</button>
+            </div>
+            <form class="ws-scene-form__form" @submit.prevent="saveSceneForm">
+              <label class="ws-scene-form__field">
+                <span class="ws-scene-form__label">场景名称</span>
+                <input v-model="sceneFormName" class="ws-scene-form__input" required maxlength="40" placeholder="如：青云书院" />
               </label>
-              <label style="display: grid; gap: 6px; font-size: 0.85rem; color: var(--color-text-muted);">
-                场景描述
-                <textarea v-model="sceneFormDescription" rows="5" maxlength="2000" placeholder="环境、时代背景、氛围、外观特征…描述越清楚，后续生成画面越贴合" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--color-border-strong); background: var(--color-surface); color: var(--color-text); resize: vertical; line-height: 1.6;"></textarea>
+              <label class="ws-scene-form__field">
+                <span class="ws-scene-form__label">场景描述</span>
+                <textarea v-model="sceneFormDescription" class="ws-scene-form__input ws-scene-form__textarea" rows="6" maxlength="2000" placeholder="环境、时代背景、氛围、外观特征…描述越清楚，后续生成画面越贴合"></textarea>
+                <span class="ws-scene-form__count">{{ sceneFormDescription.length }}/2000</span>
               </label>
-              <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px;">
+              <div class="ws-scene-form__actions">
                 <button type="button" class="confirm-dialog__btn confirm-dialog__btn--ghost" @click="closeSceneForm">取消</button>
-                <button type="submit" class="btn-primary" :disabled="!sceneFormName.trim()" style="min-width: 96px;">保存</button>
+                <button type="submit" class="btn-primary ws-scene-form__submit" :disabled="!sceneFormName.trim()">保存</button>
               </div>
             </form>
           </div>
@@ -10578,6 +10583,7 @@ onUnmounted(() => {
 .ws-scene-detail {
   position: relative;
   width: min(880px, calc(100vw - 32px));
+  max-width: min(880px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
   overflow: hidden;
 }
@@ -10684,5 +10690,90 @@ onUnmounted(() => {
     grid-template-columns: 1fr;
     overflow-y: auto;
   }
+}
+
+/* 场景编辑弹窗 */
+.ws-scene-form {
+  width: min(520px, calc(100vw - 28px));
+  max-width: min(520px, calc(100vw - 28px));
+}
+.ws-scene-form__body {
+  padding: 20px 22px 22px;
+}
+.ws-scene-form__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.ws-scene-form__title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.ws-scene-form__close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-scene-form__close:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+.ws-scene-form__form {
+  display: grid;
+  gap: 16px;
+}
+.ws-scene-form__field {
+  display: grid;
+  gap: 7px;
+  position: relative;
+}
+.ws-scene-form__label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.ws-scene-form__input {
+  width: 100%;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  color: var(--color-text);
+  font-size: 0.92rem;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.ws-scene-form__input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-primary) 65%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+.ws-scene-form__textarea {
+  min-height: 132px;
+  resize: vertical;
+  line-height: 1.65;
+}
+.ws-scene-form__count {
+  position: absolute;
+  right: 4px;
+  bottom: -18px;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+.ws-scene-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+.ws-scene-form__submit {
+  min-width: 100px;
 }
 </style>
