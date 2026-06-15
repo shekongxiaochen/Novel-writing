@@ -20,8 +20,8 @@ use handlers::{ai, announcement, auth, billing, comic, health, novels};
 use middleware::{auth_middleware, cors_layer};
 use services::{
     AiProviderService, AiService, AppState, AuthService, AutoApplyLogService, CacheService, CardKeyService,
-    CharacterStateService, EmbeddingIndexService, EmbeddingProviderService, ImageProviderService, NovelService,
-    SettingsService, WalletService,
+    CharacterStateService, EmbeddingIndexService, EmbeddingProviderService, ImageProviderService,
+    VideoProviderService, NovelService, SettingsService, WalletService,
 };
 use std::sync::Arc;
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
@@ -88,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let card_keys = Arc::new(CardKeyService::new(db.clone(), (*wallet).clone(), cache_service.clone()));
     let providers = Arc::new(AiProviderService::new(db.clone()));
     let image_providers = Arc::new(ImageProviderService::new(db.clone()));
+    let video_providers = Arc::new(VideoProviderService::new(db.clone()));
     let embedding_index = Arc::new(EmbeddingIndexService::new(
         db.clone(),
         EmbeddingProviderService::new(db.clone()),
@@ -107,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         card_keys,
         providers: providers.clone(),
         image_providers: image_providers.clone(),
+        video_providers: video_providers.clone(),
         ai: Arc::new(AiService::new(
             config.clone(),
             (*settings).clone(),
@@ -137,6 +139,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/ai/chat", post(ai::chat))
         .route("/ai/prompt", post(ai::prompt_chat))
         .route("/comic/gen-image", post(comic::gen_image))
+        .route("/comic/gen-video", post(comic::gen_video))
+        .route("/comic/video-status", get(comic::video_status))
         .route("/novels", get(novels::list_novels).post(novels::create_novel))
         .route(
             "/novels/:id",

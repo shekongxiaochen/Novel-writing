@@ -9762,6 +9762,18 @@ select[size]::-webkit-scrollbar-thumb:hover {
   opacity: 0;
 }
 
+.ai-settings-dialog-pop-enter-active,
+.ai-settings-dialog-pop-leave-active {
+  transition:
+    transform 0.24s cubic-bezier(0.34, 1.15, 0.64, 1),
+    opacity 0.2s ease;
+}
+.ai-settings-dialog-pop-enter-from,
+.ai-settings-dialog-pop-leave-to {
+  transform: scale(0.96) translateY(10px);
+  opacity: 0;
+}
+
 @media (max-width: 860px) {
   .chapter-hub__composer-grid {
     grid-template-columns: 1fr;

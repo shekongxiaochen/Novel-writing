@@ -15,6 +15,7 @@ mod card_key_admin;
 mod dashboard;
 mod embedding_config;
 mod image_config;
+mod video_config;
 mod labels;
 mod prompts;
 mod shell;
@@ -23,7 +24,7 @@ mod user_ops;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::entities::AiWalletLedgerEntity;
-use crate::services::{AiProviderService, CardKeyService, EmbeddingProviderService, ImageProviderService, SettingsService, WalletService};
+use crate::services::{AiProviderService, CardKeyService, EmbeddingProviderService, ImageProviderService, VideoProviderService, SettingsService, WalletService};
 use labels::{apply_field_labels, AI_WALLET_LEDGER_FIELDS};
 
 async fn separate_app_session_table(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
@@ -322,6 +323,10 @@ pub async fn build_router(
         }))
         .merge(image_config::routes(image_config::ImageConfigState {
             providers: ImageProviderService::new(sqlx_pool.clone()),
+            auth: auth_for_admin.clone(),
+        }))
+        .merge(video_config::routes(video_config::VideoConfigState {
+            providers: VideoProviderService::new(sqlx_pool.clone()),
             auth: auth_for_admin,
         }));
 

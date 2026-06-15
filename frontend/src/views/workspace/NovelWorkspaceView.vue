@@ -1179,83 +1179,82 @@
                 @edit="startCharacterEdit"
                 @delete="selectedGraphCharacter && openCharacterDelete(selectedGraphCharacter.id)"
               >
-                <template #body-extra>
-                  <section v-if="selectedGraphCharacter" class="char-figure">
-                    <div class="char-figure__head">
-                      <h4 class="char-figure__title">角色形象（漫剧用）</h4>
-                      <select v-if="novel" v-model="selectedVisualStyle" class="ws-style-picker ws-style-picker--sm" @change="saveVisualStyle">
-                        <option value="">🎨 未选画风</option>
-                        <option v-for="p in VISUAL_STYLE_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
-                      </select>
-                    </div>
-                    <div class="char-figure__views">
-                      <div v-for="meta in CHAR_VIEW_KINDS" :key="meta.kind" class="char-figure__view">
-                        <div class="char-figure__thumb">
-                          <img
-                            v-if="charView(selectedGraphCharacter, meta.kind)?.imageUrl"
-                            :src="charView(selectedGraphCharacter, meta.kind)!.imageUrl"
-                            :alt="meta.label"
-                          />
-                          <div v-else class="char-figure__placeholder">
-                            <i class="fa-solid fa-user"></i>
-                          </div>
-                        </div>
-                        <span class="char-figure__label">{{ meta.label }}</span>
-                        <button
-                          type="button"
-                          class="char-figure__btn"
-                          :disabled="!!charGenningKey || (meta.kind !== 'front' && !frontViewImage(selectedGraphCharacter))"
-                          @click="generateCharacterView(selectedGraphCharacter, meta.kind)"
-                        >
-                          {{ charGenningKey === `${selectedGraphCharacter.id}:${meta.kind}`
-                              ? '生成中…'
-                              : (charView(selectedGraphCharacter, meta.kind) ? '重新生成' : '生成') }}
-                        </button>
-                      </div>
-                    </div>
-                    <p class="char-figure__hint">先生成「正面」，再生成侧面/背面（以正面为基准锁定同一角色）。</p>
-                    <p v-if="charGenError" class="char-figure__error">{{ charGenError }}</p>
-                  </section>
-                </template>
               </CharacterProfilePanel>
             </div>
           </div>
 
-          <div class="characters-graph-ui__box characters-graph-ui__box--bottom">
-            <div class="characters-graph-ui__box-left">
-              <div class="characters-graph-ui__viz">
-                <div class="characters-graph-ui__viz-main">
-                  <CharacterRelationFocusSphere
-                    v-if="graphFocusCharacterId && visibleCharacters.length > 0"
-                    selectable
-                    :characters="visibleCharacters"
-                    :relations="relatedRelations"
-                    :focus-character-id="graphFocusCharacterId"
-                    :panel-height="582"
-                    @select="onFocusSphereNodeSelect"
-                  />
+          <div v-if="selectedGraphCharacter" class="characters-graph-ui__box characters-graph-ui__box--bottom ws-char-studio">
+            <div class="ws-char-studio__header">
+              <div class="ws-char-studio__heading">
+                <span class="ws-char-studio__eyebrow">角色形象</span>
+                <h3 class="ws-char-studio__name">{{ selectedGraphCharacter.name }}</h3>
+              </div>
+              <select v-if="novel" v-model="selectedVisualStyle" class="ws-style-picker" @change="saveVisualStyle(($event.target as HTMLSelectElement).value as VisualStyleId)">
+                <option value="">🎨 画风</option>
+                <option v-for="p in VISUAL_STYLE_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+              </select>
+            </div>
 
-                  <p v-else class="muted">暂无关系。</p>
+            <div class="ws-char-studio__bar">
+              <input
+                v-model="charDescInput"
+                class="ws-char-studio__desc-input"
+                maxlength="200"
+                :placeholder="`描述 ${selectedGraphCharacter.name} 的外貌（留空则用角色档案）…`"
+                @keydown.enter.prevent="generateAllCharViews(selectedGraphCharacter)"
+              />
+              <button type="button" class="btn-primary ws-char-studio__gen-all" :disabled="!!charGenningKey" @click="generateAllCharViews(selectedGraphCharacter)">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                {{ charGenningKey ? '生成中…' : '一键生成三视图' }}
+              </button>
+            </div>
+
+            <p v-if="charGenError" class="ws-char-studio__error"><i class="fa-solid fa-circle-exclamation"></i> {{ charGenError }}</p>
+
+            <div class="ws-char-studio__row">
+              <div v-for="meta in CHAR_VIEW_KINDS" :key="meta.kind" class="ws-char-studio__slot">
+                <div
+                  class="ws-char-studio__canvas"
+                  :class="{ 'is-loading': charGenningKey === `${selectedGraphCharacter.id}:${meta.kind}` }"
+                >
+                  <img
+                    v-if="charView(selectedGraphCharacter, meta.kind)?.imageUrl"
+                    :src="charView(selectedGraphCharacter, meta.kind)!.imageUrl"
+                    :alt="meta.label"
+                    @click="charPreviewUrl = charView(selectedGraphCharacter, meta.kind)!.imageUrl || ''"
+                  />
+                  <div v-else class="ws-char-studio__empty">
+                    <i class="fa-solid fa-user"></i>
+                    <span>{{ meta.label }}</span>
+                  </div>
+                  <div v-if="charGenningKey === `${selectedGraphCharacter.id}:${meta.kind}`" class="ws-char-studio__loading">
+                    <span class="ws-char-studio__spinner"></span>
+                  </div>
+                  <span class="ws-char-studio__badge">{{ meta.label }}</span>
                 </div>
+                <button
+                  type="button"
+                  class="ws-char-studio__regen"
+                  :disabled="!!charGenningKey || (meta.kind !== 'front' && !frontViewImage(selectedGraphCharacter))"
+                  :title="meta.kind !== 'front' && !frontViewImage(selectedGraphCharacter) ? '需先生成正面' : ''"
+                  @click="generateCharacterView(selectedGraphCharacter, meta.kind)"
+                >
+                  <i class="fa-solid fa-rotate"></i>
+                  {{ charView(selectedGraphCharacter, meta.kind) ? '重新生成' : '生成' }}
+                </button>
               </div>
             </div>
-
-            <div class="characters-graph-ui__box-right">
-              <section class="characters-graph-ui__section characters-graph-ui__toolbar">
-              <CharacterGraphRelationToolbar
-                v-model:link-mode="graphLinkMode"
-                v-model:search-query="graphSphereSearchQuery"
-                :novel-id="novelId"
-                :focus-character-id="graphFocusCharacterId"
-                :pair-character-id="graphFocusSphereSelectedId"
-                :characters="characters"
-                :relations="characterRelations"
-                @relations-changed="onCharacterRelationsChanged"
-              />
-              </section>
-            </div>
+            <p class="ws-char-studio__tip">正面确定长相，侧面/背面以正面为基准锁定同一角色。点击图片可放大。</p>
           </div>
         </div>
+
+        <Teleport to="body">
+          <Transition name="confirm">
+            <div v-if="charPreviewUrl" class="ws-char-preview" @click="charPreviewUrl = ''">
+              <img :src="charPreviewUrl" alt="角色形象大图" />
+            </div>
+          </Transition>
+        </Teleport>
 
         <ConfirmDialog
           v-model="characterDeleteOpen"
@@ -3230,7 +3229,7 @@
       <div class="workspace-items-hero">
         <h2>场景</h2>
         <div class="workspace-items-hero__actions">
-          <select v-if="novel" v-model="selectedVisualStyle" class="ws-style-picker" @change="saveVisualStyle">
+          <select v-if="novel" v-model="selectedVisualStyle" class="ws-style-picker" @change="saveVisualStyle(($event.target as HTMLSelectElement).value as VisualStyleId)">
             <option value="">🎨 未选画风</option>
             <option v-for="p in VISUAL_STYLE_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
           </select>
@@ -3296,29 +3295,63 @@
         <p v-if="comicError" style="color:var(--color-danger);margin:8px 0 0;">{{ comicError }}</p>
 
         <div v-if="comicStoryboard" class="ws-comic-shots">
-          <div class="ws-comic-shots__header">{{ comicStoryboard.shots.length }} 个镜头</div>
-          <article v-for="shot in comicStoryboard.shots" :key="shot.id" class="ws-comic-shot">
-            <div class="ws-comic-shot__index">#{{ shot.order }}</div>
-            <div class="ws-comic-shot__body">
-              <p class="ws-comic-shot__action">{{ shot.action || '（无动作描述）' }}</p>
-              <p v-if="shot.dialogue" class="ws-comic-shot__dialogue">「{{ shot.dialogue }}」</p>
-              <div class="ws-comic-shot__meta">
-                <span v-if="shot.sceneId" class="ws-comic-shot__tag ws-comic-shot__tag--scene">📍 {{ sceneNameById(shot.sceneId) }}</span>
-                <span v-else-if="shot.sceneDescription" class="ws-comic-shot__tag ws-comic-shot__tag--scene">📍 {{ shot.sceneDescription }}</span>
-                <span v-for="cid in shot.characterIds" :key="cid" class="ws-comic-shot__tag ws-comic-shot__tag--char">👤 {{ charNameById(cid) }}</span>
-                <span v-for="iid in shot.itemIds" :key="iid" class="ws-comic-shot__tag ws-comic-shot__tag--item">📦 {{ itemNameById(iid) }}</span>
-                <span v-if="shot.shotType" class="ws-comic-shot__tag ws-comic-shot__tag--shot">🎬 {{ shotTypeLabel(shot.shotType) }}</span>
-                <span v-if="shot.emotion" class="ws-comic-shot__tag">💬 {{ shot.emotion }}</span>
+          <div class="ws-comic-shots__header">共 {{ comicStoryboard.shots.length }} 个镜头</div>
+          <article v-for="shot in comicStoryboard.shots" :key="shot.id" class="ws-shot-card">
+            <!-- 左：媒体区 -->
+            <div class="ws-shot-card__media">
+              <div class="ws-shot-card__frame">
+                <video v-if="shot.clipUrl" :src="shot.clipUrl" controls />
+                <img v-else-if="shot.keyframeUrl" :src="shot.keyframeUrl" :alt="`镜头${shot.order}`" @click="charPreviewUrl = shot.keyframeUrl || ''" />
+                <div v-else class="ws-shot-card__frame-empty">
+                  <i class="fa-solid fa-film"></i>
+                  <span>未出图</span>
+                </div>
+                <span class="ws-shot-card__num">#{{ shot.order }}</span>
+                <span v-if="shot.shotType" class="ws-shot-card__shottype">{{ shotTypeLabel(shot.shotType) }}</span>
               </div>
-              <img v-if="shot.keyframeUrl" :src="shot.keyframeUrl" class="ws-comic-shot__kf" />
-              <button
-                type="button"
-                class="ws-comic-shot__kf-btn"
-                :disabled="!!keyframeGenningId"
-                @click="generateKeyframe(shot)"
-              >
-                {{ keyframeGenningId === shot.id ? '生成中…' : (shot.keyframeUrl ? '重出关键帧' : '生成关键帧') }}
-              </button>
+            </div>
+
+            <!-- 右：信息 + 操作 -->
+            <div class="ws-shot-card__main">
+              <p class="ws-shot-card__action">{{ shot.action || '（无动作描述）' }}</p>
+              <p v-if="shot.dialogue" class="ws-shot-card__dialogue">「{{ shot.dialogue }}」</p>
+
+              <div class="ws-shot-card__tags">
+                <span v-if="shot.sceneId" class="ws-shot-card__tag ws-shot-card__tag--scene">📍 {{ sceneNameById(shot.sceneId) }}</span>
+                <span v-else-if="shot.sceneDescription" class="ws-shot-card__tag ws-shot-card__tag--scene">📍 {{ shot.sceneDescription }}</span>
+                <span v-for="cid in shot.characterIds" :key="cid" class="ws-shot-card__tag ws-shot-card__tag--char">👤 {{ charNameById(cid) }}</span>
+                <span v-for="iid in shot.itemIds" :key="iid" class="ws-shot-card__tag ws-shot-card__tag--item">📦 {{ itemNameById(iid) }}</span>
+                <span v-if="shot.emotion" class="ws-shot-card__tag">💬 {{ shot.emotion }}</span>
+              </div>
+
+              <div class="ws-shot-card__actions">
+                <button
+                  type="button"
+                  class="ws-shot-card__btn"
+                  :disabled="!!keyframeGenningId"
+                  @click="generateKeyframe(shot)"
+                >
+                  <i class="fa-solid fa-image"></i>
+                  {{ keyframeGenningId === shot.id ? '生成中…' : (shot.keyframeUrl ? '重出画面' : '生成画面') }}
+                </button>
+                <template v-if="shot.keyframeUrl">
+                  <button
+                    type="button"
+                    class="ws-shot-card__btn ws-shot-card__btn--accent"
+                    :disabled="!!videoGenningId"
+                    @click="generateVideo(shot)"
+                  >
+                    <i class="fa-solid fa-film"></i>
+                    {{ videoGenningId === shot.id ? '生成中…' : (shot.clipUrl ? '重出视频' : '生成视频') }}
+                  </button>
+                  <select v-if="!shot.clipUrl" v-model="videoDurationSeconds" class="ws-shot-card__dur" :disabled="!!videoGenningId">
+                    <option :value="3">3 秒</option>
+                    <option :value="5">5 秒</option>
+                    <option :value="10">10 秒</option>
+                    <option :value="18">18 秒</option>
+                  </select>
+                </template>
+              </div>
             </div>
           </article>
         </div>
@@ -3550,7 +3583,7 @@ import {
 } from '../../lib/outlineHierarchy'
 import { syncAllNovelsWithCloud } from '../../lib/cloudSync'
 import { getCurrentSession } from '../../lib/auth'
-import { generateComicImage } from '../../lib/comicImage'
+import { generateComicImage, createComicVideo, pollVideoStatus } from '../../lib/comicImage'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
 import type {
   Category,
@@ -4960,6 +4993,8 @@ function deleteComicStoryboard(): void {
 }
 
 const keyframeGenningId = ref<string>('')
+const videoGenningId = ref<string>('')
+let videoPollTimer: ReturnType<typeof setInterval> | null = null
 
 async function generateKeyframe(shot: Shot): Promise<void> {
   if (keyframeGenningId.value) return
@@ -4967,25 +5002,49 @@ async function generateKeyframe(shot: Shot): Promise<void> {
   if (!sb) return
   keyframeGenningId.value = shot.id
   try {
-    // 组装画面描述
-    const sceneDesc = shot.sceneDescription ?? (shot.sceneId ? sceneNameById(shot.sceneId) : '')
-    const charDescs = (shot.characterIds ?? []).map((cid) => {
+    // 场景描述：优先 sceneDescription，其次素材库场景的文字描述
+    let sceneDesc = shot.sceneDescription ?? ''
+    const refImages: string[] = []
+    if (!sceneDesc && shot.sceneId) {
+      const sc = scenes.value.find((x) => x.id === shot.sceneId)
+      if (sc) {
+        sceneDesc = sc.description || sc.name
+        const scImg = sc.views?.[sc.views.length - 1]?.imageUrl
+        if (scImg) refImages.push(scImg)
+      }
+    }
+
+    // 出场角色：带上各自的锁定立绘当参考图（锁角色长相），并描述外貌
+    const charLines: string[] = []
+    for (const cid of shot.characterIds ?? []) {
       const c = characters.value.find((x) => x.id === cid)
-      return c ? c.name : ''
-    }).filter(Boolean)
+      if (!c) continue
+      // 该镜头指定视图，否则用正面
+      const view = (c.views ?? []).find((v) => (shot.assetViewIds ?? []).includes(v.id))
+        ?? (c.views ?? []).find((v) => v.kind === 'front')
+        ?? (c.views ?? [])[0]
+      if (view?.imageUrl && refImages.length < 3) refImages.push(view.imageUrl)
+      const look = [c.gender, c.age, c.notes].filter(Boolean).join('，')
+      charLines.push(look ? `${c.name}（${look}）` : c.name)
+    }
+
+    // 出场物品
+    const itemNames = (shot.itemIds ?? []).map((iid) => items.value.find((x) => x.id === iid)?.name).filter(Boolean)
+
     const vs = visualStyleSuffix()
+    const shotLabel = shot.shotType ? `${shotTypeLabel(shot.shotType)}` : ''
     const parts = [
-      sceneDesc,
-      charDescs.length > 0 ? `出场角色：${charDescs.join('、')}` : '',
-      shot.action ?? '',
-      shot.shotType ? `${shotTypeLabel(shot.shotType)}镜头` : '',
-      shot.emotion ? `情绪：${shot.emotion}` : '',
+      sceneDesc ? `场景：${sceneDesc}` : '',
+      charLines.length > 0 ? `画面中出现角色：${charLines.join('；')}（请严格保持与参考图一致的长相、发型、服饰）` : '',
+      itemNames.length > 0 ? `出现物品：${itemNames.join('、')}` : '',
+      shot.action ? `画面内容：${shot.action}` : '',
+      shot.emotion ? `情绪氛围：${shot.emotion}` : '',
+      shotLabel ? `镜头：${shotLabel}` : '',
       vs,
-      '动画场景概念图，空镜不要人物，无单一焦点主体，留白给角色站位。',
+      '完整的漫剧分镜画面，角色与场景融合在同一画面中，电影级构图与打光。',
     ].filter(Boolean)
     const prompt = parts.join('。')
-    const url = await generateComicImage({ prompt, size: '1024x768' })
-    // 写入 shot
+    const url = await generateComicImage({ prompt, size: '1024x768', image: refImages })
     const shots = sb.shots.map((s) => (s.id === shot.id ? { ...s, keyframeUrl: url } : s))
     upsertStoryboard({ ...sb, shots, updatedAt: new Date().toISOString() })
     comicStoryboardVal.value = { ...sb, shots, updatedAt: new Date().toISOString() }
@@ -4996,6 +5055,47 @@ async function generateKeyframe(shot: Shot): Promise<void> {
   }
 }
 
+const videoDurationSeconds = ref(5)
+
+async function generateVideo(shot: Shot): Promise<void> {
+  if (videoGenningId.value) return
+  const sb = comicStoryboard.value
+  if (!sb) return
+  videoGenningId.value = shot.id
+  try {
+    const sceneDesc = shot.sceneDescription ?? (shot.sceneId ? sceneNameById(shot.sceneId) : '')
+    const dialogue = shot.dialogue ? `台词：「${shot.dialogue}」` : ''
+    const parts = [shot.action ?? '', sceneDesc, dialogue, shot.emotion ? `情绪：${shot.emotion}` : ''].filter(Boolean)
+    const prompt = `动画场景：${parts.join('。')}。纯画面无语音，无声，无画外音，只展示视觉画面。`
+    const keyframe = shot.keyframeUrl || undefined
+    const videoId = await createComicVideo(prompt, keyframe, videoDurationSeconds.value)
+    if (videoPollTimer) clearInterval(videoPollTimer)
+    videoPollTimer = setInterval(async () => {
+      try {
+        const result = await pollVideoStatus(videoId)
+        if (result.status === 'completed' && result.url) {
+          if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null }
+          const shots = sb.shots.map((s) => (s.id === shot.id ? { ...s, clipUrl: result.url } : s))
+          upsertStoryboard({ ...sb, shots, updatedAt: new Date().toISOString() })
+          comicStoryboardVal.value = { ...sb, shots, updatedAt: new Date().toISOString() }
+          videoGenningId.value = ''
+        } else if (result.status === 'failed') {
+          if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null }
+          window.alert('视频生成失败')
+          videoGenningId.value = ''
+        }
+      } catch { /* poll error, retry */ }
+    }, 5000)
+  } catch (e) {
+    videoGenningId.value = ''
+    window.alert(e instanceof Error ? e.message : '创建视频任务失败')
+  }
+}
+
+onUnmounted(() => {
+  if (videoPollTimer) clearInterval(videoPollTimer)
+})
+
 /** 返回当前选定画风的英文提示词后缀（空串=未选） */
 function visualStyleSuffix(): string {
   const id = (novel.value?.visualStyle ?? '').trim()
@@ -5005,17 +5105,17 @@ function visualStyleSuffix(): string {
   return preset ? `，视觉风格：${preset.en}。重要——整张图必须严格采用此画风。` : ''
 }
 
-const selectedVisualStyle = computed({
-  get: () => (novel.value?.visualStyle ?? '') as VisualStyleId | '',
-  set: (_val: VisualStyleId | '') => {
-    // setter handled by saveVisualStyle
-  },
-})
+const selectedVisualStyle = ref<VisualStyleId | ''>('')
+// 初始化：作品打开/切换时同步
+watch(() => novel.value?.visualStyle, (val) => {
+  selectedVisualStyle.value = (val ?? '') as VisualStyleId | ''
+}, { immediate: true })
 
-function saveVisualStyle(): void {
+function saveVisualStyle(val: VisualStyleId | ''): void {
   const n = novel.value
   if (!n) return
-  upsertNovelRecord({ ...n, visualStyle: selectedVisualStyle.value, updatedAt: new Date().toISOString() })
+  selectedVisualStyle.value = val
+  upsertNovelRecord({ ...n, visualStyle: val, updatedAt: new Date().toISOString() })
 }
 
 function buildScenePrompt(scene: Scene): string {
@@ -5103,6 +5203,20 @@ async function adjustSceneImage(scene: Scene): Promise<void> {
 const charGenningKey = ref<string>('')   // 形如 `${characterId}:${kind}`
 const charGenError = ref<string>('')
 const charAdjustText = ref('')
+const charDescInput = ref('')
+const charPreviewUrl = ref('')
+
+async function generateAllCharViews(c: Character): Promise<void> {
+  if (charGenningKey.value || !c) return
+  charGenError.value = ''
+  // 先生成正面
+  await generateCharacterView(c, 'front')
+  if (charGenError.value) return
+  // 再用正面锁角色，生成侧面
+  await generateCharacterView(c, 'side')
+  if (charGenError.value) return
+  await generateCharacterView(c, 'back')
+}
 
 const CHAR_VIEW_KINDS: Array<{ kind: string; label: string; angle: string }> = [
   { kind: 'front', label: '正面', angle: '正面全身像，面向镜头' },
@@ -5111,6 +5225,8 @@ const CHAR_VIEW_KINDS: Array<{ kind: string; label: string; angle: string }> = [
 ]
 
 function charBaseDesc(c: Character): string {
+  const manual = charDescInput.value.trim()
+  if (manual) return `${c.name}。${manual}`
   const parts: string[] = []
   if (c.gender) parts.push(c.gender)
   if (c.age) parts.push(`${c.age}`)
@@ -11352,82 +11468,193 @@ onUnmounted(() => {
 .ws-comic-shots__header {
   font-weight: 600;
   font-size: 0.9rem;
-  margin-bottom: 8px;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
 }
-.ws-comic-shot {
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 10px 14px;
-  margin-bottom: 8px;
-  background: var(--color-surface);
+.ws-shot-card {
   display: flex;
-  gap: 12px;
+  gap: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: var(--color-surface);
 }
-.ws-comic-shot__index {
-  font-weight: 700;
-  font-size: 1.1rem;
-  color: var(--color-primary);
-  flex-shrink: 0;
-  min-width: 28px;
+.ws-shot-card__media { flex-shrink: 0; width: 220px; }
+.ws-shot-card__frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface-muted) 55%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.ws-comic-shot__body {
+.ws-shot-card__frame img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.ws-shot-card__frame video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+.ws-shot-card__frame-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  color: var(--color-text-muted); opacity: 0.5; font-size: 0.78rem;
+}
+.ws-shot-card__frame-empty i { font-size: 1.6rem; }
+.ws-shot-card__num {
+  position: absolute; top: 8px; left: 8px;
+  background: color-mix(in srgb, #000 60%, transparent);
+  color: #fff; font-size: 0.74rem; font-weight: 700; padding: 2px 9px; border-radius: 10px;
+}
+.ws-shot-card__shottype {
+  position: absolute; bottom: 8px; right: 8px;
+  background: color-mix(in srgb, #000 50%, transparent);
+  color: #fff; font-size: 0.7rem; padding: 2px 8px; border-radius: 8px;
+}
+.ws-shot-card__main {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ws-shot-card__action { margin: 0; font-size: 0.92rem; line-height: 1.55; color: var(--color-text); }
+.ws-shot-card__dialogue {
+  margin: 0; font-size: 0.88rem; line-height: 1.5;
+  color: var(--color-accent, #7c3aed); font-weight: 500;
+  padding-left: 10px; border-left: 3px solid color-mix(in srgb, var(--color-accent, #7c3aed) 40%, transparent);
+}
+.ws-shot-card__tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-shot-card__tag {
+  font-size: 0.74rem; padding: 2px 9px; border-radius: 12px;
+  background: var(--color-surface-muted); color: var(--color-text-muted);
+}
+.ws-shot-card__tag--scene { background: color-mix(in srgb, #22c55e 14%, transparent); color: #166534; }
+.ws-shot-card__tag--char { background: color-mix(in srgb, #3b82f6 14%, transparent); color: #1e40af; }
+.ws-shot-card__tag--item { background: color-mix(in srgb, #f59e0b 14%, transparent); color: #92400e; }
+.ws-shot-card__actions {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-top: auto; padding-top: 6px;
+}
+.ws-shot-card__btn {
+  font-size: 0.8rem; padding: 6px 14px;
+  border: 1px solid var(--color-border-strong); border-radius: 8px;
+  background: var(--color-surface); color: var(--color-text);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  transition: border-color 0.16s, color 0.16s;
+}
+.ws-shot-card__btn:hover:not(:disabled) { border-color: var(--color-primary); color: var(--color-primary); }
+.ws-shot-card__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ws-shot-card__btn--accent { border-color: color-mix(in srgb, var(--color-success, #22c55e) 60%, transparent); color: var(--color-success, #22c55e); }
+.ws-shot-card__btn--accent:hover:not(:disabled) { border-color: var(--color-success, #22c55e); color: var(--color-success, #22c55e); }
+.ws-shot-card__dur {
+  font-size: 0.78rem; padding: 5px 8px;
+  border: 1px solid var(--color-border); border-radius: 7px;
+  background: var(--color-surface); color: var(--color-text);
+}
+@media (max-width: 720px) {
+  .ws-shot-card { flex-direction: column; }
+  .ws-shot-card__media { width: 100%; }
+}
+.ws-char-studio { padding: 20px 24px; }
+.ws-char-studio__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.ws-char-studio__heading { display: flex; flex-direction: column; gap: 2px; }
+.ws-char-studio__eyebrow { font-size: 0.72rem; letter-spacing: 0.08em; color: var(--color-text-muted); text-transform: uppercase; }
+.ws-char-studio__name { margin: 0; font-size: 1.1rem; font-weight: 700; }
+.ws-char-studio__bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+.ws-char-studio__desc-input {
   flex: 1;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  transition: border-color 0.16s, box-shadow 0.16s;
+}
+.ws-char-studio__desc-input::placeholder { color: var(--color-text-muted); }
+.ws-char-studio__desc-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+.ws-char-studio__gen-all { flex-shrink: 0; font-size: 0.86rem; padding: 9px 18px; display: inline-flex; align-items: center; gap: 6px; }
+.ws-char-studio__row {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+}
+.ws-char-studio__slot {
+  flex: 1 1 0;
+  max-width: 200px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
-.ws-comic-shot__action {
-  margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-.ws-comic-shot__dialogue {
-  margin: 0;
-  font-size: 0.88rem;
-  color: var(--color-accent, #7c3aed);
-  font-weight: 500;
-}
-.ws-comic-shot__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.ws-comic-shot__tag {
-  font-size: 0.76rem;
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: var(--color-surface-muted);
-  color: var(--color-text-muted);
-}
-.ws-comic-shot__tag--scene { background: color-mix(in srgb, #22c55e 12%, transparent); color: #166534; }
-.ws-comic-shot__tag--char { background: color-mix(in srgb, #3b82f6 12%, transparent); color: #1e40af; }
-.ws-comic-shot__tag--item { background: color-mix(in srgb, #f59e0b 12%, transparent); color: #92400e; }
-.ws-comic-shot__tag--shot { background: color-mix(in srgb, #ec4899 12%, transparent); color: #9d174d; }
-.ws-comic-shot__kf {
+.ws-char-studio__canvas {
+  position: relative;
   width: 100%;
-  max-height: 240px;
-  object-fit: cover;
-  border-radius: 8px;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
-  margin-top: 4px;
+  background: color-mix(in srgb, var(--color-surface-muted) 55%, transparent);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.ws-comic-shot__kf-btn {
+.ws-char-studio__canvas.is-loading { border-color: var(--color-primary); }
+.ws-char-studio__canvas img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; transition: transform 0.2s; }
+.ws-char-studio__canvas img:hover { transform: scale(1.03); }
+.ws-char-studio__empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  color: var(--color-text-muted); opacity: 0.5; font-size: 0.78rem;
+}
+.ws-char-studio__empty i { font-size: 1.6rem; }
+.ws-char-studio__badge {
+  position: absolute; top: 8px; left: 8px;
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #fff; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px;
+}
+.ws-char-studio__loading {
+  position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  display: flex; align-items: center; justify-content: center;
+}
+.ws-char-studio__spinner {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border-top-color: var(--color-primary);
+  animation: ws-char-spin 0.8s linear infinite;
+}
+@keyframes ws-char-spin { to { transform: rotate(360deg); } }
+.ws-char-studio__regen {
   font-size: 0.78rem;
-  padding: 4px 10px;
+  padding: 5px 0;
   border: 1px solid var(--color-border-strong);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--color-surface);
   color: var(--color-text);
   cursor: pointer;
-  align-self: flex-end;
-  margin-top: 4px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  transition: border-color 0.16s, color 0.16s;
 }
-.ws-comic-shot__kf-btn:hover:not(:disabled) {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+.ws-char-studio__regen:hover:not(:disabled) { border-color: var(--color-primary); color: var(--color-primary); }
+.ws-char-studio__regen:disabled { opacity: 0.45; cursor: not-allowed; }
+.ws-char-studio__tip { margin: 16px 0 0; font-size: 0.76rem; color: var(--color-text-muted); text-align: center; }
+.ws-char-studio__error { margin: 10px 0 0; font-size: 0.84rem; color: var(--color-danger); display: flex; align-items: center; gap: 6px; }
+.ws-char-preview {
+  position: fixed; inset: 0; z-index: 5000;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out; padding: 32px;
 }
-.ws-comic-shot__kf-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.ws-char-preview img { max-width: 90vw; max-height: 90vh; border-radius: 10px; box-shadow: 0 12px 48px rgba(0,0,0,0.5); }
 </style>

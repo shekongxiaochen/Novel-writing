@@ -1,6 +1,7 @@
 pub mod ai_service;
 pub mod ai_provider_service;
 pub mod image_provider_service;
+pub mod video_provider_service;
 pub mod auto_apply_log_service;
 pub mod card_key_service;
 pub mod character_state_service;
@@ -20,6 +21,7 @@ pub mod wallet_units;
 pub use ai_service::AiService;
 pub use ai_provider_service::AiProviderService;
 pub use image_provider_service::ImageProviderService;
+pub use video_provider_service::VideoProviderService;
 pub use app_state::AppState;
 pub use auth_service::AuthService;
 pub use cache_service::CacheService;

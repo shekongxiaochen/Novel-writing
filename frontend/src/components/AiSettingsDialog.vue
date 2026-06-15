@@ -1,4 +1,5 @@
 <template>
+  <Transition :name="inline ? '' : 'ai-settings-dialog-pop'">
   <div
     v-if="inline || open"
     class="ai-settings-dialog"
@@ -84,6 +85,7 @@
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">

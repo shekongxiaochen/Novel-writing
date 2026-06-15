@@ -48,3 +48,31 @@ export async function generateComicImage(input: GenImageInput): Promise<string> 
   if (!parsed.url) throw new Error('生图响应中没有图片 URL')
   return parsed.url
 }
+
+/** 创建视频任务，返回 video_id。seconds 可选 3/5/10/18。 */
+export async function createComicVideo(prompt: string, keyframeUrl?: string, seconds?: number): Promise<string> {
+  const session = getCurrentSession()
+  if (!session?.token) throw new Error('请先登录后再使用生视频功能')
+  const resp = await fetch(`${API_BASE_URL}/comic/gen-video`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
+    body: JSON.stringify({ prompt, image: keyframeUrl ? [keyframeUrl] : [], seconds }),
+  })
+  const text = await resp.text()
+  if (!resp.ok) throw new Error(`创建视频任务失败: ${text.slice(0, 200)}`)
+  const parsed = JSON.parse(text) as { video_id?: string }
+  if (!parsed.video_id) throw new Error('响应中没有 video_id')
+  return parsed.video_id
+}
+
+/** 轮询视频状态，返回 {status, url?} */
+export async function pollVideoStatus(videoId: string): Promise<{ status: string; url?: string }> {
+  const session = getCurrentSession()
+  if (!session?.token) throw new Error('请先登录')
+  const resp = await fetch(`${API_BASE_URL}/comic/video-status?video_id=${encodeURIComponent(videoId)}`, {
+    headers: { Authorization: `Bearer ${session.token}` },
+  })
+  const text = await resp.text()
+  if (!resp.ok) throw new Error(`查询视频状态失败: ${text.slice(0, 200)}`)
+  return JSON.parse(text) as { status: string; url?: string }
+}
