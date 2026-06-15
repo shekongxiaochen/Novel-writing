@@ -4845,7 +4845,8 @@ function visualStyleSuffix(): string {
   const id = (novel.value?.visualStyle ?? '').trim()
   if (!id) return ''
   const preset = VISUAL_STYLE_PRESETS.find((p) => p.id === id)
-  return preset ? `, in ${preset.en} style` : ''
+  // 画风指令前置并加重语气，避免被中文描述淹没
+  return preset ? `，视觉风格：${preset.en}。重要——整张图必须严格采用此画风。` : ''
 }
 
 const selectedVisualStyle = computed({
@@ -4865,14 +4866,15 @@ function buildScenePrompt(scene: Scene): string {
   const desc = scene.description.trim()
   // 强引导为「动画背景美术 / 建立镜头」而非有焦点主体的插画：
   // 广角空镜、无人物、纵深开阔、中前景留白可放角色。
+  const vs = visualStyleSuffix()
   return [
     `${scene.name}。${desc}。`,
-    '动画场景背景美术，建立镜头（establishing shot），广角，开阔纵深，',
-    '环境氛围渲染，电影级布光，丰富的环境细节，',
+    vs,
+    '场景背景美术，建立镜头（establishing shot），广角，开阔纵深，',
+    '环境氛围渲染，丰富的环境细节，',
     '画面为空镜——不要出现任何人物或角色，不要有单一焦点主体，',
     '构图为可供角色站位演出的舞台背景，中前景留白。',
-    visualStyleSuffix(),
-  ].join('')
+  ].filter(Boolean).join('')
 }
 
 /** 形象历史最多保留 3 张，多的丢弃不入库 */
@@ -4923,7 +4925,8 @@ async function adjustSceneImage(scene: Scene): Promise<void> {
   try {
     // 「你的话优先」：用户要求独立成句、放最前、占绝对主导，
     // 只挂一句最低限度约束（仍是场景背景、无人物），不堆模板词稀释诉求。
-    const prompt = `${instruction}。（这是一张场景背景图，按上面的要求修改它，保持是无人物的场景背景。）`
+    const vs = visualStyleSuffix()
+    const prompt = `${vs ? vs + '。' : ''}${instruction}。（这是一张场景背景图，按上面的要求修改它，保持是无人物的场景背景。）`
     const url = await generateComicImage({ prompt, size: '1024x768', image: [baseUrl] })
     const view = { id: `view-${Date.now()}`, kind: 'establishing', imageUrl: url, description: scene.description.trim(), prompt }
     const existing = Array.isArray(scene.views) ? scene.views : []
@@ -4993,11 +4996,13 @@ async function generateCharacterView(c: Character, kind: string): Promise<void> 
     const style = (c.stylePrompt ?? '').trim()
     if (kind === 'front') {
       const vs = visualStyleSuffix()
-      const prompt = `${desc}。${meta.angle}。${style ? style + '。' : ''}角色设定立绘，白色背景，全身，动画角色设计，清晰一致的人物外观。${vs ? `画风：${vs.slice(2)}` : ''}`
+      const parts = [desc, meta.angle, style, vs, '角色设定立绘，白色背景，全身，清晰一致的人物外观。'].filter(Boolean)
+      const prompt = parts.join('。')
       url = await generateComicImage({ prompt, size: '768x1024' })
     } else {
       const vs = visualStyleSuffix()
-      const prompt = `保持与参考图完全相同的角色（同样的脸、发型、服饰、配色），改为${meta.angle}。角色设定立绘，白色背景，全身。${vs}`
+      const parts = [`保持与参考图完全相同的角色（同样的脸、发型、服饰、配色），改为${meta.angle}。`, vs, '角色设定立绘，白色背景，全身。'].filter(Boolean)
+      const prompt = parts.join('')
       url = await generateComicImage({ prompt, size: '768x1024', image: [frontImg] })
     }
     const view: AssetView = { id: `cv-${Date.now()}`, kind, imageUrl: url, description: `${c.name}·${meta.label}`, prompt: meta.angle }
