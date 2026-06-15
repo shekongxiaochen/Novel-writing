@@ -3312,6 +3312,28 @@
                 <button type="button" class="btn-as-link ws-scene-detail__del" @click="removeScene(sceneDetail); closeSceneDetail()">删除</button>
               </div>
 
+              <div v-if="sceneDetailImage" class="ws-scene-detail__adjust">
+                <span class="ws-scene-detail__adjust-label">不满意？告诉 AI 怎么改（在当前图上调整）</span>
+                <div class="ws-scene-detail__adjust-row">
+                  <input
+                    v-model="sceneAdjustText"
+                    class="ws-scene-form__input"
+                    maxlength="200"
+                    placeholder="如：光线再暗一点 / 加点晨雾 / 换成黄昏 / 多些树木"
+                    :disabled="sceneGenningId === sceneDetail.id"
+                    @keydown.enter.prevent="adjustSceneImage(sceneDetail)"
+                  />
+                  <button
+                    type="button"
+                    class="btn-primary"
+                    :disabled="sceneGenningId === sceneDetail.id || !sceneAdjustText.trim()"
+                    @click="adjustSceneImage(sceneDetail)"
+                  >
+                    {{ sceneGenningId === sceneDetail.id ? '调整中…' : '调整' }}
+                  </button>
+                </div>
+              </div>
+
               <div v-if="sceneDetail.views && sceneDetail.views.length > 1" class="ws-scene-detail__history">
                 <span class="ws-scene-detail__history-label">历史形象</span>
                 <div class="ws-scene-detail__thumbs">
@@ -3605,6 +3627,7 @@ const sceneFormName = ref('')
 const sceneFormDescription = ref('')
 const sceneGenningId = ref<string>('')
 const sceneGenError = ref<string>('')
+const sceneAdjustText = ref('')
 const sceneDetail = ref<Scene | null>(null)
 const sceneDetailImage = computed(() => {
   const v = sceneDetail.value?.views
@@ -4771,6 +4794,19 @@ function closeSceneDetail(): void {
   sceneDetail.value = null
 }
 
+function buildScenePrompt(scene: Scene): string {
+  const desc = scene.description.trim()
+  // 强引导为「动画背景美术 / 建立镜头」而非有焦点主体的插画：
+  // 广角空镜、无人物、纵深开阔、中前景留白可放角色。
+  return [
+    `${scene.name}。${desc}。`,
+    '动画场景背景美术，建立镜头（establishing shot），广角，开阔纵深，',
+    '环境氛围渲染，电影级布光，丰富的环境细节，',
+    '画面为空镜——不要出现任何人物或角色，不要有单一焦点主体，',
+    '构图为可供角色站位演出的舞台背景，中前景留白。',
+  ].join('')
+}
+
 async function generateSceneImage(scene: Scene): Promise<void> {
   if (sceneGenningId.value) return
   const desc = scene.description.trim()
@@ -4781,7 +4817,7 @@ async function generateSceneImage(scene: Scene): Promise<void> {
   sceneGenningId.value = scene.id
   sceneGenError.value = ''
   try {
-    const prompt = `${scene.name}。${desc}。场景概念图，电影感，丰富细节，无人物。`
+    const prompt = buildScenePrompt(scene)
     const url = await generateComicImage({ prompt, size: '1024x768' })
     const view = { id: `view-${Date.now()}`, kind: 'establishing', imageUrl: url, description: desc, prompt }
     const existing = Array.isArray(scene.views) ? scene.views : []
@@ -4792,6 +4828,42 @@ async function generateSceneImage(scene: Scene): Promise<void> {
     }
   } catch (e) {
     sceneGenError.value = e instanceof Error ? e.message : '生成失败'
+  } finally {
+    sceneGenningId.value = ''
+  }
+}
+
+async function adjustSceneImage(scene: Scene): Promise<void> {
+  if (sceneGenningId.value) return
+  const instruction = sceneAdjustText.value.trim()
+  if (!instruction) {
+    sceneGenError.value = '请先输入调整要求'
+    return
+  }
+  const baseUrl = sceneDetailImage.value
+  if (!baseUrl) {
+    sceneGenError.value = '请先生成形象后再调整'
+    return
+  }
+  sceneGenningId.value = scene.id
+  sceneGenError.value = ''
+  try {
+    // 图生图：以当前图为参考，按用户要求微调，保持原构图与场景主体
+    const prompt = [
+      `在保持原场景构图、视角与主体布局的前提下进行调整：${instruction}。`,
+      '仍为动画场景背景空镜，无人物，无单一焦点主体，保留可供角色站位的留白。',
+    ].join('')
+    const url = await generateComicImage({ prompt, size: '1024x768', image: [baseUrl] })
+    const view = { id: `view-${Date.now()}`, kind: 'establishing', imageUrl: url, description: scene.description.trim(), prompt }
+    const existing = Array.isArray(scene.views) ? scene.views : []
+    updateScene({ id: scene.id, views: [...existing, view] })
+    if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
+    if (sceneDetail.value && sceneDetail.value.id === scene.id) {
+      sceneDetail.value = scenes.value.find((s) => s.id === scene.id) ?? sceneDetail.value
+    }
+    sceneAdjustText.value = ''
+  } catch (e) {
+    sceneGenError.value = e instanceof Error ? e.message : '调整失败'
   } finally {
     sceneGenningId.value = ''
   }
@@ -10657,6 +10729,27 @@ onUnmounted(() => {
   margin: 0;
   font-size: 0.85rem;
   color: var(--color-danger, #e53935);
+}
+.ws-scene-detail__adjust {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+.ws-scene-detail__adjust-label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.ws-scene-detail__adjust-row {
+  display: flex;
+  gap: 8px;
+}
+.ws-scene-detail__adjust-row .ws-scene-form__input {
+  flex: 1;
+}
+.ws-scene-detail__adjust-row .btn-primary {
+  flex-shrink: 0;
 }
 .ws-scene-detail__actions {
   display: flex;
