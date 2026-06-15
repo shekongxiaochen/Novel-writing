@@ -1592,6 +1592,17 @@
             <span>{{ itemFirstAppearanceLabel(item) }}</span>
           </div>
           <p class="workspace-item-card__summary">{{ item.summary || '暂无简介' }}</p>
+          <div class="workspace-item-card__image">
+            <img v-if="itemImage(item)" :src="itemImage(item)" :alt="item.name" class="workspace-item-card__thumb" />
+            <button
+              type="button"
+              class="workspace-item-card__gen-btn"
+              :disabled="itemGenningId === item.id"
+              @click.stop="generateItemImage(item)"
+            >
+              {{ itemGenningId === item.id ? '生成中…' : (itemImage(item) ? '重新生成' : '生成形象') }}
+            </button>
+          </div>
           <div v-if="(item.attributes?.length ?? 0) > 0" class="workspace-item-card__attrs">
             <span v-for="attr in item.attributes" :key="attr.id" class="workspace-item-card__attr">
               <strong>{{ attr.key }}</strong>
@@ -6833,6 +6844,38 @@ function removeItemEditRow(id: string): void {
   if (i >= 0) itemEditDraft.attributes.splice(i, 1)
 }
 
+// ── 物品形象生成 ──
+const itemGenningId = ref<string>('')
+
+function itemImage(item: Item): string {
+  const v = item.views?.[item.views.length - 1]
+  return v?.imageUrl || ''
+}
+
+async function generateItemImage(item: Item): Promise<void> {
+  if (itemGenningId.value) return
+  const summary = item.summary.trim()
+  if (!summary) {
+    window.alert('请先填写物品简介，描述它的外观')
+    return
+  }
+  itemGenningId.value = item.id
+  try {
+    const vs = visualStyleSuffix()
+    const parts = [item.name, summary, vs, '物品设定图，白色背景，清晰展示物品外观与细节。'].filter(Boolean)
+    const prompt = parts.join('。')
+    const url = await generateComicImage({ prompt, size: '768x1024' })
+    const view: AssetView = { id: `iv-${Date.now()}`, kind: 'main', imageUrl: url, description: summary, prompt }
+    const views = Array.isArray(item.views) ? item.views : []
+    updateItem({ id: item.id, views: [...views, view].slice(-3) })
+    if (novelId.value) items.value = getItemsByNovelId(novelId.value)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '生成失败')
+  } finally {
+    itemGenningId.value = ''
+  }
+}
+
 function parseAttributesInput(
   attrs: CharacterAttribute[]
 ): { ok: true; value: CharacterAttribute[] } | { ok: false; message: string } {
@@ -11116,5 +11159,38 @@ onUnmounted(() => {
 }
 .char-figure__head .char-figure__title {
   margin: 0;
+}
+
+.workspace-item-card__image {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 8px;
+}
+.workspace-item-card__thumb {
+  width: 80px;
+  height: 107px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+.workspace-item-card__gen-btn {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: center;
+}
+.workspace-item-card__gen-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.workspace-item-card__gen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>
