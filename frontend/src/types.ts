@@ -37,9 +37,11 @@ export type Novel = {
 export type Shot = {
   id: string
   order: number
-  /** 本镜头在哪个场景 */
+  /** 本镜头在哪个场景（已有素材） */
   sceneId?: string
   sceneViewId?: string
+  /** 场景文字描述（无对应素材时，AI 自由描述） */
+  sceneDescription?: string
   /** 出场角色 */
   characterIds?: string[]
   /** 每个出场角色用哪个视图（正/侧/背…） */

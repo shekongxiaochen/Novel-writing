@@ -3304,6 +3304,7 @@
               <p v-if="shot.dialogue" class="ws-comic-shot__dialogue">「{{ shot.dialogue }}」</p>
               <div class="ws-comic-shot__meta">
                 <span v-if="shot.sceneId" class="ws-comic-shot__tag ws-comic-shot__tag--scene">📍 {{ sceneNameById(shot.sceneId) }}</span>
+                <span v-else-if="shot.sceneDescription" class="ws-comic-shot__tag ws-comic-shot__tag--scene">📍 {{ shot.sceneDescription }}</span>
                 <span v-for="cid in shot.characterIds" :key="cid" class="ws-comic-shot__tag ws-comic-shot__tag--char">👤 {{ charNameById(cid) }}</span>
                 <span v-for="iid in shot.itemIds" :key="iid" class="ws-comic-shot__tag ws-comic-shot__tag--item">📦 {{ itemNameById(iid) }}</span>
                 <span v-if="shot.shotType" class="ws-comic-shot__tag ws-comic-shot__tag--shot">🎬 {{ shotTypeLabel(shot.shotType) }}</span>
