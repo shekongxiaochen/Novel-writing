@@ -4807,6 +4807,11 @@ function buildScenePrompt(scene: Scene): string {
   ].join('')
 }
 
+/** 形象历史最多保留 3 张，多的丢弃不入库 */
+function capSceneViews(views: NonNullable<Scene['views']>): NonNullable<Scene['views']> {
+  return views.slice(-3)
+}
+
 async function generateSceneImage(scene: Scene): Promise<void> {
   if (sceneGenningId.value) return
   const desc = scene.description.trim()
@@ -4821,7 +4826,7 @@ async function generateSceneImage(scene: Scene): Promise<void> {
     const url = await generateComicImage({ prompt, size: '1024x768' })
     const view = { id: `view-${Date.now()}`, kind: 'establishing', imageUrl: url, description: desc, prompt }
     const existing = Array.isArray(scene.views) ? scene.views : []
-    updateScene({ id: scene.id, views: [...existing, view] })
+    updateScene({ id: scene.id, views: capSceneViews([...existing, view]) })
     if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
     if (sceneDetail.value && sceneDetail.value.id === scene.id) {
       sceneDetail.value = scenes.value.find((s) => s.id === scene.id) ?? sceneDetail.value
@@ -4848,15 +4853,18 @@ async function adjustSceneImage(scene: Scene): Promise<void> {
   sceneGenningId.value = scene.id
   sceneGenError.value = ''
   try {
-    // 图生图：以当前图为参考，按用户要求微调，保持原构图与场景主体
+    // 图生图：先强调"要改什么"，再说"要保留什么"（agnes 推荐结构），
+    // 改动诉求放在最前、占主导，避免模型过度保守导致看不出变化。
     const prompt = [
-      `在保持原场景构图、视角与主体布局的前提下进行调整：${instruction}。`,
-      '仍为动画场景背景空镜，无人物，无单一焦点主体，保留可供角色站位的留白。',
+      `修改这张场景背景图：${instruction}。`,
+      `明显地体现上述改动。`,
+      `保留原图的整体构图、机位视角与主要建筑/地形结构；`,
+      `仍为动画场景背景空镜，画面中不要出现人物或角色。`,
     ].join('')
     const url = await generateComicImage({ prompt, size: '1024x768', image: [baseUrl] })
     const view = { id: `view-${Date.now()}`, kind: 'establishing', imageUrl: url, description: scene.description.trim(), prompt }
     const existing = Array.isArray(scene.views) ? scene.views : []
-    updateScene({ id: scene.id, views: [...existing, view] })
+    updateScene({ id: scene.id, views: capSceneViews([...existing, view]) })
     if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
     if (sceneDetail.value && sceneDetail.value.id === scene.id) {
       sceneDetail.value = scenes.value.find((s) => s.id === scene.id) ?? sceneDetail.value
