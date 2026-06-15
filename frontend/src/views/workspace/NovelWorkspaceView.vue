@@ -1181,7 +1181,13 @@
               >
                 <template #body-extra>
                   <section v-if="selectedGraphCharacter" class="char-figure">
-                    <h4 class="char-figure__title">角色形象（漫剧用）</h4>
+                    <div class="char-figure__head">
+                      <h4 class="char-figure__title">角色形象（漫剧用）</h4>
+                      <select v-if="novel" v-model="selectedVisualStyle" class="ws-style-picker ws-style-picker--sm" @change="saveVisualStyle">
+                        <option value="">🎨 未选画风</option>
+                        <option v-for="p in VISUAL_STYLE_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                      </select>
+                    </div>
                     <div class="char-figure__views">
                       <div v-for="meta in CHAR_VIEW_KINDS" :key="meta.kind" class="char-figure__view">
                         <div class="char-figure__thumb">
@@ -3213,6 +3219,10 @@
       <div class="workspace-items-hero">
         <h2>场景</h2>
         <div class="workspace-items-hero__actions">
+          <select v-if="novel" v-model="selectedVisualStyle" class="ws-style-picker" @change="saveVisualStyle">
+            <option value="">🎨 未选画风</option>
+            <option v-for="p in VISUAL_STYLE_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+          </select>
           <button type="button" class="btn-primary workspace-items-hero__btn" @click="openSceneCreate">新增场景</button>
         </div>
       </div>
@@ -3498,7 +3508,9 @@ import type {
   OutlineTension,
   TimelineEvent,
   WorldSetting,
+  VisualStyleId,
 } from '../../types'
+import { VISUAL_STYLE_PRESETS } from '../../types'
 import CharacterGraphRelationToolbar from '../../components/CharacterGraphRelationToolbar.vue'
 import CharacterRelationSphere from '../../components/CharacterRelationSphere.vue'
 import CharacterRelationFocusSphere from '../../components/CharacterRelationFocusSphere.vue'
@@ -4828,6 +4840,27 @@ function closeSceneDetail(): void {
   sceneDetail.value = null
 }
 
+/** 返回当前选定画风的英文提示词后缀（空串=未选） */
+function visualStyleSuffix(): string {
+  const id = (novel.value?.visualStyle ?? '').trim()
+  if (!id) return ''
+  const preset = VISUAL_STYLE_PRESETS.find((p) => p.id === id)
+  return preset ? `, in ${preset.en} style` : ''
+}
+
+const selectedVisualStyle = computed({
+  get: () => (novel.value?.visualStyle ?? '') as VisualStyleId | '',
+  set: (_val: VisualStyleId | '') => {
+    // setter handled by saveVisualStyle
+  },
+})
+
+function saveVisualStyle(): void {
+  const n = novel.value
+  if (!n) return
+  upsertNovelRecord({ ...n, visualStyle: selectedVisualStyle.value, updatedAt: new Date().toISOString() })
+}
+
 function buildScenePrompt(scene: Scene): string {
   const desc = scene.description.trim()
   // 强引导为「动画背景美术 / 建立镜头」而非有焦点主体的插画：
@@ -4838,6 +4871,7 @@ function buildScenePrompt(scene: Scene): string {
     '环境氛围渲染，电影级布光，丰富的环境细节，',
     '画面为空镜——不要出现任何人物或角色，不要有单一焦点主体，',
     '构图为可供角色站位演出的舞台背景，中前景留白。',
+    visualStyleSuffix(),
   ].join('')
 }
 
@@ -4958,10 +4992,12 @@ async function generateCharacterView(c: Character, kind: string): Promise<void> 
     let url: string
     const style = (c.stylePrompt ?? '').trim()
     if (kind === 'front') {
-      const prompt = `${desc}。${meta.angle}。${style ? style + '。' : ''}角色设定立绘，白色背景，全身，动画角色设计，清晰一致的人物外观。`
+      const vs = visualStyleSuffix()
+      const prompt = `${desc}。${meta.angle}。${style ? style + '。' : ''}角色设定立绘，白色背景，全身，动画角色设计，清晰一致的人物外观。${vs ? `画风：${vs.slice(2)}` : ''}`
       url = await generateComicImage({ prompt, size: '768x1024' })
     } else {
-      const prompt = `保持与参考图完全相同的角色（同样的脸、发型、服饰、配色），改为${meta.angle}。角色设定立绘，白色背景，全身。`
+      const vs = visualStyleSuffix()
+      const prompt = `保持与参考图完全相同的角色（同样的脸、发型、服饰、配色），改为${meta.angle}。角色设定立绘，白色背景，全身。${vs}`
       url = await generateComicImage({ prompt, size: '768x1024', image: [frontImg] })
     }
     const view: AssetView = { id: `cv-${Date.now()}`, kind, imageUrl: url, description: `${c.name}·${meta.label}`, prompt: meta.angle }
@@ -11050,5 +11086,30 @@ onUnmounted(() => {
   margin: 6px 0 0;
   font-size: 0.8rem;
   color: var(--color-danger, #e53935);
+}
+
+/* 画风选择器 */
+.ws-style-picker {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.ws-style-picker--sm {
+  padding: 3px 8px;
+  font-size: 0.76rem;
+}
+.char-figure__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.char-figure__head .char-figure__title {
+  margin: 0;
 }
 </style>

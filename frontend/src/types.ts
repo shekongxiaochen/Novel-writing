@@ -26,9 +26,24 @@ export type Novel = {
   isMultiLineNarrative: boolean
   /** AI 写作自定义风格提示词（持久注入续写/大纲 AI 的系统提示词） */
   aiStylePrompt: string
+  /** 漫剧：统一视觉画风，所有角色/物品/场景形象生成时自动注入 */
+  visualStyle?: string
   createdAt: string
   updatedAt: string
 }
+
+/** 预设画风列表，每项提供中文标签与注入生成 prompt 的英文描述 */
+export const VISUAL_STYLE_PRESETS = [
+  { id: 'anime', label: '日系动漫', en: 'anime art style, cel-shaded, vibrant, clean lines, Japanese animation aesthetic' },
+  { id: 'realistic', label: '写实电影感', en: 'cinematic realism, photorealistic lighting, film-like, detailed textures, epic scale' },
+  { id: 'ink', label: '水墨古风', en: 'traditional Chinese ink wash painting style, soft brushstrokes, misty atmosphere, ethereal, monochrome with subtle color accents' },
+  { id: 'cyberpunk', label: '赛博朋克', en: 'cyberpunk aesthetic, neon lights, rain-soaked, high-tech low-life, gritty, Blade Runner style' },
+  { id: 'oil', label: '厚涂油画', en: 'digital oil painting, thick brushstrokes, rich textures, dramatic lighting, baroque composition' },
+  { id: 'lineart', label: '线稿插画', en: 'clean lineart illustration, minimal shading, sketch-like, manga page style, black and white with tone' },
+  { id: 'watercolor', label: '水彩', en: 'watercolor illustration, soft washes, translucent layers, dreamy, light pastel palette, poetic atmosphere' },
+] as const
+
+export type VisualStyleId = typeof VISUAL_STYLE_PRESETS[number]['id'] | ''
 
 export type NewNovelInput = {
   title: string
