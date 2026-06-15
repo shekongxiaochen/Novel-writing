@@ -4853,14 +4853,9 @@ async function adjustSceneImage(scene: Scene): Promise<void> {
   sceneGenningId.value = scene.id
   sceneGenError.value = ''
   try {
-    // 图生图：先强调"要改什么"，再说"要保留什么"（agnes 推荐结构），
-    // 改动诉求放在最前、占主导，避免模型过度保守导致看不出变化。
-    const prompt = [
-      `修改这张场景背景图：${instruction}。`,
-      `明显地体现上述改动。`,
-      `保留原图的整体构图、机位视角与主要建筑/地形结构；`,
-      `仍为动画场景背景空镜，画面中不要出现人物或角色。`,
-    ].join('')
+    // 「你的话优先」：用户要求独立成句、放最前、占绝对主导，
+    // 只挂一句最低限度约束（仍是场景背景、无人物），不堆模板词稀释诉求。
+    const prompt = `${instruction}。（这是一张场景背景图，按上面的要求修改它，保持是无人物的场景背景。）`
     const url = await generateComicImage({ prompt, size: '1024x768', image: [baseUrl] })
     const view = { id: `view-${Date.now()}`, kind: 'establishing', imageUrl: url, description: scene.description.trim(), prompt }
     const existing = Array.isArray(scene.views) ? scene.views : []
