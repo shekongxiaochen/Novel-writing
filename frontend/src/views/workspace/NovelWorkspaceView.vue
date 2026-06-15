@@ -3196,33 +3196,28 @@
         </div>
       </section>
 
-      <div v-else class="ws-scene-grid">
-        <article v-for="scene in scenes" :key="scene.id" class="ws-scene-card">
-          <header class="ws-scene-card__head">
-            <h3 class="ws-scene-card__name">{{ scene.name }}</h3>
-            <div class="ws-scene-card__actions">
-              <button type="button" class="btn-as-link" @click="openSceneEdit(scene)">编辑</button>
-              <button type="button" class="btn-as-link ws-scene-card__del" @click="removeScene(scene)">删除</button>
+      <div v-else class="ws-scene-gallery">
+        <article
+          v-for="scene in scenes"
+          :key="scene.id"
+          class="ws-scene-tile"
+          @click="openSceneDetail(scene)"
+        >
+          <div class="ws-scene-tile__name">{{ scene.name }}</div>
+          <div class="ws-scene-tile__thumb">
+            <img
+              v-if="scene.views && scene.views.length > 0 && scene.views[scene.views.length - 1].imageUrl"
+              :src="scene.views[scene.views.length - 1].imageUrl"
+              :alt="scene.name"
+            />
+            <div v-else class="ws-scene-tile__placeholder">
+              <i class="fa-solid fa-image"></i>
+              <span>暂无形象</span>
             </div>
-          </header>
-          <p class="ws-scene-card__desc">{{ scene.description || '暂无描述' }}</p>
-          <img
-            v-if="scene.views && scene.views.length > 0 && scene.views[scene.views.length - 1].imageUrl"
-            :src="scene.views[scene.views.length - 1].imageUrl"
-            alt="场景形象"
-            class="ws-scene-card__img"
-          />
-          <button
-            type="button"
-            class="btn-secondary ws-scene-card__gen"
-            :disabled="sceneGenningId === scene.id"
-            @click="generateSceneImage(scene)"
-          >
-            {{ sceneGenningId === scene.id ? '生成中…' : (scene.views && scene.views.length > 0 ? '重新生成形象' : 'AI 生成形象') }}
-          </button>
+          </div>
+          <p class="ws-scene-tile__desc">{{ scene.description || '暂无描述' }}</p>
         </article>
       </div>
-      <p v-if="sceneGenError" class="muted" style="color: var(--color-danger, #e53935); margin-top: 12px;">{{ sceneGenError }}</p>
     </section>
 
     <WorkspaceAiSidebar
@@ -3269,6 +3264,61 @@
                 <button type="submit" class="btn-primary" :disabled="!sceneFormName.trim()" style="min-width: 96px;">保存</button>
               </div>
             </form>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="confirm">
+      <div v-if="sceneDetail" class="confirm-overlay" @pointerdown.self="closeSceneDetail">
+        <div class="confirm-dialog ws-scene-detail" role="dialog" aria-modal="true" @pointerdown.stop>
+          <button type="button" class="ws-scene-detail__close" aria-label="关闭" @click="closeSceneDetail">&times;</button>
+          <div class="ws-scene-detail__body">
+            <div class="ws-scene-detail__main">
+              <img
+                v-if="sceneDetailImage"
+                :src="sceneDetailImage"
+                :alt="sceneDetail.name"
+                class="ws-scene-detail__img"
+              />
+              <div v-else class="ws-scene-detail__img ws-scene-detail__placeholder">
+                <i class="fa-solid fa-image"></i>
+                <span>暂无形象，点击下方按钮生成</span>
+              </div>
+            </div>
+            <div class="ws-scene-detail__side">
+              <h2 class="ws-scene-detail__name">{{ sceneDetail.name }}</h2>
+              <p class="ws-scene-detail__desc">{{ sceneDetail.description || '暂无描述' }}</p>
+
+              <p v-if="sceneGenError" class="ws-scene-detail__error">{{ sceneGenError }}</p>
+
+              <div class="ws-scene-detail__actions">
+                <button
+                  type="button"
+                  class="btn-primary"
+                  :disabled="sceneGenningId === sceneDetail.id"
+                  @click="generateSceneImage(sceneDetail)"
+                >
+                  {{ sceneGenningId === sceneDetail.id ? '生成中…' : (sceneDetailImage ? '重新生成形象' : 'AI 生成形象') }}
+                </button>
+                <button type="button" class="btn-secondary" @click="openSceneEdit(sceneDetail); closeSceneDetail()">编辑</button>
+                <button type="button" class="btn-as-link ws-scene-detail__del" @click="removeScene(sceneDetail); closeSceneDetail()">删除</button>
+              </div>
+
+              <div v-if="sceneDetail.views && sceneDetail.views.length > 1" class="ws-scene-detail__history">
+                <span class="ws-scene-detail__history-label">历史形象</span>
+                <div class="ws-scene-detail__thumbs">
+                  <img
+                    v-for="(v, i) in sceneDetail.views"
+                    :key="v.id || i"
+                    :src="v.imageUrl"
+                    :alt="`形象 ${i + 1}`"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -3550,6 +3600,12 @@ const sceneFormName = ref('')
 const sceneFormDescription = ref('')
 const sceneGenningId = ref<string>('')
 const sceneGenError = ref<string>('')
+const sceneDetail = ref<Scene | null>(null)
+const sceneDetailImage = computed(() => {
+  const v = sceneDetail.value?.views
+  if (!v || v.length === 0) return ''
+  return v[v.length - 1].imageUrl || ''
+})
 const categories = ref<Category[]>([])
 const categoryCreateName = ref('')
 const categoryCreateNotes = ref('')
@@ -4701,6 +4757,15 @@ function removeScene(scene: Scene): void {
   if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
 }
 
+function openSceneDetail(scene: Scene): void {
+  sceneDetail.value = scene
+  sceneGenError.value = ''
+}
+
+function closeSceneDetail(): void {
+  sceneDetail.value = null
+}
+
 async function generateSceneImage(scene: Scene): Promise<void> {
   if (sceneGenningId.value) return
   const desc = scene.description.trim()
@@ -4717,6 +4782,9 @@ async function generateSceneImage(scene: Scene): Promise<void> {
     const existing = Array.isArray(scene.views) ? scene.views : []
     updateScene({ id: scene.id, views: [...existing, view] })
     if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
+    if (sceneDetail.value && sceneDetail.value.id === scene.id) {
+      sceneDetail.value = scenes.value.find((s) => s.id === scene.id) ?? sceneDetail.value
+    }
   } catch (e) {
     sceneGenError.value = e instanceof Error ? e.message : '生成失败'
   } finally {
@@ -10440,56 +10508,181 @@ onUnmounted(() => {
   }
 }
 
-.ws-scene-grid {
+.ws-scene-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
 }
-.ws-scene-card {
+.ws-scene-tile {
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  padding: 14px 16px;
   background: var(--color-surface);
+  overflow: hidden;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.ws-scene-card__head {
+.ws-scene-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border-color: var(--color-border-strong);
+}
+.ws-scene-tile__name {
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-scene-tile__thumb {
+  aspect-ratio: 4 / 3;
+  background: color-mix(in srgb, var(--color-surface-muted) 60%, transparent);
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
-.ws-scene-card__name {
+.ws-scene-tile__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ws-scene-tile__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+.ws-scene-tile__placeholder i {
+  font-size: 1.6rem;
+  opacity: 0.5;
+}
+.ws-scene-tile__desc {
   margin: 0;
-  font-size: 1rem;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 场景详情弹窗 */
+.ws-scene-detail {
+  position: relative;
+  width: min(880px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: hidden;
+}
+.ws-scene-detail__close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-scene-detail__close:hover {
+  background: rgba(0, 0, 0, 0.55);
+}
+.ws-scene-detail__body {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  max-height: calc(100vh - 64px);
+}
+.ws-scene-detail__main {
+  background: #0d0d0d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+.ws-scene-detail__img {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100vh - 64px);
+  object-fit: contain;
+}
+.ws-scene-detail__placeholder {
+  flex-direction: column;
+  gap: 10px;
+  color: #888;
+  font-size: 0.9rem;
+}
+.ws-scene-detail__placeholder i {
+  font-size: 2.4rem;
+  opacity: 0.5;
+}
+.ws-scene-detail__side {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+.ws-scene-detail__name {
+  margin: 0;
+  font-size: 1.2rem;
   font-weight: 600;
 }
-.ws-scene-card__actions {
-  display: flex;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.ws-scene-card__del {
-  color: var(--color-danger, #e53935);
-}
-.ws-scene-card__desc {
+.ws-scene-detail__desc {
   margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.6;
+  font-size: 0.9rem;
+  line-height: 1.7;
   color: var(--color-text-muted);
   white-space: pre-wrap;
   word-break: break-word;
 }
-.ws-scene-card__img {
-  width: 100%;
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  object-fit: cover;
+.ws-scene-detail__error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-danger, #e53935);
 }
-.ws-scene-card__gen {
-  align-self: flex-start;
-  font-size: 0.82rem;
-  padding: 5px 12px;
+.ws-scene-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: auto;
+}
+.ws-scene-detail__del {
+  color: var(--color-danger, #e53935);
+}
+.ws-scene-detail__history-label {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+.ws-scene-detail__thumbs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.ws-scene-detail__thumbs img {
+  width: 56px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+@media (max-width: 640px) {
+  .ws-scene-detail__body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
 }
 </style>
