@@ -3294,34 +3294,21 @@
               </div>
             </div>
             <div class="ws-scene-detail__side">
-              <label class="ws-scene-form__field">
-                <span class="ws-scene-form__label">场景名称</span>
-                <input v-model="sceneDetailName" class="ws-scene-form__input" maxlength="40" placeholder="如：青云书院" />
-              </label>
-              <label class="ws-scene-form__field">
-                <span class="ws-scene-form__label">场景描述</span>
-                <textarea v-model="sceneDetailDesc" class="ws-scene-form__input ws-scene-form__textarea" rows="6" maxlength="2000" placeholder="环境、时代背景、氛围、外观特征…描述越清楚，后续生成画面越贴合"></textarea>
-                <span class="ws-scene-form__count">{{ sceneDetailDesc.length }}/2000</span>
-              </label>
+              <h2 class="ws-scene-detail__name">{{ sceneDetail.name }}</h2>
+              <p class="ws-scene-detail__desc">{{ sceneDetail.description || '暂无描述' }}</p>
 
               <p v-if="sceneGenError" class="ws-scene-detail__error">{{ sceneGenError }}</p>
-              <p v-if="sceneDetailSaved" class="ws-scene-detail__saved">已保存</p>
 
               <div class="ws-scene-detail__actions">
                 <button
                   type="button"
                   class="btn-primary"
-                  :disabled="!sceneDetailName.trim() || sceneDetailDirty === false"
-                  @click="saveSceneDetail"
-                >保存</button>
-                <button
-                  type="button"
-                  class="btn-secondary"
                   :disabled="sceneGenningId === sceneDetail.id"
                   @click="generateSceneImage(sceneDetail)"
                 >
                   {{ sceneGenningId === sceneDetail.id ? '生成中…' : (sceneDetailImage ? '重新生成形象' : 'AI 生成形象') }}
                 </button>
+                <button type="button" class="btn-secondary" @click="openSceneEdit(sceneDetail); closeSceneDetail()">编辑</button>
                 <button type="button" class="btn-as-link ws-scene-detail__del" @click="removeScene(sceneDetail); closeSceneDetail()">删除</button>
               </div>
 
@@ -3619,14 +3606,6 @@ const sceneFormDescription = ref('')
 const sceneGenningId = ref<string>('')
 const sceneGenError = ref<string>('')
 const sceneDetail = ref<Scene | null>(null)
-const sceneDetailName = ref('')
-const sceneDetailDesc = ref('')
-const sceneDetailSaved = ref(false)
-const sceneDetailDirty = computed(() => {
-  const s = sceneDetail.value
-  if (!s) return false
-  return sceneDetailName.value !== s.name || sceneDetailDesc.value !== s.description
-})
 const sceneDetailImage = computed(() => {
   const v = sceneDetail.value?.views
   if (!v || v.length === 0) return ''
@@ -4748,6 +4727,13 @@ function openSceneCreate(): void {
   sceneFormOpen.value = true
 }
 
+function openSceneEdit(scene: Scene): void {
+  sceneEditId.value = scene.id
+  sceneFormName.value = scene.name
+  sceneFormDescription.value = scene.description
+  sceneFormOpen.value = true
+}
+
 function closeSceneForm(): void {
   sceneFormOpen.value = false
   sceneEditId.value = ''
@@ -4778,27 +4764,11 @@ function removeScene(scene: Scene): void {
 
 function openSceneDetail(scene: Scene): void {
   sceneDetail.value = scene
-  sceneDetailName.value = scene.name
-  sceneDetailDesc.value = scene.description
-  sceneDetailSaved.value = false
   sceneGenError.value = ''
 }
 
 function closeSceneDetail(): void {
   sceneDetail.value = null
-  sceneDetailSaved.value = false
-}
-
-function saveSceneDetail(): void {
-  const s = sceneDetail.value
-  if (!s) return
-  const name = sceneDetailName.value.trim()
-  if (!name) return
-  updateScene({ id: s.id, name, description: sceneDetailDesc.value.trim() })
-  if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
-  sceneDetail.value = scenes.value.find((x) => x.id === s.id) ?? sceneDetail.value
-  sceneDetailSaved.value = true
-  window.setTimeout(() => { sceneDetailSaved.value = false }, 1800)
 }
 
 async function generateSceneImage(scene: Scene): Promise<void> {
@@ -10687,11 +10657,6 @@ onUnmounted(() => {
   margin: 0;
   font-size: 0.85rem;
   color: var(--color-danger, #e53935);
-}
-.ws-scene-detail__saved {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--color-success, #22c55e);
 }
 .ws-scene-detail__actions {
   display: flex;
