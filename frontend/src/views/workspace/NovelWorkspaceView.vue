@@ -1178,7 +1178,40 @@
                 @open-all-changes="openWorkspaceCharacterAllChangesModal"
                 @edit="startCharacterEdit"
                 @delete="selectedGraphCharacter && openCharacterDelete(selectedGraphCharacter.id)"
-              />
+              >
+                <template #body-extra>
+                  <section v-if="selectedGraphCharacter" class="char-figure">
+                    <h4 class="char-figure__title">角色形象（漫剧用）</h4>
+                    <div class="char-figure__views">
+                      <div v-for="meta in CHAR_VIEW_KINDS" :key="meta.kind" class="char-figure__view">
+                        <div class="char-figure__thumb">
+                          <img
+                            v-if="charView(selectedGraphCharacter, meta.kind)?.imageUrl"
+                            :src="charView(selectedGraphCharacter, meta.kind)!.imageUrl"
+                            :alt="meta.label"
+                          />
+                          <div v-else class="char-figure__placeholder">
+                            <i class="fa-solid fa-user"></i>
+                          </div>
+                        </div>
+                        <span class="char-figure__label">{{ meta.label }}</span>
+                        <button
+                          type="button"
+                          class="char-figure__btn"
+                          :disabled="!!charGenningKey || (meta.kind !== 'front' && !frontViewImage(selectedGraphCharacter))"
+                          @click="generateCharacterView(selectedGraphCharacter, meta.kind)"
+                        >
+                          {{ charGenningKey === `${selectedGraphCharacter.id}:${meta.kind}`
+                              ? '生成中…'
+                              : (charView(selectedGraphCharacter, meta.kind) ? '重新生成' : '生成') }}
+                        </button>
+                      </div>
+                    </div>
+                    <p class="char-figure__hint">先生成「正面」，再生成侧面/背面（以正面为基准锁定同一角色）。</p>
+                    <p v-if="charGenError" class="char-figure__error">{{ charGenError }}</p>
+                  </section>
+                </template>
+              </CharacterProfilePanel>
             </div>
           </div>
 
@@ -3455,6 +3488,7 @@ import type {
   NewCharacterInput,
   NewItemInput,
   Scene,
+  AssetView,
   OutlineItem,
   OutlineNodeLevel,
   OutlinePlotStage,
@@ -4869,6 +4903,76 @@ async function adjustSceneImage(scene: Scene): Promise<void> {
     sceneGenError.value = e instanceof Error ? e.message : '调整失败'
   } finally {
     sceneGenningId.value = ''
+  }
+}
+
+// ── 角色形象：多视图生成（正面 text2img → 侧/背 img2img 锁同一角色）──
+const charGenningKey = ref<string>('')   // 形如 `${characterId}:${kind}`
+const charGenError = ref<string>('')
+const charAdjustText = ref('')
+
+const CHAR_VIEW_KINDS: Array<{ kind: string; label: string; angle: string }> = [
+  { kind: 'front', label: '正面', angle: '正面全身像，面向镜头' },
+  { kind: 'side', label: '侧面', angle: '侧面全身像，90度侧视' },
+  { kind: 'back', label: '背面', angle: '背面全身像，背对镜头' },
+]
+
+function charBaseDesc(c: Character): string {
+  const parts: string[] = []
+  if (c.gender) parts.push(c.gender)
+  if (c.age) parts.push(`${c.age}`)
+  const attrs = (c.attributes ?? []).map((a) => `${a.key}:${a.value}`).join('，')
+  const body = [c.notes, attrs].filter(Boolean).join('，')
+  return [c.name, parts.join('、'), body].filter(Boolean).join('，')
+}
+
+function charView(c: Character, kind: string): AssetView | undefined {
+  return (c.views ?? []).find((v) => v.kind === kind)
+}
+
+function frontViewImage(c: Character): string {
+  return charView(c, 'front')?.imageUrl || ''
+}
+
+/** 生成某个视图。front 用文生图；side/back 用 front 当参考图生图锁同一角色 */
+async function generateCharacterView(c: Character, kind: string): Promise<void> {
+  if (charGenningKey.value) return
+  const desc = charBaseDesc(c)
+  if (!desc.trim()) {
+    charGenError.value = '请先完善角色档案（外貌/性别/年龄等）再生成形象'
+    return
+  }
+  const meta = CHAR_VIEW_KINDS.find((k) => k.kind === kind)
+  if (!meta) return
+
+  // 侧/背必须先有正面作为锁角色的参考
+  const frontImg = frontViewImage(c)
+  if (kind !== 'front' && !frontImg) {
+    charGenError.value = '请先生成「正面」形象，再生成其它角度（用于锁定同一角色）'
+    return
+  }
+
+  charGenningKey.value = `${c.id}:${kind}`
+  charGenError.value = ''
+  try {
+    let url: string
+    const style = (c.stylePrompt ?? '').trim()
+    if (kind === 'front') {
+      const prompt = `${desc}。${meta.angle}。${style ? style + '。' : ''}角色设定立绘，白色背景，全身，动画角色设计，清晰一致的人物外观。`
+      url = await generateComicImage({ prompt, size: '768x1024' })
+    } else {
+      const prompt = `保持与参考图完全相同的角色（同样的脸、发型、服饰、配色），改为${meta.angle}。角色设定立绘，白色背景，全身。`
+      url = await generateComicImage({ prompt, size: '768x1024', image: [frontImg] })
+    }
+    const view: AssetView = { id: `cv-${Date.now()}`, kind, imageUrl: url, description: `${c.name}·${meta.label}`, prompt: meta.angle }
+    const views = (c.views ?? []).filter((v) => v.kind !== kind)
+    views.push(view)
+    updateCharacter({ id: c.id, views })
+    if (novelId.value) characters.value = getCharactersByNovelId(novelId.value)
+  } catch (e) {
+    charGenError.value = e instanceof Error ? e.message : '生成失败'
+  } finally {
+    charGenningKey.value = ''
   }
 }
 
@@ -10871,5 +10975,80 @@ onUnmounted(() => {
 }
 .ws-scene-form__submit {
   min-width: 100px;
+}
+
+/* 角色形象多视图 */
+.char-figure {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+.char-figure__title {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.char-figure__views {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.char-figure__view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.char-figure__thumb {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface-muted) 60%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.char-figure__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.char-figure__placeholder {
+  color: var(--color-text-muted);
+  font-size: 1.4rem;
+  opacity: 0.45;
+}
+.char-figure__label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.char-figure__btn {
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.char-figure__btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.char-figure__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.char-figure__hint {
+  margin: 10px 0 0;
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+}
+.char-figure__error {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: var(--color-danger, #e53935);
 }
 </style>
