@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{AiProviderService, AiService, AuthService, AutoApplyLogService, CardKeyService, CharacterStateService, EmbeddingIndexService, NovelService, SettingsService, WalletService};
+use super::{AiProviderService, AiService, AuthService, AutoApplyLogService, CardKeyService, CharacterStateService, EmbeddingIndexService, ImageProviderService, NovelService, SettingsService, WalletService};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -10,6 +10,7 @@ pub struct AppState {
     pub wallet: Arc<WalletService>,
     pub card_keys: Arc<CardKeyService>,
     pub providers: Arc<AiProviderService>,
+    pub image_providers: Arc<ImageProviderService>,
     pub ai: Arc<AiService>,
     pub embedding_index: Arc<EmbeddingIndexService>,
     pub character_states: Arc<CharacterStateService>,

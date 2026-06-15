@@ -3206,8 +3206,23 @@
             </div>
           </header>
           <p class="ws-scene-card__desc">{{ scene.description || '暂无描述' }}</p>
+          <img
+            v-if="scene.views && scene.views.length > 0 && scene.views[scene.views.length - 1].imageUrl"
+            :src="scene.views[scene.views.length - 1].imageUrl"
+            alt="场景形象"
+            class="ws-scene-card__img"
+          />
+          <button
+            type="button"
+            class="btn-secondary ws-scene-card__gen"
+            :disabled="sceneGenningId === scene.id"
+            @click="generateSceneImage(scene)"
+          >
+            {{ sceneGenningId === scene.id ? '生成中…' : (scene.views && scene.views.length > 0 ? '重新生成形象' : 'AI 生成形象') }}
+          </button>
         </article>
       </div>
+      <p v-if="sceneGenError" class="muted" style="color: var(--color-danger, #e53935); margin-top: 12px;">{{ sceneGenError }}</p>
     </section>
 
     <WorkspaceAiSidebar
@@ -3345,6 +3360,7 @@ import {
 } from '../../lib/outlineHierarchy'
 import { syncAllNovelsWithCloud } from '../../lib/cloudSync'
 import { getCurrentSession } from '../../lib/auth'
+import { generateComicImage } from '../../lib/comicImage'
 import { setChromeAnchor } from '../../composables/useChromeAnchor'
 import type {
   Category,
@@ -3532,6 +3548,8 @@ const sceneFormOpen = ref(false)
 const sceneEditId = ref<string>('')
 const sceneFormName = ref('')
 const sceneFormDescription = ref('')
+const sceneGenningId = ref<string>('')
+const sceneGenError = ref<string>('')
 const categories = ref<Category[]>([])
 const categoryCreateName = ref('')
 const categoryCreateNotes = ref('')
@@ -4681,6 +4699,29 @@ function removeScene(scene: Scene): void {
   if (!window.confirm(`确认删除场景「${scene.name}」？`)) return
   deleteScene(scene.id)
   if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
+}
+
+async function generateSceneImage(scene: Scene): Promise<void> {
+  if (sceneGenningId.value) return
+  const desc = scene.description.trim()
+  if (!desc) {
+    sceneGenError.value = '请先填写场景描述再生成形象'
+    return
+  }
+  sceneGenningId.value = scene.id
+  sceneGenError.value = ''
+  try {
+    const prompt = `${scene.name}。${desc}。场景概念图，电影感，丰富细节，无人物。`
+    const url = await generateComicImage({ prompt, size: '1024x768' })
+    const view = { id: `view-${Date.now()}`, kind: 'establishing', imageUrl: url, description: desc, prompt }
+    const existing = Array.isArray(scene.views) ? scene.views : []
+    updateScene({ id: scene.id, views: [...existing, view] })
+    if (novelId.value) scenes.value = getScenesByNovelId(novelId.value)
+  } catch (e) {
+    sceneGenError.value = e instanceof Error ? e.message : '生成失败'
+  } finally {
+    sceneGenningId.value = ''
+  }
 }
 
 // ── AI 待采用修改：原位 diff 预览 ──────────────────────────────────────────
@@ -10439,5 +10480,16 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.ws-scene-card__img {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  object-fit: cover;
+}
+.ws-scene-card__gen {
+  align-self: flex-start;
+  font-size: 0.82rem;
+  padding: 5px 12px;
 }
 </style>

@@ -14,6 +14,7 @@ mod announcement;
 mod card_key_admin;
 mod dashboard;
 mod embedding_config;
+mod image_config;
 mod labels;
 mod prompts;
 mod shell;
@@ -22,7 +23,7 @@ mod user_ops;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::entities::AiWalletLedgerEntity;
-use crate::services::{AiProviderService, CardKeyService, EmbeddingProviderService, SettingsService, WalletService};
+use crate::services::{AiProviderService, CardKeyService, EmbeddingProviderService, ImageProviderService, SettingsService, WalletService};
 use labels::{apply_field_labels, AI_WALLET_LEDGER_FIELDS};
 
 async fn separate_app_session_table(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
@@ -317,12 +318,17 @@ pub async fn build_router(
         }))
         .merge(embedding_config::routes(embedding_config::EmbeddingConfigState {
             providers: EmbeddingProviderService::new(sqlx_pool.clone()),
+            auth: auth_for_admin.clone(),
+        }))
+        .merge(image_config::routes(image_config::ImageConfigState {
+            providers: ImageProviderService::new(sqlx_pool.clone()),
             auth: auth_for_admin,
         }));
 
     tracing::info!("Admin dashboard: http://127.0.0.1:8080/admin/dashboard");
     tracing::info!("Admin user ops: http://127.0.0.1:8080/admin/user-ops");    tracing::info!("Admin AI config: http://127.0.0.1:8080/admin/ai-config");
     tracing::info!("Admin embedding config: http://127.0.0.1:8080/admin/embedding-config");
+    tracing::info!("Admin image config: http://127.0.0.1:8080/admin/image-config");
     tracing::info!("Admin prompts: http://127.0.0.1:8080/admin/prompts");
     tracing::info!("Admin announcement: http://127.0.0.1:8080/admin/announcement");
     tracing::info!("Admin card keys: http://127.0.0.1:8080/admin/card-keys");

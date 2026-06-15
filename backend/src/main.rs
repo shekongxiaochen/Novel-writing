@@ -16,11 +16,11 @@ use axum::{
     Router,
 };
 use config::Config;
-use handlers::{ai, announcement, auth, billing, health, novels};
+use handlers::{ai, announcement, auth, billing, comic, health, novels};
 use middleware::{auth_middleware, cors_layer};
 use services::{
     AiProviderService, AiService, AppState, AuthService, AutoApplyLogService, CacheService, CardKeyService,
-    CharacterStateService, EmbeddingIndexService, EmbeddingProviderService, NovelService,
+    CharacterStateService, EmbeddingIndexService, EmbeddingProviderService, ImageProviderService, NovelService,
     SettingsService, WalletService,
 };
 use std::sync::Arc;
@@ -87,6 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wallet = Arc::new(WalletService::new(db.clone()));
     let card_keys = Arc::new(CardKeyService::new(db.clone(), (*wallet).clone(), cache_service.clone()));
     let providers = Arc::new(AiProviderService::new(db.clone()));
+    let image_providers = Arc::new(ImageProviderService::new(db.clone()));
     let embedding_index = Arc::new(EmbeddingIndexService::new(
         db.clone(),
         EmbeddingProviderService::new(db.clone()),
@@ -105,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         wallet: wallet.clone(),
         card_keys,
         providers: providers.clone(),
+        image_providers: image_providers.clone(),
         ai: Arc::new(AiService::new(
             config.clone(),
             (*settings).clone(),
@@ -134,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/billing/redeem", post(billing::redeem_card_key))
         .route("/ai/chat", post(ai::chat))
         .route("/ai/prompt", post(ai::prompt_chat))
+        .route("/comic/gen-image", post(comic::gen_image))
         .route("/novels", get(novels::list_novels).post(novels::create_novel))
         .route(
             "/novels/:id",
