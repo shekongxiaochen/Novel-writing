@@ -23,6 +23,8 @@ import type {
   Item,
   ItemOwnerType,
   Scene,
+  Shot,
+  Storyboard,
   NewForeshadowPlantInput,
   NewForeshadowFulfillmentInput,
   Novel,
@@ -46,6 +48,7 @@ const CHARACTER_RELATIONS_KEY = 'novel-writing.character-relations'
 const FACTIONS_KEY = 'novel-writing.factions'
 const ITEMS_KEY = 'novel-writing.items'
 const SCENES_KEY = 'novel-writing.scenes'
+const STORYBOARDS_KEY = 'novel-writing.storyboards'
 const CHARACTER_FACTION_MEMBERSHIPS_KEY = 'novel-writing.character-faction-memberships'
 const CHARACTER_LAST_CHANGED_FIELDS_KEY = 'novel-writing.character-last-changed-fields'
 const FACTION_LAST_CHANGED_FIELDS_KEY = 'novel-writing.faction-last-changed-fields'
@@ -3262,6 +3265,40 @@ export function deleteScene(sceneId: string): boolean {
   const next = all.filter((s) => s.id !== sceneId)
   if (next.length === all.length) return false
   saveAllScenes(next)
+  return true
+}
+
+// ── 分镜表（P3 剧组大脑）──
+
+function getAllStoryboards(): Storyboard[] {
+  const raw = readScopedStorageItem(STORYBOARDS_KEY)
+  if (!raw) return []
+  try { return (JSON.parse(raw) as Storyboard[]).filter((s) => s.id && s.novelId) } catch { return [] }
+}
+
+function saveAllStoryboards(list: Storyboard[]): void {
+  writeScopedStorageItem(STORYBOARDS_KEY, JSON.stringify(list))
+  emitStorageChange()
+}
+
+export function getStoryboardByChapter(novelId: string, chapterId: string): Storyboard | null {
+  return getAllStoryboards().find((s) => s.novelId === novelId && s.chapterId === chapterId) ?? null
+}
+
+export function upsertStoryboard(sb: Storyboard): Storyboard {
+  const all = getAllStoryboards()
+  const idx = all.findIndex((s) => s.id === sb.id)
+  if (idx >= 0) all[idx] = sb
+  else all.push(sb)
+  saveAllStoryboards(all)
+  return sb
+}
+
+export function deleteStoryboard(sbId: string): boolean {
+  const all = getAllStoryboards()
+  const next = all.filter((s) => s.id !== sbId)
+  if (next.length === all.length) return false
+  saveAllStoryboards(next)
   return true
 }
 

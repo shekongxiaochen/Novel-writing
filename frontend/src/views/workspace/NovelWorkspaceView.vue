@@ -3274,6 +3274,51 @@
       </div>
     </section>
 
+    <section class="card ws-tab-panel" v-show="activeTab === 'comic'">
+      <div class="workspace-items-hero">
+        <h2>漫剧</h2>
+      </div>
+
+      <div class="ws-comic-section" v-if="chapters.length > 0">
+        <div class="ws-comic-toolbar">
+          <select v-model="comicChapterId" class="ws-style-picker" style="min-width:200px;">
+            <option value="">-- 选择章节 --</option>
+            <option v-for="ch in chapters" :key="ch.id" :value="ch.id">
+              第{{ ch.chapterNo }}章 {{ ch.title || '未命名' }}
+            </option>
+          </select>
+          <button type="button" class="btn-primary" :disabled="!comicChapterId || comicGenerating" @click="generateStoryboard">
+            {{ comicGenerating ? '生成中…' : 'AI 生成分镜' }}
+          </button>
+          <button v-if="comicStoryboard" type="button" class="btn-secondary" @click="deleteComicStoryboard">删除分镜</button>
+        </div>
+
+        <p v-if="comicError" style="color:var(--color-danger);margin:8px 0 0;">{{ comicError }}</p>
+
+        <div v-if="comicStoryboard" class="ws-comic-shots">
+          <div class="ws-comic-shots__header">{{ comicStoryboard.shots.length }} 个镜头</div>
+          <article v-for="shot in comicStoryboard.shots" :key="shot.id" class="ws-comic-shot">
+            <div class="ws-comic-shot__index">#{{ shot.order }}</div>
+            <div class="ws-comic-shot__body">
+              <p class="ws-comic-shot__action">{{ shot.action || '（无动作描述）' }}</p>
+              <p v-if="shot.dialogue" class="ws-comic-shot__dialogue">「{{ shot.dialogue }}」</p>
+              <div class="ws-comic-shot__meta">
+                <span v-if="shot.sceneId" class="ws-comic-shot__tag ws-comic-shot__tag--scene">📍 {{ sceneNameById(shot.sceneId) }}</span>
+                <span v-for="cid in shot.characterIds" :key="cid" class="ws-comic-shot__tag ws-comic-shot__tag--char">👤 {{ charNameById(cid) }}</span>
+                <span v-for="iid in shot.itemIds" :key="iid" class="ws-comic-shot__tag ws-comic-shot__tag--item">📦 {{ itemNameById(iid) }}</span>
+                <span v-if="shot.shotType" class="ws-comic-shot__tag ws-comic-shot__tag--shot">🎬 {{ shotTypeLabel(shot.shotType) }}</span>
+                <span v-if="shot.emotion" class="ws-comic-shot__tag">💬 {{ shot.emotion }}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+      <section v-else class="ws-empty">
+        <h3 class="ws-empty__title">还没有章节</h3>
+        <p class="ws-empty__desc">请先写好正文，再生成分镜。</p>
+      </section>
+    </section>
+
     <WorkspaceAiSidebar
       ref="workspaceAiSidebarRef"
       v-if="activeTab !== 'write'"
@@ -3467,6 +3512,9 @@ import {
   createScene,
   updateScene,
   deleteScene,
+  getStoryboardByChapter,
+  upsertStoryboard,
+  deleteStoryboard,
 } from '../../lib/storage'
 import { characterMatchLabels, normalizeCharacterAliases, buildDisplayNameMap } from '../../lib/characterLabels'
 import {
@@ -3478,6 +3526,7 @@ import {
   expandOutlineScenesForSkeletonByAi,
   expandOutlineSkeletonByAi,
   generateWorldSettingDraftByAi,
+  generateStoryboardFromPayload,
   refineOutlineOptionsByAi,
 } from '../../lib/localAi'
 import { lintOutlineDraftItems } from '../../lib/outlineDraftLint'
@@ -3509,6 +3558,8 @@ import type {
   NewCharacterInput,
   NewItemInput,
   Scene,
+  Shot,
+  Storyboard,
   AssetView,
   OutlineItem,
   OutlineNodeLevel,
@@ -3567,6 +3618,7 @@ type WorkspaceTab =
   | 'issues'
   | 'worldsettings'
   | 'scenes'
+  | 'comic'
 
 const novelId = computed(() => String(route.params.id ?? ''))
 const novel = computed(() => getNovelById(novelId.value))
@@ -4849,6 +4901,52 @@ function openSceneDetail(scene: Scene): void {
 
 function closeSceneDetail(): void {
   sceneDetail.value = null
+}
+
+// ── 漫剧分镜（P3 剧组大脑）──
+const comicChapterId = ref('')
+const comicGenerating = ref(false)
+const comicStoryboardVal = ref<Storyboard | null>(null)
+const comicError = ref('')
+const comicStoryboard = computed(() => {
+  if (comicStoryboardVal.value) return comicStoryboardVal.value
+  if (!comicChapterId.value || !novelId.value) return null
+  const cached = getStoryboardByChapter(novelId.value, comicChapterId.value)
+  comicStoryboardVal.value = cached
+  return cached
+})
+
+function sceneNameById(id: string): string { return scenes.value.find((s) => s.id === id)?.name ?? id }
+function charNameById(id: string): string { return characters.value.find((c) => c.id === id)?.name ?? id }
+function shotTypeLabel(t: string): string {
+  const m: Record<string, string> = { establishing: '建立镜头', wide: '远景', medium: '中景', closeup: '特写' }
+  return m[t] ?? t
+}
+
+async function generateStoryboard(): Promise<void> {
+  const id = novelId.value
+  const chId = comicChapterId.value
+  if (!id || !chId || comicGenerating.value) return
+  comicGenerating.value = true
+  comicError.value = ''
+  try {
+    const payload = buildNovelWorkspacePayload(id)
+    const sb = await generateStoryboardFromPayload(payload, chId)
+    upsertStoryboard(sb)
+    comicStoryboardVal.value = sb
+  } catch (e) {
+    comicError.value = e instanceof Error ? e.message : '生成失败'
+  } finally {
+    comicGenerating.value = false
+  }
+}
+
+function deleteComicStoryboard(): void {
+  const sb = comicStoryboardVal.value
+  if (!sb) return
+  if (!window.confirm('确认删除当前分镜表？')) return
+  deleteStoryboard(sb.id)
+  comicStoryboardVal.value = null
 }
 
 /** 返回当前选定画风的英文提示词后缀（空串=未选） */
@@ -8571,7 +8669,8 @@ function applyRoutePrefill(): void {
     tab === 'categories' ||
     tab === 'issues' ||
     tab === 'worldsettings' ||
-    tab === 'scenes'
+    tab === 'scenes' ||
+    tab === 'comic'
   ) {
     activeTab.value = tab
   }
@@ -11193,4 +11292,68 @@ onUnmounted(() => {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.ws-comic-section {
+  display: grid;
+  gap: 16px;
+}
+.ws-comic-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.ws-comic-shots__header {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+.ws-comic-shot {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  background: var(--color-surface);
+  display: flex;
+  gap: 12px;
+}
+.ws-comic-shot__index {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--color-primary);
+  flex-shrink: 0;
+  min-width: 28px;
+}
+.ws-comic-shot__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-comic-shot__action {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.ws-comic-shot__dialogue {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--color-accent, #7c3aed);
+  font-weight: 500;
+}
+.ws-comic-shot__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ws-comic-shot__tag {
+  font-size: 0.76rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+.ws-comic-shot__tag--scene { background: color-mix(in srgb, #22c55e 12%, transparent); color: #166534; }
+.ws-comic-shot__tag--char { background: color-mix(in srgb, #3b82f6 12%, transparent); color: #1e40af; }
+.ws-comic-shot__tag--item { background: color-mix(in srgb, #f59e0b 12%, transparent); color: #92400e; }
+.ws-comic-shot__tag--shot { background: color-mix(in srgb, #ec4899 12%, transparent); color: #9d174d; }
 </style>

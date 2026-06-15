@@ -1039,7 +1039,7 @@ watch(
   { immediate: true },
 )
 
-type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues' | 'worldsettings' | 'scenes'
+type WorkspaceTabKey = 'write' | 'outline' | 'characters' | 'items' | 'factions' | 'categories' | 'issues' | 'worldsettings' | 'scenes' | 'comic'
 const workspaceTabs = [
   { key: 'write' as const, label: '写作' },
   { key: 'outline' as const, label: '大纲' },
@@ -1047,6 +1047,7 @@ const workspaceTabs = [
   { key: 'items' as const, label: '物品' },
   { key: 'factions' as const, label: '势力' },
   { key: 'scenes' as const, label: '场景' },
+  { key: 'comic' as const, label: '漫剧' },
   { key: 'categories' as const, label: '分类' },
   { key: 'issues' as const, label: '伏笔' },
   { key: 'worldsettings' as const, label: '世界观' },

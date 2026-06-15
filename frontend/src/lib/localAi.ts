@@ -19,6 +19,8 @@ import type {
   OutlineNodeLevel,
   OutlineRewriteResult,
   OutlineStorylineType,
+  Storyboard,
+  Shot,
 } from '../types'
 import type { AiToolResult } from '../types'
 import { matchGenreProfiles, buildGenrePromptInjection } from './genreProfiles'
@@ -26,7 +28,7 @@ import { assertAiReady, postAiCompletion, postAiCompletionStream, postAiPrompt, 
 import { buildPendingToolActions } from '../features/chapter-hub/lib/aiPendingToolActions'
 import { AI_WRITE_TOOLS, executeToolCall } from './aiTools'
 import type { WorkspaceSnapshotPayload } from './storage'
-import { getCharacterStateAtPosition, recordCharacterChangeFields } from './storage'
+import { getCharacterStateAtPosition, recordCharacterChangeFields, uid } from './storage'
 import type { CharacterNarrativeState, CharacterChangeDetail } from './storage'
 import {
   buildAskFollowUpPrompt,
@@ -1465,6 +1467,89 @@ export type CharacterStateExtractResult = {
  * 写入逐章叙事状态历史(narrativeState)，供续写时注入"截至当前章的真实现状"。
  * 仅记录本章真有变化的角色(增量)，无变化不写。
  */
+
+export async function generateStoryboardFromPayload(
+  payload: WorkspaceSnapshotPayload,
+  chapterId: string,
+): Promise<Storyboard> {
+  const chapters = [...(payload.chapters ?? [])].sort((a, b) => (a.chapterNo ?? 0) - (b.chapterNo ?? 0))
+  const chapter = chapters.find((c) => c.id === chapterId)
+  if (!chapter) throw new Error('找不到目标章节')
+  if (!chapter.content?.trim()) throw new Error('本章没有正文')
+
+  // 场景素材（含多视图）
+  const scenes = (payload.scenes ?? []).map((s) => ({
+    id: s.id, name: s.name, description: (s.description ?? '').slice(0, 200),
+    views: (s.views ?? []).map((v) => ({ id: v.id, kind: v.kind, description: v.description })),
+  }))
+
+  // 角色素材（含多视图）
+  const characters = (payload.characters ?? []).slice(0, 20).map((c) => ({
+    id: c.id, name: c.name, aliases: c.aliases ?? [], gender: c.gender, age: c.age,
+    views: (c.views ?? []).map((v) => ({ id: v.id, kind: v.kind, description: v.description })),
+  }))
+
+  // 物品素材
+  const items = (payload.items ?? []).slice(0, 10).map((i) => ({
+    id: i.id, name: i.name, summary: (i.summary ?? '').slice(0, 150),
+    views: (i.views ?? []).map((v) => ({ id: v.id, kind: v.kind, description: v.description })),
+  }))
+
+  const prompt = [
+    '你是分镜师。请把以下小说章节拆成分镜表。',
+    '',
+    `--- 本章正文（第${chapter.chapterNo ?? 1}章）---`,
+    chapter.content.slice(0, 4000),
+    '',
+    '--- 可用场景 ---',
+    stableStringify(scenes),
+    '',
+    '--- 可用角色 ---',
+    stableStringify(characters),
+    '',
+    '--- 可用物品 ---',
+    stableStringify(items),
+    '',
+    '你必须严格从上述列表中选取角色/物品/场景，不要自行编造不存在的资源。如果某个角色有 views，请为每个镜头指定该角色应使用的视图的 id（不同机位用不同视图）。没有适合的视图则不指定 assetViewIds。',
+    '',
+    '输出 JSON 格式:',
+    '{"shots": [{"order":1,"sceneId":"...","sceneViewId":"...","characterIds":["..."],"assetViewIds":["..."],"itemIds":["..."],"shotType":"wide|medium|closeup|establishing","action":"动作描述","dialogue":"台词或旁白","emotion":"情绪"}]}',
+    'shotType: establishing=建立镜头空镜 wide=远景 medium=中景 closeup=特写',
+    'action 写角色做了什么，dialogue 写台词或旁白，emotion 写情绪基调，没有的留空。',
+    '每个镜头只保留真正出场的角色，不要塞无关 id。',
+  ].join('\n')
+
+  const raw = await callAiPromptJson('qa', prompt, { temperature: 0.5, maxTokens: 8192 })
+  const shots: Shot[] = (Array.isArray(raw.shots) ? raw.shots : [])
+    .filter((s: any) => s && typeof s.order === 'number')
+    .sort((a: any, b: any) => a.order - b.order)
+    .map((s: any, i: number) => ({
+      id: uid(),
+      order: s.order ?? i + 1,
+      sceneId: String(s.sceneId ?? '').trim() || undefined,
+      sceneViewId: String(s.sceneViewId ?? '').trim() || undefined,
+      characterIds: Array.isArray(s.characterIds) ? s.characterIds.map(String) : [],
+      assetViewIds: Array.isArray(s.assetViewIds) ? s.assetViewIds.map(String) : [],
+      itemIds: Array.isArray(s.itemIds) ? s.itemIds.map(String) : [],
+      shotType: (['closeup', 'medium', 'wide', 'establishing'].includes(s.shotType) ? s.shotType : undefined) as Shot['shotType'],
+      action: String(s.action ?? '').trim() || undefined,
+      dialogue: String(s.dialogue ?? '').trim() || undefined,
+      emotion: String(s.emotion ?? '').trim() || undefined,
+    }))
+
+  const now = new Date().toISOString()
+  return {
+    id: uid(),
+    novelId: chapter.novelId || '',
+    chapterId: chapter.id,
+    chapterTitle: chapter.title || undefined,
+    chapterNo: chapter.chapterNo,
+    shots,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export async function runCharacterStateExtract(
   payload: WorkspaceSnapshotPayload,
   chapterId: string,

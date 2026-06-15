@@ -33,6 +33,49 @@ export type Novel = {
 }
 
 /** 预设画风列表，每项提供中文标签与注入生成 prompt 的英文描述 */
+/** 分镜头 */
+export type Shot = {
+  id: string
+  order: number
+  /** 本镜头在哪个场景 */
+  sceneId?: string
+  sceneViewId?: string
+  /** 出场角色 */
+  characterIds?: string[]
+  /** 每个出场角色用哪个视图（正/侧/背…） */
+  assetViewIds?: string[]
+  /** 出场物品 */
+  itemIds?: string[]
+  /** 景别 */
+  shotType?: 'closeup' | 'medium' | 'wide' | 'establishing'
+  /** 动作描述 */
+  action?: string
+  /** 台词/旁白 */
+  dialogue?: string
+  /** 情绪 */
+  emotion?: string
+  /** 后续生成的关键帧图 URL（P4） */
+  keyframeUrl?: string
+  /** 后续生成的视频片段 URL（P5） */
+  clipUrl?: string
+  /** 作画监督质检状态 */
+  qcStatus?: 'pending' | 'pass' | 'retry' | 'failed'
+  qcReason?: string
+  retryCount?: number
+}
+
+/** 分镜表 */
+export type Storyboard = {
+  id: string
+  novelId: string
+  chapterId: string
+  chapterTitle?: string
+  chapterNo?: number
+  shots: Shot[]
+  createdAt: string
+  updatedAt: string
+}
+
 export const VISUAL_STYLE_PRESETS = [
   { id: 'anime', label: '日系动漫', en: 'anime art style, cel-shaded, vibrant, clean lines, Japanese animation aesthetic' },
   { id: 'realistic', label: '写实电影感', en: 'cinematic realism, photorealistic lighting, film-like, detailed textures, epic scale' },
