@@ -3310,6 +3310,15 @@
                 <span v-if="shot.shotType" class="ws-comic-shot__tag ws-comic-shot__tag--shot">🎬 {{ shotTypeLabel(shot.shotType) }}</span>
                 <span v-if="shot.emotion" class="ws-comic-shot__tag">💬 {{ shot.emotion }}</span>
               </div>
+              <img v-if="shot.keyframeUrl" :src="shot.keyframeUrl" class="ws-comic-shot__kf" />
+              <button
+                type="button"
+                class="ws-comic-shot__kf-btn"
+                :disabled="!!keyframeGenningId"
+                @click="generateKeyframe(shot)"
+              >
+                {{ keyframeGenningId === shot.id ? '生成中…' : (shot.keyframeUrl ? '重出关键帧' : '生成关键帧') }}
+              </button>
             </div>
           </article>
         </div>
@@ -4948,6 +4957,43 @@ function deleteComicStoryboard(): void {
   if (!window.confirm('确认删除当前分镜表？')) return
   deleteStoryboard(sb.id)
   comicStoryboardVal.value = null
+}
+
+const keyframeGenningId = ref<string>('')
+
+async function generateKeyframe(shot: Shot): Promise<void> {
+  if (keyframeGenningId.value) return
+  const sb = comicStoryboard.value
+  if (!sb) return
+  keyframeGenningId.value = shot.id
+  try {
+    // 组装画面描述
+    const sceneDesc = shot.sceneDescription ?? (shot.sceneId ? sceneNameById(shot.sceneId) : '')
+    const charDescs = (shot.characterIds ?? []).map((cid) => {
+      const c = characters.value.find((x) => x.id === cid)
+      return c ? c.name : ''
+    }).filter(Boolean)
+    const vs = visualStyleSuffix()
+    const parts = [
+      sceneDesc,
+      charDescs.length > 0 ? `出场角色：${charDescs.join('、')}` : '',
+      shot.action ?? '',
+      shot.shotType ? `${shotTypeLabel(shot.shotType)}镜头` : '',
+      shot.emotion ? `情绪：${shot.emotion}` : '',
+      vs,
+      '动画场景概念图，空镜不要人物，无单一焦点主体，留白给角色站位。',
+    ].filter(Boolean)
+    const prompt = parts.join('。')
+    const url = await generateComicImage({ prompt, size: '1024x768' })
+    // 写入 shot
+    const shots = sb.shots.map((s) => (s.id === shot.id ? { ...s, keyframeUrl: url } : s))
+    upsertStoryboard({ ...sb, shots, updatedAt: new Date().toISOString() })
+    comicStoryboardVal.value = { ...sb, shots, updatedAt: new Date().toISOString() }
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '关键帧生成失败')
+  } finally {
+    keyframeGenningId.value = ''
+  }
 }
 
 /** 返回当前选定画风的英文提示词后缀（空串=未选） */
@@ -11357,4 +11403,31 @@ onUnmounted(() => {
 .ws-comic-shot__tag--char { background: color-mix(in srgb, #3b82f6 12%, transparent); color: #1e40af; }
 .ws-comic-shot__tag--item { background: color-mix(in srgb, #f59e0b 12%, transparent); color: #92400e; }
 .ws-comic-shot__tag--shot { background: color-mix(in srgb, #ec4899 12%, transparent); color: #9d174d; }
+.ws-comic-shot__kf {
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  margin-top: 4px;
+}
+.ws-comic-shot__kf-btn {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  align-self: flex-end;
+  margin-top: 4px;
+}
+.ws-comic-shot__kf-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.ws-comic-shot__kf-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 </style>
