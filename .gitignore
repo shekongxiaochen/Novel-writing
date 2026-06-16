@@ -74,3 +74,8 @@ _backup_重装前/
 # === OS artifacts ===
 Thumbs.db
 .DS_Store
+
+# === Chinese docs (not for public repo) ===
+功能总表.md
+启动说明.md
+需求文档.md
