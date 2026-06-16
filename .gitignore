@@ -1,4 +1,4 @@
-# === Build artifacts ===
+﻿# === Build artifacts ===
 backend/target/
 frontend/dist/
 frontend/release/
@@ -11,6 +11,18 @@ frontend/src-tauri/target/
 .tmp/
 .tmp_find_blobs.ps1
 
+# === Tooling / local config ===
+.codegraph/
+.codex/
+.vscode/
+.agents/
+.claude/
+.kiro/
+.opencode/
+.mcp.json
+CLAUDE.md
+AGENTS.md
+
 # === Recovery backups ===
 .codex-recovery-backup/
 .codex-recovery-tmp-pre-overwrite/
@@ -19,12 +31,15 @@ frontend/src-tauri/target/
 cookies.txt
 dump.rdb
 backend/dump.rdb
-backend-deploy.tar.gz
-admin-ui-patch.tar.gz
-remove-prompts-patch.tar.gz
 *.tar.gz
+*.bak
+novel_db.sql
+*_dump.sql
+*.dump.sql
+edge-shot.png
+C盘垃圾文件扫描报告.txt
 
-# 环境变量 / 密钥（绝不进仓库，保留 .example 示例）
+# === Environment files (keep .example templates) ===
 .env
 .env.*
 !.env.example
@@ -33,24 +48,29 @@ backend/.env
 frontend/.env.development
 frontend/.env.production
 
+# === Logs ===
 *.log
 **/vite-dev.log
 **/vite-dev.err.log
 **/vite.log
 **/vite.err.log
 
-# === Tooling / local ===
-.codegraph/
+# === Personal dev notes ===
+更新手册.md
+RUST_BACKEND_COMPLETED.md
+RUST_BACKEND_DESIGN.md
+AI写作能力测试方案.md
 
-# === Misc ===
-edge-shot.png
-C盘垃圾文件扫描报告.txt
+# === Build output ===
 dist-linux/
 dist-windows/
 dist-macos/
-更新手册.md
+dist-linux;C/
+frontend;C/
+
+# === Backup ===
 _backup_重装前/
-*.env.bak
-novel_db.sql
-*_dump.sql
-*.dump.sql
+
+# === OS artifacts ===
+Thumbs.db
+.DS_Store
